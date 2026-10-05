@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "こえのずかん"
+description = "子どもの成長の思い出を、写真・名前・録音した声と一緒にカードとして残せる家族向けのスマートフォン最適化Webアプリ。ブラウザ内保存に対応。"
+version = "1.0.0"
+id = "artifacts/kids-voice-encyclopedia"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21965
+
+[services.development]
+run = "pnpm --filter @workspace/kids-voice-encyclopedia run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/kids-voice-encyclopedia", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/kids-voice-encyclopedia/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21965"
+BASE_PATH = "/"
