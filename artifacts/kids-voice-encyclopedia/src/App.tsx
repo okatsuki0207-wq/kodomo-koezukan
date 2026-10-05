@@ -16,6 +16,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import PhotoEditor from './components/PhotoEditor';
 import './index.css';
 
 type Keepsake = {
@@ -27,8 +28,6 @@ type Keepsake = {
 };
 
 const STORAGE_KEY = 'koe-no-zukan-keepsakes-v1';
-const PHOTO_MAX_DIMENSION = 300;
-const PHOTO_JPEG_QUALITY = 0.45;
 
 function readKeepsakes(): Keepsake[] {
   try {
@@ -62,47 +61,6 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
-function compressPhotoToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(file);
-    const image = new Image();
-    const releaseObjectUrl = () => URL.revokeObjectURL(objectUrl);
-
-    image.onload = () => {
-      try {
-        const { naturalWidth, naturalHeight } = image;
-        if (!naturalWidth || !naturalHeight) throw new Error('画像サイズを読み取れませんでした');
-
-        const scale = Math.min(1, PHOTO_MAX_DIMENSION / Math.max(naturalWidth, naturalHeight));
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1, Math.round(naturalWidth * scale));
-        canvas.height = Math.max(1, Math.round(naturalHeight * scale));
-
-        const context = canvas.getContext('2d');
-        if (!context) throw new Error('画像を圧縮できませんでした');
-        context.fillStyle = '#fff';
-        context.fillRect(0, 0, canvas.width, canvas.height);
-        context.drawImage(image, 0, 0, canvas.width, canvas.height);
-
-        const compressed = canvas.toDataURL('image/jpeg', PHOTO_JPEG_QUALITY);
-        if (!compressed.startsWith('data:image/jpeg;base64,')) {
-          throw new Error('JPEG形式に変換できませんでした');
-        }
-        releaseObjectUrl();
-        resolve(compressed);
-      } catch (caught) {
-        releaseObjectUrl();
-        reject(caught instanceof Error ? caught : new Error('画像を圧縮できませんでした'));
-      }
-    };
-    image.onerror = () => {
-      releaseObjectUrl();
-      reject(new Error('画像を読み込めませんでした'));
-    };
-    image.src = objectUrl;
-  });
-}
-
 function formatDate(timestamp: number) {
   return new Intl.DateTimeFormat('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }).format(timestamp);
 }
@@ -113,6 +71,7 @@ function App() {
   const [detail, setDetail] = useState<Keepsake | null>(null);
   const [itemName, setItemName] = useState('');
   const [photo, setPhoto] = useState('');
+  const [photoEditorSource, setPhotoEditorSource] = useState('');
   const [voice, setVoice] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
@@ -217,6 +176,7 @@ function App() {
   const openCreate = () => {
     setItemName('');
     setPhoto('');
+    setPhotoEditorSource('');
     setVoice(null);
     setError('');
     setNotice('');
@@ -229,6 +189,7 @@ function App() {
     if (recording) stopRecording();
     stopPlayback();
     setCreateOpen(false);
+    setPhotoEditorSource('');
     setError('');
   };
 
@@ -242,7 +203,7 @@ function App() {
       return;
     }
     try {
-      setPhoto(await compressPhotoToDataUrl(file));
+      setPhotoEditorSource(await fileToDataUrl(file));
       setError('');
       setNotice('');
     } catch {
@@ -469,6 +430,19 @@ function App() {
             </div>
           </section>
         </div>
+      )}
+
+      {photoEditorSource && (
+        <PhotoEditor
+          source={photoEditorSource}
+          onCancel={() => setPhotoEditorSource('')}
+          onApply={(processedPhoto) => {
+            setPhoto(processedPhoto);
+            setPhotoEditorSource('');
+            setError('');
+            setNotice('加工した写真をカードに設定しました。');
+          }}
+        />
       )}
 
       {detail && (
