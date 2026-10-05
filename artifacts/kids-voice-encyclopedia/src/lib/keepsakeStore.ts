@@ -119,6 +119,7 @@ export async function deleteKeepsake(item: Keepsake): Promise<void> {
 
 export function firebaseError(error: unknown): string {
   const code = (error as { code?: string })?.code ?? '';
+  if (code.includes('configuration-not-found')) return 'Firebase Authentication が未設定です。Firebase ConsoleでAuthenticationの「始める」を押し、ログイン方法の「匿名」を有効にしてから再接続してください。';
   if (code.includes('permission-denied') || code.includes('unauthorized')) return 'Firebase のアクセス権限がありません。Firestore / Storage のルールとBlazeプランをご確認ください。';
   if (code.includes('operation-not-allowed')) return 'Firebase Authentication の匿名ログインを有効にしてください。';
   if (code.includes('network') || code.includes('unavailable') || code.includes('retry-limit')) return 'Firebase に接続できませんでした。通信を確認してもう一度お試しください。';

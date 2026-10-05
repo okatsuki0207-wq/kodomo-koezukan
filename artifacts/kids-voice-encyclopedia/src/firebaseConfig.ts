@@ -21,12 +21,13 @@ import type { FirebaseOptions } from 'firebase/app';
  * 匿名アカウントを通常のログインにリンクする追加実装が必要です。
  */
 export const firebaseConfig: FirebaseOptions = {
-  apiKey: 'YOUR_FIREBASE_API_KEY',
-  authDomain: 'YOUR_PROJECT_ID.firebaseapp.com',
-  projectId: 'YOUR_PROJECT_ID',
-  storageBucket: 'YOUR_PROJECT_ID.firebasestorage.app',
-  messagingSenderId: 'YOUR_MESSAGING_SENDER_ID',
-  appId: 'YOUR_FIREBASE_APP_ID',
+  apiKey: 'AIzaSyC3_8iu6dW6CA0dDieQogrejlCRO8cyba4',
+  authDomain: 'klds-voice-zukan.firebaseapp.com',
+  projectId: 'klds-voice-zukan',
+  storageBucket: 'klds-voice-zukan.firebasestorage.app',
+  messagingSenderId: '986617757603',
+  appId: '1:986617757603:web:bb333e795a5cc472c16416',
+  measurementId: 'G-3BN1L97SR5',
 };
 
 export const isFirebaseConfigured = ['apiKey', 'projectId', 'storageBucket', 'appId']
