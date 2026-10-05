@@ -27,6 +27,8 @@ type Keepsake = {
 };
 
 const STORAGE_KEY = 'koe-no-zukan-keepsakes-v1';
+const PHOTO_MAX_DIMENSION = 300;
+const PHOTO_JPEG_QUALITY = 0.45;
 
 function readKeepsakes(): Keepsake[] {
   try {
@@ -57,6 +59,47 @@ function fileToDataUrl(file: File): Promise<string> {
     reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('画像を読み込めませんでした'));
     reader.onerror = () => reject(new Error('画像を読み込めませんでした'));
     reader.readAsDataURL(file);
+  });
+}
+
+function compressPhotoToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    const releaseObjectUrl = () => URL.revokeObjectURL(objectUrl);
+
+    image.onload = () => {
+      try {
+        const { naturalWidth, naturalHeight } = image;
+        if (!naturalWidth || !naturalHeight) throw new Error('画像サイズを読み取れませんでした');
+
+        const scale = Math.min(1, PHOTO_MAX_DIMENSION / Math.max(naturalWidth, naturalHeight));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(naturalHeight * scale));
+
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('画像を圧縮できませんでした');
+        context.fillStyle = '#fff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+        const compressed = canvas.toDataURL('image/jpeg', PHOTO_JPEG_QUALITY);
+        if (!compressed.startsWith('data:image/jpeg;base64,')) {
+          throw new Error('JPEG形式に変換できませんでした');
+        }
+        releaseObjectUrl();
+        resolve(compressed);
+      } catch (caught) {
+        releaseObjectUrl();
+        reject(caught instanceof Error ? caught : new Error('画像を圧縮できませんでした'));
+      }
+    };
+    image.onerror = () => {
+      releaseObjectUrl();
+      reject(new Error('画像を読み込めませんでした'));
+    };
+    image.src = objectUrl;
   });
 }
 
@@ -190,20 +233,21 @@ function App() {
   };
 
   const onPhotoChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.currentTarget.files?.[0];
+    const input = event.currentTarget;
+    const file = input.files?.[0];
     if (!file) return;
+    input.value = '';
     if (!file.type.startsWith('image/')) {
       setError('写真を選んでください。');
       return;
     }
     try {
-      setPhoto(await fileToDataUrl(file));
+      setPhoto(await compressPhotoToDataUrl(file));
       setError('');
       setNotice('');
     } catch {
       setError('写真を読み込めませんでした。別の写真を選んでください。');
     }
-    event.currentTarget.value = '';
   };
 
   const startRecording = async () => {
