@@ -1,0 +1,1 @@
+- [AI photo library licensing](ai-photo-licensing.md) — browser background removal uses an Apache-licensed library/model to avoid IMG.LY's AGPL obligations.

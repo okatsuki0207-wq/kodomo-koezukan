@@ -10,7 +10,6 @@ import {
   Pause,
   Play,
   Plus,
-  Radio,
   RotateCcw,
   Sparkles,
   Trash2,
@@ -105,6 +104,10 @@ function App() {
     player.current?.pause();
   }, []);
 
+  useEffect(() => () => {
+    if (photoEditorSource.startsWith('blob:')) URL.revokeObjectURL(photoEditorSource);
+  }, [photoEditorSource]);
+
   const persist = useCallback((next: Keepsake[]) => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
@@ -193,7 +196,7 @@ function App() {
     setError('');
   };
 
-  const onPhotoChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const onPhotoChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
     const file = input.files?.[0];
     if (!file) return;
@@ -203,7 +206,8 @@ function App() {
       return;
     }
     try {
-      setPhotoEditorSource(await fileToDataUrl(file));
+      // Keep the original file as a temporary URL, not a large base64 copy.
+      setPhotoEditorSource(URL.createObjectURL(file));
       setError('');
       setNotice('');
     } catch {
@@ -324,7 +328,7 @@ function App() {
 
         <div className="section-top">
           <h2 className="section-label"><Sparkles size={17} /> わが家のずかん</h2>
-          <span className="section-hint">写真をタップすると、すぐに声が聞けます</span>
+          <span className="section-hint">写真で声をきく・名前で大きく見る</span>
         </div>
 
         {storageIssue && <div className="notice" role="alert" data-testid="status-storage-error"><AlertCircle size={16} />この端末の保存データを読み込めませんでした。ブラウザの保存領域をご確認ください。</div>}
@@ -337,37 +341,24 @@ function App() {
             <button type="button" className="empty-action" onClick={openCreate} data-testid="button-empty-create">はじめのカードをつくる</button>
           </section>
         ) : (
-          <section className="card-grid" aria-label="保存した図鑑カード" data-testid="grid-keepsakes">
+          <section className="sticker-collage" aria-label="保存した図鑑のシール" data-testid="grid-keepsakes">
             {items.map((item, index) => (
-              <article key={item.id} className="memory-card" style={{ animationDelay: `${index * 70}ms` }} data-testid={`card-keepsake-${item.id}`}>
+              <article key={item.id} className="sticker-item" style={{ animationDelay: `${Math.min(index, 12) * 70}ms` }} data-testid={`card-keepsake-${item.id}`}>
                 <button
                   type="button"
-                  className="memory-card-main"
+                  className="sticker-photo-button"
                   onClick={() => playKeepsake(item)}
                   aria-label={item.voice ? `${item.itemName}の声を再生` : `${item.itemName}の写真をひらく`}
                   data-testid={`button-play-card-${item.id}`}
                 >
-                  <span className="photo-frame">
-                    {item.photo ? <img src={item.photo} alt={`${item.itemName}の写真`} /> : <span className="photo-empty"><ImageIcon size={44} /></span>}
-                    {item.voice && <span className="recorded-stamp" aria-label="声の録音あり"><Radio size={17} /></span>}
-                    {item.voice && (
-                      <span className={`card-play-indicator${playing && playingItemId === item.id ? ' is-playing' : ''}`}>
-                        {playing && playingItemId === item.id ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}
-                        {playing && playingItemId === item.id ? '再生中' : 'タップして声をきく'}
-                      </span>
-                    )}
-                  </span>
-                  <span className="card-copy">
-                    <span className="card-copy-text">
-                      <span className="card-title">{item.itemName}</span>
-                      <span className="card-date">{formatDate(item.createdAt)}</span>
-                    </span>
-                    {!item.voice && <span className="no-voice-mark">声なし</span>}
-                  </span>
+                  {item.photo
+                    ? <img className="sticker-photo" src={item.photo} alt={`${item.itemName}の写真`} data-testid={`img-sticker-${item.id}`} />
+                    : <ImageIcon size={44} />}
                 </button>
-                <button type="button" className="detail-link" onClick={() => openDetail(item)} aria-label={`${item.itemName}の写真を大きく表示`} data-testid={`button-detail-${item.id}`}>
-                  <ImageIcon size={13} /> 写真を大きく見る
+                <button type="button" className="sticker-name" onClick={() => openDetail(item)} aria-label={`${item.itemName}の写真を大きく表示`} data-testid={`button-detail-${item.id}`}>
+                  {item.itemName}
                 </button>
+                <span className="sr-only" role="status">{playing && playingItemId === item.id ? `${item.itemName}の声を再生中` : ''}</span>
               </article>
             ))}
           </section>
@@ -376,7 +367,7 @@ function App() {
         <footer className="footer-note"><Sparkles size={14} /> 写真と声は、この端末のブラウザにだけ保存されます</footer>
       </main>
 
-      {createOpen && (
+      {createOpen && !photoEditorSource && (
         <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCreate(); }}>
           <section className="dialog" role="dialog" aria-modal="true" aria-labelledby="create-title">
             <div className="dialog-head">
