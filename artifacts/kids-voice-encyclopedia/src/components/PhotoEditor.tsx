@@ -4,10 +4,13 @@ import './PhotoEditor.css';
 
 const MAX_IMAGE_DIMENSION = 600;
 const JPEG_QUALITY = 0.75;
+const AI_MAX_DIMENSION = 448;
+const AI_TIMEOUT_MS = 120_000;
 
 type EditMode = 'shape' | 'freehand' | 'ai';
 type CropShape = 'circle' | 'square';
 type TracePoint = { x: number; y: number; viewX: number; viewY: number };
+type Pan = { x: number; y: number };
 type Props = {
   source: string;
   onCancel: () => void;
@@ -57,12 +60,44 @@ function resizedDataUrl(
   return canvas.toDataURL(format, format === 'image/jpeg' ? JPEG_QUALITY : undefined);
 }
 
-function cropToShape(image: HTMLImageElement, shape: CropShape) {
-  const side = Math.min(image.naturalWidth, image.naturalHeight);
-  const outputSize = Math.min(side, MAX_IMAGE_DIMENSION);
+function resizeForAi(source: string) {
+  return new Promise<string>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const scale = Math.min(1, AI_MAX_DIMENSION / Math.max(image.naturalWidth, image.naturalHeight));
+        const width = Math.max(1, Math.round(image.naturalWidth * scale));
+        const height = Math.max(1, Math.round(image.naturalHeight * scale));
+        const { canvas, context } = makeCanvas(width, height);
+        context.drawImage(image, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        canvas.width = 1;
+        canvas.height = 1;
+        resolve(dataUrl);
+      } catch {
+        reject(new Error('Could not prepare the image for background removal'));
+      }
+    };
+    image.onerror = () => reject(new Error('Could not load the image for background removal'));
+    image.src = source;
+  });
+}
+
+function cropToShape(
+  image: HTMLImageElement,
+  shape: CropShape,
+  frameSize: number,
+  viewport: { width: number; height: number },
+  zoom: number,
+  pan: Pan,
+) {
+  const fitScale = Math.max(viewport.width / image.naturalWidth, viewport.height / image.naturalHeight);
+  const sourceScale = fitScale * zoom;
+  const side = frameSize / sourceScale;
+  const sourceX = image.naturalWidth / 2 - pan.x / sourceScale - side / 2;
+  const sourceY = image.naturalHeight / 2 - pan.y / sourceScale - side / 2;
+  const outputSize = Math.min(MAX_IMAGE_DIMENSION, Math.max(1, Math.round(side)));
   const { canvas, context } = makeCanvas(outputSize, outputSize);
-  const sourceX = (image.naturalWidth - side) / 2;
-  const sourceY = (image.naturalHeight - side) / 2;
 
   if (shape === 'circle') {
     context.beginPath();
@@ -90,12 +125,14 @@ function cropFreehand(image: HTMLImageElement, points: TracePoint[]) {
   const { canvas, context } = makeCanvas(width, height);
   context.scale(scale, scale);
   context.beginPath();
-  points.forEach((point, index) => {
-    const x = point.x - minX;
-    const y = point.y - minY;
-    if (index === 0) context.moveTo(x, y);
-    else context.lineTo(x, y);
-  });
+  context.moveTo(points[0].x - minX, points[0].y - minY);
+  for (let index = 1; index < points.length; index += 1) {
+    const current = points[index];
+    const next = points[(index + 1) % points.length];
+    const midX = (current.x + next.x) / 2 - minX;
+    const midY = (current.y + next.y) / 2 - minY;
+    context.quadraticCurveTo(current.x - minX, current.y - minY, midX, midY);
+  }
   context.closePath();
   context.clip();
   context.drawImage(image, -minX, -minY);
