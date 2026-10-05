@@ -1,0 +1,13 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /users/{uid}/keepsakes/{id}/{kind} {
+      function owner() { return request.auth != null && request.auth.uid == uid; }
+      allow read, delete: if owner();
+      allow create, update: if owner()
+        && request.resource.size < 20 * 1024 * 1024
+        && ((kind == 'photo' && request.resource.contentType.matches('image/(jpeg|png|webp)'))
+          || (kind == 'voice' && request.resource.contentType.matches('audio/.*')));
+    }
+  }
+}

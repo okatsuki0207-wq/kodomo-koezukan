@@ -1,0 +1,22 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid}/keepsakes/{id} {
+      function owner() { return request.auth != null && request.auth.uid == uid; }
+      allow read, delete: if owner();
+      allow create, update: if owner()
+        && request.resource.data.keys().hasOnly(['itemName', 'photo', 'voice', 'photoPath', 'voicePath', 'createdAt'])
+        && request.resource.data.itemName is string
+        && request.resource.data.itemName.size() > 0
+        && request.resource.data.itemName.size() <= 48
+        && request.resource.data.photo is string
+        && request.resource.data.photo.matches('https://firebasestorage.googleapis.com/.*')
+        && request.resource.data.photoPath == 'users/' + uid + '/keepsakes/' + id + '/photo'
+        && (request.resource.data.voice == null ||
+          (request.resource.data.voice is string && request.resource.data.voice.matches('https://firebasestorage.googleapis.com/.*')))
+        && (request.resource.data.voicePath == null ||
+          request.resource.data.voicePath == 'users/' + uid + '/keepsakes/' + id + '/voice')
+        && request.resource.data.createdAt is timestamp;
+    }
+  }
+}

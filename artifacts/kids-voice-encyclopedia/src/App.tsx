@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import {
   AlertCircle,
   BookOpen,
@@ -16,56 +16,30 @@ import {
   X,
 } from 'lucide-react';
 import PhotoEditor from './components/PhotoEditor';
+import { deleteKeepsake, firebaseError, saveKeepsake, subscribeKeepsakes, type Keepsake } from './lib/keepsakeStore';
+import { readLegacyKeepsakes } from './lib/legacyImport';
+import { trimLeadingSilence } from './lib/audioTrim';
+import { isFirebaseConfigured } from './firebaseConfig';
 import './index.css';
-
-type Keepsake = {
-  id: string;
-  itemName: string;
-  photo: string;
-  voice: string | null;
-  createdAt: number;
-};
-
-const STORAGE_KEY = 'koe-no-zukan-keepsakes-v1';
-
-function readKeepsakes(): Keepsake[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed)
-      ? parsed.flatMap((item): Keepsake[] => {
-          const itemName = typeof item?.itemName === 'string' ? item.itemName : item?.title;
-          if (typeof item?.id !== 'string' || typeof itemName !== 'string') return [];
-          return [{
-            id: item.id,
-            itemName,
-            photo: typeof item.photo === 'string' ? item.photo : '',
-            voice: typeof item.voice === 'string' ? item.voice : null,
-            createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
-          }];
-        })
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('画像を読み込めませんでした'));
-    reader.onerror = () => reject(new Error('画像を読み込めませんでした'));
-    reader.readAsDataURL(file);
-  });
-}
 
 function formatDate(timestamp: number) {
   return new Intl.DateTimeFormat('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }).format(timestamp);
 }
 
+/** IDから固定のばらつきを生成。再読み込み・並べ替えで位置がちらつかない。 */
+function stickerStyle(id: string, index: number): CSSProperties {
+  let seed = 0;
+  for (let i = 0; i < id.length; i++) seed = (Math.imul(seed, 31) + id.charCodeAt(i)) >>> 0;
+  return {
+    '--sticker-tilt': `${(seed % 15) - 7}deg`,
+    '--sticker-offset': `${6 + ((seed >>> 4) % 17)}px`,
+    '--sticker-scale': `${0.9 + ((seed >>> 9) % 11) / 100}`,
+    animationDelay: `${Math.min(index, 12) * 70}ms`,
+  } as CSSProperties;
+}
+
 function App() {
-  const [items, setItems] = useState<Keepsake[]>(readKeepsakes);
+  const [items, setItems] = useState<Keepsake[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [detail, setDetail] = useState<Keepsake | null>(null);
   const [itemName, setItemName] = useState('');
@@ -80,26 +54,54 @@ function App() {
   const [playing, setPlaying] = useState(false);
   const [playingItemId, setPlayingItemId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [storageIssue, setStorageIssue] = useState(false);
+  const [storageIssue, setStorageIssue] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [processingVoice, setProcessingVoice] = useState(false);
+  const [legacyItems, setLegacyItems] = useState<Keepsake[]>([]);
+  const [migrationNotice, setMigrationNotice] = useState('');
+  const [connectionAttempt, setConnectionAttempt] = useState(0);
+  const recordingSession = useRef(0);
+  const pendingId = useRef<string | null>(null);
+  const mutationLock = useRef(false);
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const mediaStream = useRef<MediaStream | null>(null);
-  const audioParts = useRef<Blob[]>([]);
   const timer = useRef<number | null>(null);
   const player = useRef<HTMLAudioElement | null>(null);
   const activePlaybackId = useRef<string | null>(null);
   const photoInput = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) JSON.parse(raw);
-    } catch {
-      setStorageIssue(true);
-    }
+    try { setLegacyItems(readLegacyKeepsakes()); }
+    catch (caught) { setMigrationNotice(firebaseError(caught)); }
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+    setLoading(true);
+    setStorageIssue('');
+    const timer = window.setTimeout(() => {
+      if (!cancelled) {
+        setLoading(false);
+        setStorageIssue('Firebaseからの応答がありません。通信と設定を確認し、再接続してください。');
+      }
+    }, 20_000);
+    const fail = (caught: unknown) => {
+      window.clearTimeout(timer);
+      if (!cancelled) { setStorageIssue(firebaseError(caught)); setLoading(false); }
+    };
+    void subscribeKeepsakes((next) => {
+      window.clearTimeout(timer);
+      if (!cancelled) { setItems(next); setLoading(false); setStorageIssue(''); }
+    }, fail).then((stop) => { if (cancelled) stop(); else unsubscribe = stop; }).catch(fail);
+    return () => { cancelled = true; window.clearTimeout(timer); unsubscribe?.(); };
+  }, [connectionAttempt]);
+
   useEffect(() => () => {
+    recordingSession.current++;
     if (timer.current) window.clearInterval(timer.current);
+    if (mediaRecorder.current?.state === 'recording') mediaRecorder.current.stop();
     mediaStream.current?.getTracks().forEach((track) => track.stop());
     player.current?.pause();
   }, []);
@@ -108,18 +110,25 @@ function App() {
     if (photoEditorSource.startsWith('blob:')) URL.revokeObjectURL(photoEditorSource);
   }, [photoEditorSource]);
 
-  const persist = useCallback((next: Keepsake[]) => {
+  useEffect(() => () => {
+    if (voice?.startsWith('blob:')) URL.revokeObjectURL(voice);
+  }, [voice]);
+
+  const importLegacy = async () => {
+    if (mutationLock.current) return;
+    mutationLock.current = true;
+    setBusy(true);
+    setMigrationNotice('旧データをFirebaseへ移しています…');
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      setItems(next);
-      setStorageIssue(false);
-      return true;
-    } catch {
-      setStorageIssue(true);
-      setError('保存できる容量が足りません。写真や録音を短くするか、カードを整理してください。');
-      return false;
-    }
-  }, []);
+      for (const item of legacyItems) {
+        await saveKeepsake(item, true);
+        setLegacyItems((remaining) => remaining.filter((entry) => entry.id !== item.id));
+      }
+      setMigrationNotice('移行が完了しました。元の端末内データは削除していません。');
+    } catch (caught) {
+      setMigrationNotice(`移行を中断しました。完了分は保存済みです。再実行できます。${firebaseError(caught)}`);
+    } finally { mutationLock.current = false; setBusy(false); }
+  };
 
   const stopPlayback = () => {
     player.current?.pause();
@@ -163,6 +172,7 @@ function App() {
 
   const openDetail = (item: Keepsake) => {
     stopPlayback();
+    setError('');
     setDetail(item);
     setConfirmDelete(false);
   };
@@ -177,6 +187,8 @@ function App() {
   };
 
   const openCreate = () => {
+    if (busy) return;
+    pendingId.current = null;
     setItemName('');
     setPhoto('');
     setPhotoEditorSource('');
@@ -189,7 +201,11 @@ function App() {
   };
 
   const closeCreate = () => {
+    if (busy) return;
+    recordingSession.current++;
     if (recording) stopRecording();
+    setProcessingVoice(false);
+    setVoice(null);
     stopPlayback();
     setCreateOpen(false);
     setPhotoEditorSource('');
@@ -216,40 +232,82 @@ function App() {
   };
 
   const startRecording = async () => {
+    if (processingVoice || busy || recording) return;
+    const session = ++recordingSession.current;
+    setProcessingVoice(true);
     setPermissionError('');
     setError('');
+    setNotice('');
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
       setPermissionError('このブラウザでは録音できません。写真と名前を保存して、別のブラウザで声を追加できます。');
+      setProcessingVoice(false);
       return;
     }
+    let acquiredStream: MediaStream | null = null;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      acquiredStream = stream;
+      if (session !== recordingSession.current) { stream.getTracks().forEach((track) => track.stop()); return; }
       mediaStream.current = stream;
       const recorder = new MediaRecorder(stream);
-      audioParts.current = [];
+      const parts: Blob[] = [];
+      stopPlayback();
+      setVoice(null);
       recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) audioParts.current.push(event.data);
+        if (event.data.size > 0) parts.push(event.data);
+      };
+      recorder.onerror = () => {
+        if (session !== recordingSession.current) return;
+        recordingSession.current++;
+        if (timer.current) window.clearInterval(timer.current);
+        timer.current = null;
+        if (recorder.state === 'recording') recorder.stop();
+        stream.getTracks().forEach((track) => track.stop());
+        if (mediaStream.current === stream) mediaStream.current = null;
+        mediaRecorder.current = null;
+        setRecording(false);
+        setProcessingVoice(false);
+        setError('録音に失敗しました。もう一度お試しください。');
       };
       recorder.onstop = async () => {
         const type = recorder.mimeType || 'audio/webm';
-        const blob = new Blob(audioParts.current, { type });
-        try {
-          if (blob.size > 0) {
-            setVoice(await fileToDataUrl(new File([blob], 'voice-recording', { type })));
-            setNotice('録音を聞いてみてください。気に入らなければ、もう一度録音できます。');
-          }
-        } catch {
-          setError('録音を読み込めませんでした。もう一度お試しください。');
-        }
+        const blob = new Blob(parts, { type });
+        // マイクは解析を待たず、録音終了直後に解放。
         stream.getTracks().forEach((track) => track.stop());
-        mediaStream.current = null;
+        if (mediaStream.current === stream) mediaStream.current = null;
+        if (session !== recordingSession.current) return;
+        setProcessingVoice(true);
+        try {
+          if (!blob.size) throw new Error('録音が空でした。もう一度録音してください。');
+          const trimmed = await trimLeadingSilence(blob);
+          if (session === recordingSession.current) {
+            setVoice(URL.createObjectURL(trimmed));
+            setNotice('冒頭の無音をカットしました。録音を聞いてみてください。');
+          }
+        } catch (caught) {
+          if (session === recordingSession.current) setError(caught instanceof Error
+            ? `音声の処理に失敗しました。${caught.message}`
+            : '録音を処理できませんでした。もう一度お試しください。');
+        } finally {
+          if (session === recordingSession.current) setProcessingVoice(false);
+        }
       };
       mediaRecorder.current = recorder;
       recorder.start();
+      setProcessingVoice(false);
       setRecording(true);
       setRecordSeconds(0);
-      timer.current = window.setInterval(() => setRecordSeconds((seconds) => seconds + 1), 1000);
+      let elapsed = 0;
+      timer.current = window.setInterval(() => {
+        elapsed++;
+        setRecordSeconds(elapsed);
+        if (elapsed >= 60) stopRecording();
+      }, 1000);
     } catch (caught) {
+      acquiredStream?.getTracks().forEach((track) => track.stop());
+      if (mediaStream.current === acquiredStream) mediaStream.current = null;
+      if (session !== recordingSession.current) return;
+      setProcessingVoice(false);
       const denied = caught instanceof DOMException && (caught.name === 'NotAllowedError' || caught.name === 'PermissionDeniedError');
       setPermissionError(denied
         ? 'マイクが使えませんでした。端末の設定でマイクを許可すると録音できます。'
@@ -260,7 +318,10 @@ function App() {
   const stopRecording = () => {
     if (timer.current) window.clearInterval(timer.current);
     timer.current = null;
-    if (mediaRecorder.current?.state === 'recording') mediaRecorder.current.stop();
+    if (mediaRecorder.current?.state === 'recording') {
+      setProcessingVoice(true);
+      mediaRecorder.current.stop();
+    }
     mediaRecorder.current = null;
     setRecording(false);
   };
@@ -270,7 +331,8 @@ function App() {
     void playAudio(voice, 'voice-preview');
   };
 
-  const saveCard = () => {
+  const saveCard = async () => {
+    if (mutationLock.current || recording || processingVoice) return;
     const cleanItemName = itemName.trim();
     if (!cleanItemName) {
       setError('図鑑に登録するモノの名前を入力してください。');
@@ -280,23 +342,34 @@ function App() {
       setError('写真を選んでください。');
       return;
     }
-    const next = [{ id: crypto.randomUUID?.() ?? `${Date.now()}`, itemName: cleanItemName, photo, voice, createdAt: Date.now() }, ...items];
-    if (persist(next)) {
+    mutationLock.current = true;
+    setBusy(true);
+    setError('');
+    pendingId.current ??= crypto.randomUUID();
+    try {
+      await saveKeepsake({ id: pendingId.current, itemName: cleanItemName, photo, voice, createdAt: Date.now() });
       setCreateOpen(false);
       setItemName('');
       setPhoto('');
       setVoice(null);
       setError('');
-    }
+      pendingId.current = null;
+    } catch (caught) { setError(firebaseError(caught)); }
+    finally { mutationLock.current = false; setBusy(false); }
   };
 
-  const deleteCard = () => {
-    if (!detail) return;
-    const next = items.filter((item) => item.id !== detail.id);
-    if (persist(next)) {
+  const deleteCard = async () => {
+    if (!detail || mutationLock.current) return;
+    mutationLock.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      await deleteKeepsake(detail);
+      stopPlayback();
       setDetail(null);
       setConfirmDelete(false);
-    }
+    } catch (caught) { setError(firebaseError(caught)); }
+    finally { mutationLock.current = false; setBusy(false); }
   };
 
   const playDetailVoice = () => {
@@ -331,9 +404,16 @@ function App() {
           <span className="section-hint">写真で声をきく・名前で大きく見る</span>
         </div>
 
-        {storageIssue && <div className="notice" role="alert" data-testid="status-storage-error"><AlertCircle size={16} />この端末の保存データを読み込めませんでした。ブラウザの保存領域をご確認ください。</div>}
+        {storageIssue && <div className="notice" role="alert" data-testid="status-storage-error"><AlertCircle size={16} />{storageIssue}
+          {isFirebaseConfigured && <button type="button" className="record-button" onClick={() => setConnectionAttempt((value) => value + 1)} disabled={busy}>再接続</button>}
+        </div>}
+        {legacyItems.length > 0 && <div className="notice neutral" role="status">旧データが{legacyItems.length}件あります。元データを残して移行できます。
+          <button type="button" className="record-button" onClick={importLegacy} disabled={busy || loading || !!storageIssue || createOpen || !!detail} data-testid="button-import-legacy">{busy ? '移行中…' : 'Firebaseへ移行'}</button>
+        </div>}
+        {migrationNotice && <p className="notice neutral" role="status">{migrationNotice}</p>}
+        {error && !createOpen && !detail && <p className="form-error" role="alert">{error}</p>}
 
-        {items.length === 0 ? (
+        {loading ? <p className="notice neutral" role="status">Firebase から図鑑を読み込んでいます…</p> : items.length === 0 ? (
           <section className="empty-state" data-testid="empty-keepsakes">
             <div className="empty-illustration"><BookOpen size={46} strokeWidth={1.35} /></div>
             <h2 className="empty-title">まだ、まっさらなページ</h2>
@@ -343,7 +423,7 @@ function App() {
         ) : (
           <section className="sticker-collage" aria-label="保存した図鑑のシール" data-testid="grid-keepsakes">
             {items.map((item, index) => (
-              <article key={item.id} className="sticker-item" style={{ animationDelay: `${Math.min(index, 12) * 70}ms` }} data-testid={`card-keepsake-${item.id}`}>
+              <article key={item.id} className="sticker-item" style={stickerStyle(item.id, index)} data-testid={`card-keepsake-${item.id}`}>
                 <button
                   type="button"
                   className="sticker-photo-button"
@@ -364,7 +444,7 @@ function App() {
           </section>
         )}
 
-        <footer className="footer-note"><Sparkles size={14} /> 写真と声は、この端末のブラウザにだけ保存されます</footer>
+        <footer className="footer-note"><Sparkles size={14} /> 写真と声はFirebaseに保存します。同じブラウザの匿名アカウントで閲覧できます。</footer>
       </main>
 
       {createOpen && !photoEditorSource && (
@@ -372,17 +452,17 @@ function App() {
           <section className="dialog" role="dialog" aria-modal="true" aria-labelledby="create-title">
             <div className="dialog-head">
               <div><h2 id="create-title" className="dialog-title">新しいページをつくる</h2><p className="dialog-lede">図鑑に登録するモノの写真と声を残します。</p></div>
-              <button type="button" className="icon-button" onClick={closeCreate} aria-label="閉じる" data-testid="button-close-create"><X size={19} /></button>
+              <button type="button" className="icon-button" disabled={busy} onClick={closeCreate} aria-label="閉じる" data-testid="button-close-create"><X size={19} /></button>
             </div>
             <div className="form-block">
               <label className="field-label" htmlFor="keepsake-item-name">モノの名前</label>
               <p className="field-hint">図鑑に登録するものの名前を入力してください。</p>
-              <input id="keepsake-item-name" className="title-input" value={itemName} onChange={(event) => setItemName(event.currentTarget.value)} placeholder="りんご、ライオン、赤バス など" maxLength={48} data-testid="input-item-name" />
+              <input id="keepsake-item-name" className="title-input" disabled={busy} value={itemName} onChange={(event) => setItemName(event.currentTarget.value)} placeholder="りんご、ライオン、赤バス など" maxLength={48} data-testid="input-item-name" />
             </div>
             <div className="form-block">
               <span className="field-label">写真</span>
               <input ref={photoInput} className="sr-only" type="file" accept="image/*" onChange={onPhotoChange} aria-label="写真を選ぶ" data-testid="input-card-photo" />
-              <button type="button" className="photo-picker" onClick={() => photoInput.current?.click()} data-testid="button-select-photo">
+              <button type="button" className="photo-picker" disabled={busy || recording || processingVoice} onClick={() => photoInput.current?.click()} data-testid="button-select-photo">
                 {photo && <img src={photo} alt="選んだ写真" />}
                 <span className="picker-content">
                   {photo ? <Check size={22} /> : <Camera size={23} />}
@@ -401,11 +481,11 @@ function App() {
                   {recording ? (
                     <button type="button" className="record-button danger" onClick={stopRecording} data-testid="button-stop-recording"><span className="recording-dot" /> 録音をとめる</button>
                   ) : (
-                    <button type="button" className="record-button primary" onClick={startRecording} data-testid="button-start-recording"><Mic size={15} /> {voice ? 'もう一度録音' : '録音する'}</button>
+                    <button type="button" className="record-button primary" disabled={processingVoice || busy} onClick={startRecording} data-testid="button-start-recording"><Mic size={15} /> {processingVoice ? '音声を準備しています…' : voice ? 'もう一度録音' : '録音する'}</button>
                   )}
-                  {voice && !recording && <>
+                  {voice && !recording && !processingVoice && <>
                     <button type="button" className="record-button" onClick={togglePreview} data-testid="button-preview-recording">{playing ? <Pause size={15} /> : <Play size={15} />} {playing ? '一時停止' : '聞いてみる'}</button>
-                    <button type="button" className="record-button" onClick={() => { setVoice(null); setNotice('録音を消しました。'); }} aria-label="録音を消す" data-testid="button-remove-recording"><RotateCcw size={15} /></button>
+                    <button type="button" className="record-button" disabled={busy} onClick={() => { stopPlayback(); setVoice(null); setNotice('録音を消しました。'); }} aria-label="録音を消す" data-testid="button-remove-recording"><RotateCcw size={15} /></button>
                   </>}
                 </div>
               </div>
@@ -413,12 +493,15 @@ function App() {
               {notice && !permissionError && <div className="notice neutral" role="status"><Check size={15} />{notice}</div>}
               {(!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') && <div className="notice" role="status" data-testid="status-unsupported-browser"><CircleHelp size={16} />このブラウザでは録音できません。録音以外のカード機能はお使いいただけます。</div>}
               {recording && <p className="sr-only" aria-live="polite">録音中です。録音時間 {formatTime(recordSeconds)}</p>}
+              {processingVoice && <p className="notice neutral" role="status">音声を準備しています。録音後は冒頭の無音をカットします…</p>}
+              <p className="field-hint">録音は最大60秒。冒頭の無音を自動でカットします。</p>
             </div>
             {error && <p className="form-error" role="alert" data-testid="status-form-error">{error}</p>}
             <div className="dialog-actions">
-              <button type="button" className="cancel-button" onClick={closeCreate} data-testid="button-cancel-create">あとで</button>
-              <button type="button" className="save-button" onClick={saveCard} disabled={recording} data-testid="button-save-card"><Check size={16} /> このページをしまう</button>
+              <button type="button" className="cancel-button" disabled={busy} onClick={closeCreate} data-testid="button-cancel-create">あとで</button>
+              <button type="button" className="save-button" onClick={saveCard} disabled={recording || processingVoice || busy || !isFirebaseConfigured || !!storageIssue || loading} data-testid="button-save-card"><Check size={16} /> {busy ? 'Firebaseに保存中…' : 'このページをしまう'}</button>
             </div>
+            {!isFirebaseConfigured && <p className="form-error" role="status">保存にはFirebaseの設定が必要です。src/firebaseConfig.ts をご確認ください。</p>}
           </section>
         </div>
       )}
@@ -437,9 +520,9 @@ function App() {
       )}
 
       {detail && (
-        <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) { stopPlayback(); setDetail(null); } }}>
+        <div className="overlay" role="presentation" onMouseDown={(event) => { if (!busy && event.target === event.currentTarget) { stopPlayback(); setDetail(null); } }}>
           <section className="dialog dialog-detail" role="dialog" aria-modal="true" aria-label={`${detail.itemName}のページ`}>
-            <button type="button" className="icon-button" style={{ position: 'absolute', zIndex: 2, right: 25, top: 25 }} onClick={() => { stopPlayback(); setDetail(null); }} aria-label="閉じる" data-testid="button-close-detail"><X size={19} /></button>
+            <button type="button" className="icon-button" disabled={busy} style={{ position: 'absolute', zIndex: 2, right: 25, top: 25 }} onClick={() => { stopPlayback(); setDetail(null); }} aria-label="閉じる" data-testid="button-close-detail"><X size={19} /></button>
             {detail.photo ? <img className="detail-image" src={detail.photo} alt={`${detail.itemName}の写真`} /> : <div className="detail-image-placeholder"><ImageIcon size={54} /></div>}
             <div className="detail-meta">
               <div><h2 className="detail-name">{detail.itemName}</h2><p className="detail-date">{formatDate(detail.createdAt)} にしまいました</p>{!detail.voice && <p className="detail-date">このページには、まだ声がありません</p>}</div>
@@ -448,7 +531,8 @@ function App() {
                 <button type="button" className="plain-action" onClick={() => setConfirmDelete((value) => !value)} aria-label="このカードを削除" data-testid="button-delete-card"><Trash2 size={17} /></button>
               </div>
             </div>
-            {confirmDelete && <div className="delete-confirm" role="alert"><AlertCircle size={16} />このページを削除しますか？<button type="button" onClick={deleteCard} data-testid="button-confirm-delete">削除する</button><button type="button" onClick={() => setConfirmDelete(false)} data-testid="button-cancel-delete">やめる</button></div>}
+            {confirmDelete && <div className="delete-confirm" role="alert"><AlertCircle size={16} />Firebaseから写真・音声・このページを削除しますか？<button type="button" disabled={busy} onClick={deleteCard} data-testid="button-confirm-delete">{busy ? '削除中…' : '削除する'}</button><button type="button" disabled={busy} onClick={() => setConfirmDelete(false)} data-testid="button-cancel-delete">やめる</button></div>}
+            {error && <p className="form-error" role="alert">{error}</p>}
           </section>
         </div>
       )}
