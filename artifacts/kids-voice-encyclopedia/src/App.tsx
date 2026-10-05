@@ -20,7 +20,7 @@ import './index.css';
 
 type Keepsake = {
   id: string;
-  title: string;
+  itemName: string;
   photo: string;
   voice: string | null;
   createdAt: number;
@@ -33,9 +33,19 @@ function readKeepsakes(): Keepsake[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((item) =>
-      item && typeof item.id === 'string' && typeof item.title === 'string',
-    ) : [];
+    return Array.isArray(parsed)
+      ? parsed.flatMap((item): Keepsake[] => {
+          const itemName = typeof item?.itemName === 'string' ? item.itemName : item?.title;
+          if (typeof item?.id !== 'string' || typeof itemName !== 'string') return [];
+          return [{
+            id: item.id,
+            itemName,
+            photo: typeof item.photo === 'string' ? item.photo : '',
+            voice: typeof item.voice === 'string' ? item.voice : null,
+            createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
+          }];
+        })
+      : [];
   } catch {
     return [];
   }
@@ -58,7 +68,7 @@ function App() {
   const [items, setItems] = useState<Keepsake[]>(readKeepsakes);
   const [createOpen, setCreateOpen] = useState(false);
   const [detail, setDetail] = useState<Keepsake | null>(null);
-  const [title, setTitle] = useState('');
+  const [itemName, setItemName] = useState('');
   const [photo, setPhoto] = useState('');
   const [voice, setVoice] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
@@ -67,6 +77,7 @@ function App() {
   const [notice, setNotice] = useState('');
   const [permissionError, setPermissionError] = useState('');
   const [playing, setPlaying] = useState(false);
+  const [playingItemId, setPlayingItemId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [storageIssue, setStorageIssue] = useState(false);
   const mediaRecorder = useRef<MediaRecorder | null>(null);
@@ -74,6 +85,7 @@ function App() {
   const audioParts = useRef<Blob[]>([]);
   const timer = useRef<number | null>(null);
   const player = useRef<HTMLAudioElement | null>(null);
+  const activePlaybackId = useRef<string | null>(null);
   const photoInput = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -104,8 +116,63 @@ function App() {
     }
   }, []);
 
+  const stopPlayback = () => {
+    player.current?.pause();
+    player.current = null;
+    activePlaybackId.current = null;
+    setPlaying(false);
+    setPlayingItemId(null);
+  };
+
+  const playAudio = async (source: string, playbackId: string) => {
+    if (
+      activePlaybackId.current === playbackId &&
+      player.current &&
+      !player.current.paused
+    ) {
+      stopPlayback();
+      return;
+    }
+
+    player.current?.pause();
+    const audio = new Audio(source);
+    player.current = audio;
+    activePlaybackId.current = playbackId;
+    setPlayingItemId(playbackId === 'voice-preview' ? null : playbackId);
+    setPlaying(false);
+    audio.onended = () => {
+      if (player.current === audio) stopPlayback();
+    };
+    audio.onerror = () => {
+      if (player.current === audio) stopPlayback();
+      setError('録音を再生できませんでした。');
+    };
+    try {
+      await audio.play();
+      if (player.current === audio) setPlaying(true);
+    } catch {
+      if (player.current === audio) stopPlayback();
+      setError('録音を再生できませんでした。');
+    }
+  };
+
+  const openDetail = (item: Keepsake) => {
+    stopPlayback();
+    setDetail(item);
+    setConfirmDelete(false);
+  };
+
+  const playKeepsake = (item: Keepsake) => {
+    if (!item.voice) {
+      openDetail(item);
+      return;
+    }
+    setError('');
+    void playAudio(item.voice, item.id);
+  };
+
   const openCreate = () => {
-    setTitle('');
+    setItemName('');
     setPhoto('');
     setVoice(null);
     setError('');
@@ -117,6 +184,7 @@ function App() {
 
   const closeCreate = () => {
     if (recording) stopRecording();
+    stopPlayback();
     setCreateOpen(false);
     setError('');
   };
@@ -190,35 +258,23 @@ function App() {
 
   const togglePreview = () => {
     if (!voice) return;
-    if (player.current && !player.current.paused) {
-      player.current.pause();
-      setPlaying(false);
-      return;
-    }
-    const audio = new Audio(voice);
-    player.current = audio;
-    audio.onended = () => setPlaying(false);
-    audio.onerror = () => {
-      setPlaying(false);
-      setError('録音を再生できませんでした。');
-    };
-    audio.play().then(() => setPlaying(true)).catch(() => setError('録音を再生できませんでした。'));
+    void playAudio(voice, 'voice-preview');
   };
 
   const saveCard = () => {
-    const cleanTitle = title.trim();
-    if (!cleanTitle) {
-      setError('名前やタイトルを入力してください。');
+    const cleanItemName = itemName.trim();
+    if (!cleanItemName) {
+      setError('図鑑に登録するモノの名前を入力してください。');
       return;
     }
     if (!photo) {
       setError('写真を選んでください。');
       return;
     }
-    const next = [{ id: crypto.randomUUID?.() ?? `${Date.now()}`, title: cleanTitle, photo, voice, createdAt: Date.now() }, ...items];
+    const next = [{ id: crypto.randomUUID?.() ?? `${Date.now()}`, itemName: cleanItemName, photo, voice, createdAt: Date.now() }, ...items];
     if (persist(next)) {
       setCreateOpen(false);
-      setTitle('');
+      setItemName('');
       setPhoto('');
       setVoice(null);
       setError('');
@@ -236,15 +292,7 @@ function App() {
 
   const playDetailVoice = () => {
     if (!detail?.voice) return;
-    if (player.current && !player.current.paused) {
-      player.current.pause();
-      setPlaying(false);
-      return;
-    }
-    const audio = new Audio(detail.voice);
-    player.current = audio;
-    audio.onended = () => setPlaying(false);
-    audio.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+    void playAudio(detail.voice, detail.id);
   };
 
   const formatTime = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
@@ -263,15 +311,15 @@ function App() {
         <section className="intro">
           <div>
             <p className="eyebrow">かぞくの ちいさな ずかん</p>
-            <h1 className="headline">いまのあなたを、<br /><em>声ごと</em>のこそう。</h1>
-            <p className="intro-note">名前と写真と、今日の声。<br />家族だけの小さな図鑑をつくろう。</p>
+            <h1 className="headline">すきなモノを、<br /><em>声ごと</em>のこそう。</h1>
+            <p className="intro-note">りんごも、ライオンも、赤バスも。<br />見つけたものを声と一緒に記録しよう。</p>
           </div>
           <button type="button" className="add-button" onClick={openCreate} data-testid="button-create-card"><Plus size={19} /> 新しいカードをつくる</button>
         </section>
 
         <div className="section-top">
           <h2 className="section-label"><Sparkles size={17} /> わが家のずかん</h2>
-          <span className="section-hint">写真をひらくと、声が聞けます</span>
+          <span className="section-hint">写真をタップすると、すぐに声が聞けます</span>
         </div>
 
         {storageIssue && <div className="notice" role="alert" data-testid="status-storage-error"><AlertCircle size={16} />この端末の保存データを読み込めませんでした。ブラウザの保存領域をご確認ください。</div>}
@@ -280,23 +328,41 @@ function App() {
           <section className="empty-state" data-testid="empty-keepsakes">
             <div className="empty-illustration"><BookOpen size={46} strokeWidth={1.35} /></div>
             <h2 className="empty-title">まだ、まっさらなページ</h2>
-            <p className="empty-copy">いちばん最初の一枚をつくってみよう。<br />写真と声は、この端末の中だけにしまわれます。</p>
+            <p className="empty-copy">いちばん最初の一枚をつくってみよう。<br />登録するモノの写真と声を残せます。</p>
             <button type="button" className="empty-action" onClick={openCreate} data-testid="button-empty-create">はじめのカードをつくる</button>
           </section>
         ) : (
-          <section className="card-grid" aria-label="保存したカード" data-testid="grid-keepsakes">
+          <section className="card-grid" aria-label="保存した図鑑カード" data-testid="grid-keepsakes">
             {items.map((item, index) => (
               <article key={item.id} className="memory-card" style={{ animationDelay: `${index * 70}ms` }} data-testid={`card-keepsake-${item.id}`}>
-                <button type="button" className="photo-frame" onClick={() => { setDetail(item); setPlaying(false); setConfirmDelete(false); }} aria-label={`${item.title}の写真と声をひらく`} data-testid={`button-open-card-${item.id}`}>
-                  {item.photo ? <img src={item.photo} alt={`${item.title}の写真`} /> : <span className="photo-empty"><ImageIcon size={44} /></span>}
-                  {item.voice && <span className="recorded-stamp" aria-label="声の録音あり"><Radio size={17} /></span>}
+                <button
+                  type="button"
+                  className="memory-card-main"
+                  onClick={() => playKeepsake(item)}
+                  aria-label={item.voice ? `${item.itemName}の声を再生` : `${item.itemName}の写真をひらく`}
+                  data-testid={`button-play-card-${item.id}`}
+                >
+                  <span className="photo-frame">
+                    {item.photo ? <img src={item.photo} alt={`${item.itemName}の写真`} /> : <span className="photo-empty"><ImageIcon size={44} /></span>}
+                    {item.voice && <span className="recorded-stamp" aria-label="声の録音あり"><Radio size={17} /></span>}
+                    {item.voice && (
+                      <span className={`card-play-indicator${playing && playingItemId === item.id ? ' is-playing' : ''}`}>
+                        {playing && playingItemId === item.id ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}
+                        {playing && playingItemId === item.id ? '再生中' : 'タップして声をきく'}
+                      </span>
+                    )}
+                  </span>
+                  <span className="card-copy">
+                    <span className="card-copy-text">
+                      <span className="card-title">{item.itemName}</span>
+                      <span className="card-date">{formatDate(item.createdAt)}</span>
+                    </span>
+                    {!item.voice && <span className="no-voice-mark">声なし</span>}
+                  </span>
                 </button>
-                <div className="card-copy">
-                  <div><h3 className="card-title">{item.title}</h3><p className="card-date">{formatDate(item.createdAt)}</p></div>
-                  <button type="button" className="listen-chip" onClick={() => { setDetail(item); setPlaying(false); setConfirmDelete(false); }} aria-label={`${item.title}をひらく`} data-testid={`button-detail-${item.id}`}>
-                    {item.voice ? <><Play size={14} /> 声をきく</> : <><ImageIcon size={14} /> ひらく</>}
-                  </button>
-                </div>
+                <button type="button" className="detail-link" onClick={() => openDetail(item)} aria-label={`${item.itemName}の写真を大きく表示`} data-testid={`button-detail-${item.id}`}>
+                  <ImageIcon size={13} /> 写真を大きく見る
+                </button>
               </article>
             ))}
           </section>
@@ -309,22 +375,23 @@ function App() {
         <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCreate(); }}>
           <section className="dialog" role="dialog" aria-modal="true" aria-labelledby="create-title">
             <div className="dialog-head">
-              <div><h2 id="create-title" className="dialog-title">新しいページをつくる</h2><p className="dialog-lede">今日のその子らしさを、ひとつずつ。</p></div>
+              <div><h2 id="create-title" className="dialog-title">新しいページをつくる</h2><p className="dialog-lede">図鑑に登録するモノの写真と声を残します。</p></div>
               <button type="button" className="icon-button" onClick={closeCreate} aria-label="閉じる" data-testid="button-close-create"><X size={19} /></button>
             </div>
             <div className="form-block">
-              <label className="field-label" htmlFor="keepsake-title">名前・タイトル</label>
-              <input id="keepsake-title" className="title-input" value={title} onChange={(event) => setTitle(event.currentTarget.value)} placeholder="たとえば「はじめての、こんにちは」" maxLength={48} data-testid="input-card-title" />
+              <label className="field-label" htmlFor="keepsake-item-name">モノの名前</label>
+              <p className="field-hint">図鑑に登録するものの名前を入力してください。</p>
+              <input id="keepsake-item-name" className="title-input" value={itemName} onChange={(event) => setItemName(event.currentTarget.value)} placeholder="りんご、ライオン、赤バス など" maxLength={48} data-testid="input-item-name" />
             </div>
             <div className="form-block">
               <span className="field-label">写真</span>
-              <input ref={photoInput} className="sr-only" type="file" accept="image/*" capture="environment" onChange={onPhotoChange} aria-label="写真を選ぶ" data-testid="input-card-photo" />
+              <input ref={photoInput} className="sr-only" type="file" accept="image/*" onChange={onPhotoChange} aria-label="写真を選ぶ" data-testid="input-card-photo" />
               <button type="button" className="photo-picker" onClick={() => photoInput.current?.click()} data-testid="button-select-photo">
                 {photo && <img src={photo} alt="選んだ写真" />}
                 <span className="picker-content">
                   {photo ? <Check size={22} /> : <Camera size={23} />}
                   <strong>{photo ? '写真をえらびなおす' : '写真をえらぶ・撮る'}</strong>
-                  <span>カメラまたは写真ライブラリから</span>
+                  <span>写真ライブラリから選ぶか、カメラで撮影できます</span>
                 </span>
               </button>
             </div>
@@ -361,14 +428,14 @@ function App() {
       )}
 
       {detail && (
-        <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) { player.current?.pause(); setPlaying(false); setDetail(null); } }}>
-          <section className="dialog dialog-detail" role="dialog" aria-modal="true" aria-label={`${detail.title}のページ`}>
-            <button type="button" className="icon-button" style={{ position: 'absolute', zIndex: 2, right: 25, top: 25 }} onClick={() => { player.current?.pause(); setPlaying(false); setDetail(null); }} aria-label="閉じる" data-testid="button-close-detail"><X size={19} /></button>
-            {detail.photo ? <img className="detail-image" src={detail.photo} alt={`${detail.title}の写真`} /> : <div className="detail-image-placeholder"><ImageIcon size={54} /></div>}
+        <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) { stopPlayback(); setDetail(null); } }}>
+          <section className="dialog dialog-detail" role="dialog" aria-modal="true" aria-label={`${detail.itemName}のページ`}>
+            <button type="button" className="icon-button" style={{ position: 'absolute', zIndex: 2, right: 25, top: 25 }} onClick={() => { stopPlayback(); setDetail(null); }} aria-label="閉じる" data-testid="button-close-detail"><X size={19} /></button>
+            {detail.photo ? <img className="detail-image" src={detail.photo} alt={`${detail.itemName}の写真`} /> : <div className="detail-image-placeholder"><ImageIcon size={54} /></div>}
             <div className="detail-meta">
-              <div><h2 className="detail-name">{detail.title}</h2><p className="detail-date">{formatDate(detail.createdAt)} にしまいました</p>{!detail.voice && <p className="detail-date">このページには、まだ声がありません</p>}</div>
+              <div><h2 className="detail-name">{detail.itemName}</h2><p className="detail-date">{formatDate(detail.createdAt)} にしまいました</p>{!detail.voice && <p className="detail-date">このページには、まだ声がありません</p>}</div>
               <div className="detail-actions">
-                {detail.voice && <button type="button" className="record-button primary" onClick={playDetailVoice} data-testid="button-play-detail-voice">{playing ? <Pause size={16} /> : <Play size={16} />}{playing ? 'とめる' : '声をきく'}</button>}
+                {detail.voice && <button type="button" className="record-button primary" onClick={playDetailVoice} data-testid="button-play-detail-voice">{playing && playingItemId === detail.id ? <Pause size={16} /> : <Play size={16} />}{playing && playingItemId === detail.id ? 'とめる' : '声をきく'}</button>}
                 <button type="button" className="plain-action" onClick={() => setConfirmDelete((value) => !value)} aria-label="このカードを削除" data-testid="button-delete-card"><Trash2 size={17} /></button>
               </div>
             </div>
