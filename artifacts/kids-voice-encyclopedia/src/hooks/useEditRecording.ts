@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { recordingCue } from '../lib/recordingCue';
 
 export const MAX_RECORD_SECONDS = 60;
 const MIME_CANDIDATES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
@@ -10,10 +11,11 @@ function pickMime(): string | undefined {
 
 export const canRecord = () => typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined';
 
-/** 編集用の録音フック。結果の Blob は onResult へ渡す（古いセッションの結果は破棄）。 */
+/** 新規・編集共通。合図の終了後に録音し、結果のBlobだけを返す。古いセッションは破棄。 */
 export function useEditRecording(onResult: (blob: Blob) => void) {
   const [recording, setRecording] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [guiding, setGuiding] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [level, setLevel] = useState(0);
   const [error, setError] = useState('');
@@ -23,10 +25,14 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
   const timer = useRef<number | null>(null);
   const raf = useRef<number | null>(null);
   const audioCtx = useRef<AudioContext | null>(null);
+  const cue = useRef<ReturnType<typeof recordingCue> | null>(null);
+  const startingRef = useRef(false);
   const resultRef = useRef(onResult);
   resultRef.current = onResult;
 
   const release = useCallback(() => {
+    cue.current?.cancel(); cue.current = null;
+    setGuiding(false);
     if (timer.current) window.clearInterval(timer.current);
     timer.current = null;
     if (raf.current) cancelAnimationFrame(raf.current);
@@ -56,20 +62,39 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
     release();
     setRecording(false);
     setStarting(false);
+    startingRef.current = false;
     setSeconds(0);
   }, [release]);
 
   const start = useCallback(async () => {
-    if (recorder.current || starting) return;
+    if (recorder.current || startingRef.current) return;
     setError('');
     if (!canRecord()) { setError('このブラウザでは録音できません。音声ファイルをえらんで追加できます。'); return; }
     const mine = ++session.current;
+    startingRef.current = true;
     setStarting(true);
     let acquired: MediaStream | null = null;
     try {
+      // Unlock Web Audio synchronously in the tap gesture, before microphone
+      // permission or any other asynchronous work (important on iPhone).
+      const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctx) throw new Error('このブラウザでは録音の合図音を準備できません。');
+      const ctx = new Ctx();
+      audioCtx.current = ctx;
+      const ready = ctx.resume().then(() => null, (error: unknown) => error);
       acquired = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (mine !== session.current) { acquired.getTracks().forEach((t) => t.stop()); return; }
       stream.current = acquired;
+      const resumeError = await ready;
+      if (mine !== session.current) return;
+      if (resumeError === null && ctx.state !== 'running') await ctx.resume();
+      if (mine !== session.current) return;
+      if (resumeError !== null || ctx.state !== 'running') throw new Error('合図音を再生できませんでした。もう一度録音ボタンを押してください。');
+      setGuiding(true);
+      cue.current = recordingCue(ctx);
+      await cue.current.finished;
+      if (mine !== session.current) return;
+      cue.current = null; setGuiding(false);
       const mime = pickMime();
       const rec = mime ? new MediaRecorder(acquired, { mimeType: mime }) : new MediaRecorder(acquired);
       const parts: Blob[] = [];
@@ -90,10 +115,6 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
         resultRef.current(blob);
       };
       try {
-        const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-        if (Ctx) {
-          const ctx = new Ctx();
-          audioCtx.current = ctx;
           const analyser = ctx.createAnalyser();
           analyser.fftSize = 512;
           ctx.createMediaStreamSource(acquired).connect(analyser);
@@ -106,11 +127,11 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
             raf.current = requestAnimationFrame(tick);
           };
           tick();
-        }
       } catch { /* level meter is optional */ }
       recorder.current = rec;
       rec.start();
       setStarting(false);
+      startingRef.current = false;
       setRecording(true);
       setSeconds(0);
       let elapsed = 0;
@@ -124,14 +145,15 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
       if (mine !== session.current) return;
       recorder.current = null; release(); setRecording(false);
       setStarting(false);
+      startingRef.current = false;
       const denied = caught instanceof DOMException && (caught.name === 'NotAllowedError' || caught.name === 'PermissionDeniedError');
       setError(denied
         ? 'マイクが使えませんでした。端末の設定でマイクを許可すると録音できます。'
-        : 'マイクにつながりませんでした。もう一度お試しください。');
+        : caught instanceof Error && caught.message.includes('合図音') ? caught.message : 'マイクにつながりませんでした。もう一度お試しください。');
     }
-  }, [release, starting, stop]);
+  }, [release, stop]);
 
   useEffect(() => cancel, [cancel]);
 
-  return { recording, starting, seconds, level, error, setError, start, stop, cancel };
+  return { recording, starting, guiding, seconds, level, error, setError, start, stop, cancel };
 }

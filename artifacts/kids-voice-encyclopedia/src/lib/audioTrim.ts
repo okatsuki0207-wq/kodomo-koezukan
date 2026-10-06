@@ -25,8 +25,13 @@ export function findVoiceStart(channels: Float32Array[], sampleRate: number): nu
 }
 
 /** PCM 16-bit WAV: MediaRecorder の WebM / MP4 に依存しない再生形式。 */
-export function encodeWav(channels: Float32Array[], sampleRate: number, start: number): Blob {
-  const frames = channels[0].length - start;
+export function encodeWav(channels: Float32Array[], sampleRate: number, start: number, end = channels[0]?.length ?? 0): Blob {
+  if (!channels.length || channels.some((c) => c.length !== channels[0].length) ||
+    !Number.isFinite(sampleRate) || sampleRate <= 0 ||
+    !Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end > channels[0].length || end <= start) {
+    throw new Error('音声の切り抜き範囲が正しくありません。');
+  }
+  const frames = end - start;
   const byteLength = frames * channels.length * 2;
   const output = new ArrayBuffer(44 + byteLength);
   const view = new DataView(output);
@@ -41,7 +46,7 @@ export function encodeWav(channels: Float32Array[], sampleRate: number, start: n
   view.setUint16(32, channels.length * 2, true); view.setUint16(34, 16, true);
   text(36, 'data'); view.setUint32(40, byteLength, true);
   let offset = 44;
-  for (let i = start; i < channels[0].length; i++) {
+  for (let i = start; i < end; i++) {
     for (const channel of channels) {
       const sample = Math.max(-1, Math.min(1, channel[i]));
       view.setInt16(offset, Math.round(sample * (sample < 0 ? 32768 : 32767)), true);
@@ -51,15 +56,44 @@ export function encodeWav(channels: Float32Array[], sampleRate: number, start: n
   return new Blob([output], { type: 'audio/wav' });
 }
 
-export async function trimLeadingSilence(recording: Blob): Promise<Blob> {
-  const context = new AudioContext();
+export type DecodedAudio = { channels: Float32Array[]; sampleRate: number; duration: number };
+
+export async function decodeAudioBlob(recording: Blob): Promise<DecodedAudio> {
+  const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctx) throw new Error('このブラウザでは音声を編集できません。');
+  const context = new Ctx();
   try {
     const decoded = await context.decodeAudioData(await recording.arrayBuffer());
     const channels = Array.from({ length: decoded.numberOfChannels }, (_, i) => decoded.getChannelData(i));
-    const start = findVoiceStart(channels, decoded.sampleRate);
-    if (start === null) throw new Error('声が聞こえませんでした。マイクの近くでもう一度録音してください。');
-    return encodeWav(channels, decoded.sampleRate, start);
+    return { channels, sampleRate: decoded.sampleRate, duration: decoded.length / decoded.sampleRate };
   } finally {
     await context.close();
   }
+}
+
+export async function trimLeadingSilence(recording: Blob): Promise<Blob> {
+  const decoded = await decodeAudioBlob(recording);
+  const start = findVoiceStart(decoded.channels, decoded.sampleRate);
+  if (start === null) throw new Error('声が聞こえませんでした。マイクの近くでもう一度録音してください。');
+  return encodeWav(decoded.channels, decoded.sampleRate, start);
+}
+
+export function trimAudioRange(audio: DecodedAudio, startSeconds: number, endSeconds: number): Blob {
+  if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds) ||
+    startSeconds < 0 || endSeconds > audio.duration + 0.001 || endSeconds - startSeconds < 0.05) {
+    throw new Error('開始と終了の間を0.05秒以上あけてください。');
+  }
+  return encodeWav(audio.channels, audio.sampleRate, Math.round(startSeconds * audio.sampleRate),
+    Math.min(audio.channels[0].length, Math.round(endSeconds * audio.sampleRate)));
+}
+
+export function waveformPeaks(channels: Float32Array[], count = 160): number[] {
+  const length = channels[0]?.length ?? 0;
+  if (!length || !Number.isInteger(count) || count < 1 || count > 1000) return [];
+  return Array.from({ length: count }, (_, bin) => {
+    const start = Math.floor(bin * length / count), end = Math.max(start + 1, Math.floor((bin + 1) * length / count));
+    let peak = 0;
+    for (const channel of channels) for (let i = start; i < Math.min(end, channel.length); i++) peak = Math.max(peak, Math.abs(channel[i]));
+    return Math.min(1, peak);
+  });
 }

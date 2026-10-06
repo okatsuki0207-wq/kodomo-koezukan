@@ -60,6 +60,16 @@ export function cropToShape(
   return canvas.toDataURL(circle ? 'image/png' : 'image/jpeg', JPEG_QUALITY);
 }
 
+/** Rectangle-only ROI for AI. Preserve source transparency, and never send the
+ * unselected portion of the photo to the inference worker. */
+export function cropForAi(image: HTMLImageElement, viewport: Size, transform: Transform, frame: CropFrame) {
+  const rect = sourceCropRect({ width: image.naturalWidth, height: image.naturalHeight }, viewport, transform, frame);
+  const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(rect.width, rect.height));
+  const { canvas, context } = makeCanvas(rect.width * scale, rect.height * scale);
+  context.drawImage(image, rect.x, rect.y, rect.width, rect.height, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/png');
+}
+
 export function cropFreehand(image: HTMLImageElement, points: Point[]) {
   const pad = 2;
   const xs = points.map((p) => p.x);

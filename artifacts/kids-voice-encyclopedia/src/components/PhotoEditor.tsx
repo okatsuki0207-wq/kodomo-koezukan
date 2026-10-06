@@ -1,16 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, Circle, LoaderCircle, PenLine, RotateCcw, Sparkles, Square, X } from 'lucide-react';
-import { removeBackgroundOnDevice } from '../lib/backgroundRemoval';
 import { smoothTracePath } from '../lib/cropGeometry';
-import type { Point, ResizeHandle, Size } from '../lib/cropGeometry';
+import type { ResizeHandle, Size } from '../lib/cropGeometry';
 import { containMap, naturalToStage } from './photo-editor/contain';
-import { cropFreehand, cropToShape, resizeForAi, resizedDataUrl } from './photo-editor/exportImage';
+import { cropForAi, cropFreehand, cropToShape, resizedDataUrl } from './photo-editor/exportImage';
 import { usePhotoCrop } from './photo-editor/usePhotoCrop';
 import { useFreehand } from './photo-editor/usePointerPaint';
 import { removeSelectedBackground } from './photo-editor/subjectCutout';
 import './PhotoEditor.css';
 
-type EditMode = 'shape' | 'freehand' | 'mask' | 'ai';
+type EditMode = 'shape' | 'freehand' | 'ai';
 type CropShape = 'circle' | 'square';
 type Props = { source: string; onCancel: () => void; onApply: (image: string) => void };
 
@@ -37,19 +36,17 @@ export default function PhotoEditor({ source, onCancel, onApply }: Props) {
   const [imageSize, setImageSize] = useState<Size>({ width: 0, height: 0 });
   const [loaded, setLoaded] = useState(false);
   const [processedImage, setProcessedImage] = useState('');
-  const [processing, setProcessing] = useState<'' | 'ai' | 'mask'>('');
+  const [processing, setProcessing] = useState<'' | 'ai'>('');
   const [error, setError] = useState('');
 
   const idle = !processedImage && !processing && loaded;
-  const circle = shape === 'circle';
+  const circle = mode === 'shape' && shape === 'circle';
   const crop = usePhotoCrop({
-    stageRef, enabled: idle && mode === 'shape', viewport, image: imageSize, circle, resetKey: source,
+    stageRef, enabled: idle && (mode === 'shape' || mode === 'ai'), viewport, image: imageSize, circle, resetKey: source,
   });
   const surfaceOpts = { stageRef, enabled: idle, image: imageSize, viewport };
   const freehand = useFreehand({ ...surfaceOpts, enabled: idle && mode === 'freehand',
     onComplete: (points) => guard(() => cropFreehand(imageRef.current!, points)) });
-  const mask = useFreehand({ ...surfaceOpts, enabled: idle && mode === 'mask',
-    onComplete: (points) => { void runMask(points); } });
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -71,7 +68,6 @@ export default function PhotoEditor({ source, onCancel, onApply }: Props) {
     runId.current += 1;
     busyRef.current = false;
     freehand.clear();
-    mask.clear();
     setProcessedImage('');
     setProcessing('');
     setError('');
@@ -110,36 +106,14 @@ export default function PhotoEditor({ source, onCancel, onApply }: Props) {
     setProcessing('ai');
     setError('');
     try {
-      const light = await resizeForAi(source);
-      const canvas = await removeBackgroundOnDevice(light);
-      if (id !== runId.current) return;
-      setProcessedImage(resizedDataUrl(canvas, canvas.width, canvas.height, 'image/png'));
-    } catch {
-      if (id === runId.current) setError('処理に失敗しました。他のモードをお試しください');
-    } finally {
-      if (id === runId.current) { busyRef.current = false; setProcessing(''); }
-    }
-  };
-
-  const runMask = async (points: Point[] = mask.points) => {
-    if (busyRef.current) return;
-    if (points.length < 3 || !imageRef.current?.naturalWidth) {
-      setError('切り抜きたい対象のまわりを一周なぞってください。');
-      return;
-    }
-    busyRef.current = true;
-    const id = ++runId.current;
-    setProcessing('mask');
-    setError('');
-    try {
-      const selection = cropFreehand(imageRef.current!, points);
+      const selection = cropForAi(imageRef.current!, viewport, crop.transform, crop.frame);
+      // Existing local semantic model intersects source opacity and crops its
+      // transparent bounds after inference. The rectangle is selected first.
       const canvas = await removeSelectedBackground(selection);
       if (id !== runId.current) return;
       setProcessedImage(resizedDataUrl(canvas, canvas.width, canvas.height, 'image/png'));
     } catch {
-      if (id === runId.current) {
-        setError('背景を削除できませんでした。囲む範囲を変えて、もう一度お試しください。「指でなぞる」では背景削除なしで切り抜けます。');
-      }
+      if (id === runId.current) setError('背景を削除できませんでした。枠を少し広げて再度お試しください。元の写真と枠はそのままです。');
     } finally {
       if (id === runId.current) { busyRef.current = false; setProcessing(''); }
     }
@@ -149,7 +123,7 @@ export default function PhotoEditor({ source, onCancel, onApply }: Props) {
   const fit = imageSize.width ? Math.max(viewport.width / imageSize.width, viewport.height / imageSize.height) : 1;
   let imageStyle: React.CSSProperties | undefined;
   if (loaded && viewport.width) {
-    if (mode === 'shape') {
+    if (mode === 'shape' || mode === 'ai') {
       const w = imageSize.width * fit;
       const h = imageSize.height * fit;
       imageStyle = {
@@ -163,12 +137,11 @@ export default function PhotoEditor({ source, onCancel, onApply }: Props) {
 
   const toView = (pts: { x: number; y: number }[]) => pts.map((p) => naturalToStage(p, map));
   const freehandPath = freehand.points.length > 1 ? smoothTracePath(toView(freehand.points), !freehand.drawing) : '';
-  const targetPath = mask.points.length > 1 ? smoothTracePath(toView(mask.points), !mask.drawing) : '';
   const f = crop.frame;
   const handles = circle ? CIRCLE_HANDLES : RECT_HANDLES;
-  const showFrame = idle && mode === 'shape' && crop.ready && f.width > 0;
+  const showFrame = idle && (mode === 'shape' || mode === 'ai') && crop.ready && f.width > 0;
   const stageClass = !processedImage && idle
-    ? mode === 'shape' ? ' is-cropping' : mode === 'freehand' || mode === 'mask' ? ' is-drawing' : ''
+    ? mode === 'shape' || mode === 'ai' ? ' is-cropping' : mode === 'freehand' ? ' is-drawing' : ''
     : '';
 
   return (
@@ -178,7 +151,7 @@ export default function PhotoEditor({ source, onCancel, onApply }: Props) {
         <header className="photo-editor-header">
           <div>
             <h2 id="photo-editor-title">写真をととのえる</h2>
-            <p>形を選ぶ、なぞる、対象を囲む、AIにおまかせ。</p>
+            <p>型抜き、なぞって切り抜く、AIで切り抜く。</p>
           </div>
           <button type="button" className="photo-editor-close" onClick={onCancel} disabled={Boolean(processing)} aria-label="写真編集を閉じる" data-testid="button-close-photo-editor">
             <X size={19} />
@@ -186,13 +159,12 @@ export default function PhotoEditor({ source, onCancel, onApply }: Props) {
         </header>
 
         <div className="photo-editor-tabs" role="tablist" aria-label="写真の加工方法">
-          <button type="button" role="tab" aria-selected={mode === 'shape'} onClick={() => chooseMode('shape')} disabled={Boolean(processing)} data-testid="tab-photo-shape"><Circle size={16} /> 形を選ぶ</button>
-          <button type="button" role="tab" aria-selected={mode === 'freehand'} onClick={() => chooseMode('freehand')} disabled={Boolean(processing)} data-testid="tab-photo-freehand"><PenLine size={16} /> 指でなぞる</button>
-          <button type="button" role="tab" aria-selected={mode === 'mask'} onClick={() => chooseMode('mask')} disabled={Boolean(processing)} data-testid="tab-photo-mask"><PenLine size={16} /> 対象を囲む</button>
-          <button type="button" role="tab" aria-selected={mode === 'ai'} onClick={() => chooseMode('ai')} disabled={Boolean(processing)} data-testid="tab-photo-ai"><Sparkles size={16} /> AIで消す</button>
+          <button type="button" role="tab" aria-selected={mode === 'shape'} onClick={() => chooseMode('shape')} disabled={Boolean(processing)} data-testid="tab-photo-shape"><Circle size={16} /> 型抜き（丸・四角）</button>
+          <button type="button" role="tab" aria-selected={mode === 'freehand'} onClick={() => chooseMode('freehand')} disabled={Boolean(processing)} data-testid="tab-photo-freehand"><PenLine size={16} /> なぞって切り抜く</button>
+          <button type="button" role="tab" aria-selected={mode === 'ai'} onClick={() => chooseMode('ai')} disabled={Boolean(processing)} data-testid="tab-photo-ai"><Sparkles size={16} /> AIで切り抜く</button>
         </div>
 
-        <div className={`photo-editor-stage${stageClass}`} ref={stageRef} {...(mode === 'shape' && !processedImage ? crop.stageProps : {})} data-testid="photo-editor-stage">
+        <div className={`photo-editor-stage${stageClass}`} ref={stageRef} {...((mode === 'shape' || mode === 'ai') && !processedImage ? crop.stageProps : {})} data-testid="photo-editor-stage">
           {processedImage && <img className="photo-editor-image is-result" src={processedImage} alt="加工後の写真プレビュー" />}
           <img
             ref={imageRef}
@@ -239,20 +211,11 @@ export default function PhotoEditor({ source, onCancel, onApply }: Props) {
               {freehandPath && <path d={freehandPath} className="trace-core" vectorEffect="non-scaling-stroke" />}
             </svg>
           )}
-          {!processedImage && loaded && mode === 'mask' && (
-            <svg className="photo-editor-trace" width={viewport.width} height={viewport.height}
-              viewBox={`0 0 ${viewport.width} ${viewport.height}`} aria-label="切り抜きたい対象の周りをなぞる"
-              {...mask.surfaceProps} onPointerDown={(event) => { setError(''); mask.surfaceProps.onPointerDown(event); }} data-testid="photo-mask-surface">
-              {targetPath && !mask.drawing && mask.points.length > 2 && <path d={targetPath} className="trace-fill" />}
-              {targetPath && <path d={targetPath} className="trace-halo" vectorEffect="non-scaling-stroke" />}
-              {targetPath && <path d={targetPath} className="trace-core" vectorEffect="non-scaling-stroke" />}
-            </svg>
-          )}
           {!loaded && !error && !processedImage && <span className="photo-editor-wait">写真を読み込んでいます…</span>}
           {processing && (
             <div className="photo-editor-processing" role="status" aria-live="polite" data-testid="status-photo-ai-processing">
               <LoaderCircle className="photo-editor-spinner" size={38} />
-              <strong>{processing === 'ai' ? 'AIが背景を消しています...' : '囲んだ対象の背景を消しています...'}</strong>
+              <strong>選んだ範囲の背景を消しています…</strong>
               <span>初回はAIモデルをダウンロードします。写真は端末内で処理され、外部には送られません。</span>
             </div>
           )}
@@ -287,19 +250,10 @@ export default function PhotoEditor({ source, onCancel, onApply }: Props) {
                 </div>
               </>
             )}
-            {mode === 'mask' && (
-              <>
-                <p className="photo-editor-hint">対象のまわりをペンのように一周なぞってください。指を離すと輪郭を閉じ、囲んだ範囲内の被写体をAIが認識して背景を削除します。初回はモデルを読み込みます。写真は外部へ送られません。</p>
-                <div className="photo-editor-actions">
-                  <button type="button" className="photo-editor-secondary" onClick={() => { mask.clear(); setError(''); }} disabled={Boolean(processing) || mask.points.length === 0} data-testid="button-mask-clear"><RotateCcw size={16} /> 囲み直す</button>
-                  <button type="button" className="photo-editor-primary" onClick={() => void runMask()} disabled={Boolean(processing) || mask.drawing || !loaded || mask.points.length < 3} data-testid="button-run-mask-crop"><Sparkles size={16} /> 囲んだ対象の背景を消す</button>
-                </div>
-              </>
-            )}
             {mode === 'ai' && (
               <>
-                <p className="photo-editor-hint">写真を448px以下に縮小し、軽量な量子化モデルで端末内処理します。初回はモデルの読み込みに時間がかかることがあります。</p>
-                <button type="button" className="photo-editor-primary" onClick={() => void runAi()} disabled={!loaded || Boolean(processing)} data-testid="button-run-photo-ai"><Sparkles size={17} /> ワンタップで背景を消す</button>
+                <p className="photo-editor-hint">① 四角い枠を対象のすぐ外側に合わせます（角や辺をドラッグ）。② 枠の中だけをAIで背景削除します。透明な余白も詰めて仕上げます。処理は端末内で行います。</p>
+                <button type="button" className="photo-editor-primary" onClick={() => void runAi()} disabled={!loaded || !crop.ready || f.width <= 0 || Boolean(processing)} data-testid="button-run-photo-ai"><Sparkles size={17} /> この範囲をAIで切り抜く</button>
               </>
             )}
             {error && <p className="photo-editor-error" role="alert" data-testid="status-photo-editor-error">{error}</p>}

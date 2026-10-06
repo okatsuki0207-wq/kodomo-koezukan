@@ -1,0 +1,38 @@
+.vte, .rg { max-width: 100%; min-width: 0; }
+.vte { background: #fff; border: 1px solid #dfe3e8; border-radius: 13px; padding: 14px; box-shadow: 0 1px 3px rgba(31,41,55,.07); }
+.vte-title { margin: 0 0 4px; font-size: 13px; font-weight: 700; color: #65513d; }
+.vte-help { margin: 0 0 12px; font-size: 11px; line-height: 1.7; color: #6f6862; }
+.vte-bar { position: relative; height: 96px; margin: 0 14px; border-radius: 10px; background: #f8f9fa; border: 1px solid #e3e6ea; touch-action: none; user-select: none; -webkit-user-select: none; }
+.vte-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.vte-dim { position: absolute; top: 0; bottom: 0; background: rgba(255,255,255,.72); pointer-events: none; }
+.vte-dim.l { left: 0; border-radius: 10px 0 0 10px; } .vte-dim.r { right: 0; border-radius: 0 10px 10px 0; }
+.vte-playhead { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; background: #5f8d6b; pointer-events: none; will-change: transform; }
+.vte-handle { position: absolute; top: -6px; bottom: -6px; width: 44px; margin-left: -22px; display: flex; justify-content: center; touch-action: none; cursor: ew-resize; background: none; border: 0; padding: 0; }
+.vte-handle::before { content: ""; width: 6px; height: 100%; border-radius: 4px; background: #bd7057; box-shadow: 0 0 0 2px #fff; }
+.vte-handle.end::before { background: #5f8d6b; }
+.vte-handle:focus-visible { outline: 3px solid rgba(194,104,78,.45); outline-offset: 0; border-radius: 8px; }
+.vte-times { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin: 12px 0; font-size: 12px; color: #65513d; font-variant-numeric: tabular-nums; }
+.vte-times b { font-weight: 700; }
+.vte-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.vte-btn { min-height: 44px; min-width: 44px; padding: 0 16px; border-radius: 999px; border: 1px solid #d5dadf; background: #fff; color: #6f6355; font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.vte-btn.primary { background: #bd7057; border-color: #bd7057; color: #fff8ed; }
+.vte-btn:disabled { opacity: .5; cursor: not-allowed; }
+.vte-msg { margin: 10px 0 0; padding: 9px 12px; border-radius: 9px; font-size: 12px; line-height: 1.7; background: #eef3ec; color: #4f6a4b; }
+.vte-msg.err { background: #fbf0ea; color: #9a4a3a; }
+.vte-load { height: 96px; border-radius: 10px; background: #f1f3f5; animation: vte-pulse 1.2s ease-in-out infinite; }
+@keyframes vte-pulse { 50% { opacity: .5; } }
+
+.rg { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; }
+.rg-stage { position: relative; width: min(100%, 420px); aspect-ratio: 1; background: #fff; border: 1px solid #e3e6ea; border-radius: 16px; box-shadow: 0 1px 3px rgba(31,41,55,.08); display: grid; place-items: center; overflow: hidden; }
+.rg-photo { width: 100%; height: 100%; object-fit: contain; display: block; }
+.rg-guide { position: absolute; left: 8px; right: 8px; bottom: 8px; display: flex; align-items: flex-end; gap: 8px; pointer-events: none; }
+.rg-char { width: 96px; height: 96px; flex: 0 0 auto; animation: rg-bob 1.6s ease-in-out infinite; }
+.rg-bubble { position: relative; background: #fff; border: 2px solid #e5be7a; border-radius: 18px; padding: 8px 14px; font-size: 20px; font-weight: 900; color: #65513d; margin-bottom: 40px; }
+.rg-bubble::before { content: ""; position: absolute; left: -9px; bottom: 14px; width: 14px; height: 14px; background: #fff; border-left: 2px solid #e5be7a; border-bottom: 2px solid #e5be7a; transform: rotate(45deg); }
+.rg-cue { margin: 0; font-size: 14px; font-weight: 700; color: #a85f49; text-align: center; min-height: 24px; }
+.rg-rec { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 999px; background: #fbf0ea; color: #b4473b; font-weight: 700; font-size: 15px; }
+.rg-dot { width: 10px; height: 10px; border-radius: 50%; background: #cc554a; animation: vte-pulse 1s infinite; }
+.rg-name { margin: 0; font-size: 18px; font-weight: 700; color: #65513d; overflow-wrap: anywhere; text-align: center; }
+@keyframes rg-bob { 50% { transform: translateY(-4px); } }
+@media (max-width: 420px) { .rg-char { width: 80px; height: 80px; } .rg-bubble { font-size: 17px; } .vte { padding: 12px 8px; } }
+@media (prefers-reduced-motion: reduce) { .rg-char, .rg-dot, .vte-load { animation: none; } }
