@@ -9,6 +9,64 @@ async function load(name) {
 }
 const gesture = await load('longPressGesture');
 const subject = await load('subjectMask');
+const { loadVoiceSource } = await load('voiceSource');
+const { recordingCue } = await load('recordingCue');
+
+test('waveform drafts keep Blob bytes usable after their temporary URL is revoked', async () => {
+  const blob = new Blob(['synthetic WAV bytes'], { type: 'audio/wav' });
+  const url = URL.createObjectURL(blob);
+  URL.revokeObjectURL(url);
+  assert.equal(await loadVoiceSource(blob, new AbortController().signal), blob);
+  await assert.rejects(loadVoiceSource(url, new AbortController().signal), /一時音声/);
+});
+test('waveform loader refreshes an expired saved URL once, validates bytes, and honours cancellation', async () => {
+  const original = globalThis.fetch;
+  let refreshed = 0;
+  globalThis.fetch = async (url) => url.endsWith('expired')
+    ? new Response('denied', { status: 403 })
+    : new Response(new Blob(['wav'], { type: 'audio/wav' }));
+  try {
+    const result = await loadVoiceSource('https://example.invalid/expired', new AbortController().signal,
+      async () => { refreshed++; return 'https://example.invalid/fresh'; });
+    assert.equal(await result.text(), 'wav');
+    assert.equal(refreshed, 1);
+    await assert.rejects(loadVoiceSource(new Blob([]), new AbortController().signal), /空/);
+    await assert.rejects(loadVoiceSource(new Blob(['<html>'], { type: 'text/html' }), new AbortController().signal), /音声ではない/);
+    const ctl = new AbortController(); ctl.abort();
+    await assert.rejects(loadVoiceSource(new Blob(['wav']), ctl.signal), { name: 'AbortError' });
+  } finally { globalThis.fetch = original; }
+});
+class GuideAudio {
+  onended = null; onerror = null; played = 0; paused = 0;
+  play() { this.played++; return Promise.resolve(); }
+  pause() { this.paused++; }
+  load() {}
+  removeAttribute() {}
+}
+test('guide voice begins from tap and resolves only after ended plus acoustic tail', async () => {
+  const audio = new GuideAudio();
+  const cue = recordingCue('/test-guide.mp3', () => audio);
+  assert.equal(audio.played, 1);
+  let finished = false;
+  cue.finished.then(() => { finished = true; });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(finished, false);
+  audio.onended();
+  assert.equal(finished, false);
+  await cue.finished;
+  assert.equal(finished, true);
+  assert.equal(audio.onended, null);
+});
+test('guide cancellation and load failure reject instead of permitting recording', async () => {
+  const audio = new GuideAudio();
+  const cancelled = recordingCue('/test-guide.mp3', () => audio);
+  const check = assert.rejects(cancelled.finished, { name: 'AbortError' });
+  cancelled.cancel(); await check;
+  const failedAudio = new GuideAudio();
+  const failed = recordingCue('/test-guide.mp3', () => failedAudio);
+  const error = assert.rejects(failed.finished, /ガイドボイス/);
+  failedAudio.onerror(); await error;
+});
 
 test('long press tolerates small finger jitter but cancels drags and scroll-sized movement', () => {
   assert.equal(gesture.LONG_PRESS_MS, 550);

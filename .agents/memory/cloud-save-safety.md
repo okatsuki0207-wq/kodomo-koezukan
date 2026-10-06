@@ -26,3 +26,9 @@ Keep builds and watched-file edits out of browser passes that use an in-memory s
 **Why:** A dev-server reload can reset the synthetic backing state mid-test, making a successful deletion appear to reappear on rescan. A stable-document recheck distinguished that fixture reset from a real persistence defect.
 
 **How to apply:** Finish builds before starting the browser pass. When synthetic state unexpectedly resets, inspect navigation/module reloads before changing production persistence logic.
+
+Do not restore the legacy-import banner or unused-file maintenance entry on the child-facing gallery, or treat their removal as permission to delete retained data.
+
+**Why:** The user explicitly requested a gallery-first layout without those development/maintenance surfaces. Removing their entry points does not prove old or uncertain media are disposable.
+
+**How to apply:** Preserve storage retention and owner-scoped safety guarantees independently of visible maintenance controls.

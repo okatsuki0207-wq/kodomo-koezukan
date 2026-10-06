@@ -67,7 +67,8 @@ export async function decodeAudioBlob(recording: Blob): Promise<DecodedAudio> {
     const channels = Array.from({ length: decoded.numberOfChannels }, (_, i) => decoded.getChannelData(i));
     return { channels, sampleRate: decoded.sampleRate, duration: decoded.length / decoded.sampleRate };
   } finally {
-    await context.close();
+    // Closing an already-closed context must not mask a successful decode.
+    await context.close().catch(() => undefined);
   }
 }
 

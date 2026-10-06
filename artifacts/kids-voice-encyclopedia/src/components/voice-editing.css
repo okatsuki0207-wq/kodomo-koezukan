@@ -34,5 +34,14 @@
 .rg-dot { width: 10px; height: 10px; border-radius: 50%; background: #cc554a; animation: vte-pulse 1s infinite; }
 .rg-name { margin: 0; font-size: 18px; font-weight: 700; color: #65513d; overflow-wrap: anywhere; text-align: center; }
 @keyframes rg-bob { 50% { transform: translateY(-4px); } }
+.rg[data-phase="guide"] .rg-mouth { transform-box: fill-box; transform-origin: center; animation: rg-speaking .32s ease-in-out infinite alternate; }
+.rg[data-phase="guide"] .rg-bubble { animation: rg-bob 1.6s ease-in-out infinite; }
+.rg[data-phase="recording"] .rg-photo { border-radius: 16px; outline: 2px solid #d8e4d2; outline-offset: 4px; }
+.vte { padding: 16px; }
+.vte-help, .em-note { font-size: 12px; color: #6b7280; line-height: 1.7; }
+.vte-help { margin-bottom: 16px; }
+.vte-actions { gap: 8px; margin-top: 16px; }
+.vte-msg .vte-btn { margin: 8px 0 0; }
+@keyframes rg-speaking { to { transform: scaleY(1.65); } }
 @media (max-width: 420px) { .rg-char { width: 80px; height: 80px; } .rg-bubble { font-size: 17px; } .vte { padding: 12px 8px; } }
-@media (prefers-reduced-motion: reduce) { .rg-char, .rg-dot, .vte-load { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .rg-char, .rg-dot, .vte-load, .rg[data-phase="guide"] .rg-mouth, .rg[data-phase="guide"] .rg-bubble { animation: none; } }

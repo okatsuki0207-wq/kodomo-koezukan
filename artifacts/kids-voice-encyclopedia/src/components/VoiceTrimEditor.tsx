@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Play, Square, RotateCcw } from 'lucide-react';
 import { decodeAudioBlob, trimAudioRange, waveformPeaks, type DecodedAudio } from '../lib/audioTrim';
+import { loadVoiceSource } from '../lib/voiceSource';
 import './voice-editing.css';
 
 type Props = {
-  source: string;
+  source: string | Blob;
+  refreshSource?: () => Promise<string>;
   disabled?: boolean;
   onApply: (blob: Blob) => void;
   onPendingChange?: (pending: boolean) => void;
@@ -14,7 +16,7 @@ type Props = {
 const MIN = 0.05;
 const fmt = (s: number) => `${s.toFixed(2)}秒`;
 
-export default function VoiceTrimEditor({ source, disabled, onApply, onPendingChange, onBeforePreview }: Props) {
+export default function VoiceTrimEditor({ source, refreshSource, disabled, onApply, onPendingChange, onBeforePreview }: Props) {
   const [audio, setAudio] = useState<DecodedAudio | null>(null);
   const [peaks, setPeaks] = useState<number[]>([]);
   const [range, setRange] = useState<[number, number]>([0, 0]);
@@ -22,6 +24,9 @@ export default function VoiceTrimEditor({ source, disabled, onApply, onPendingCh
   const [loading, setLoading] = useState(true);
   const [playing, setPlaying] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [reload, setReload] = useState(0);
+  const refreshRef = useRef(refreshSource);
+  refreshRef.current = refreshSource;
   const bar = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const head = useRef<HTMLDivElement>(null);
@@ -51,11 +56,11 @@ export default function VoiceTrimEditor({ source, disabled, onApply, onPendingCh
     stop();
     setAudio(null); setPeaks([]); setError(''); setLoading(true); setRange([0, 0]);
     cbRef.current.onPendingChange?.(false);
-    (async () => {
+    // React effect runs after DOM commit; one frame also lets modal layout settle.
+    const frame = requestAnimationFrame(() => { void (async () => {
       try {
-        const res = await fetch(source, { signal: ctl.signal });
-        if (!res.ok) throw new Error('音声の取得に失敗しました。');
-        const blob = await res.blob();
+        const blob = await loadVoiceSource(source, ctl.signal, refreshRef.current);
+        ctl.signal.throwIfAborted();
         const decoded = await decodeAudioBlob(blob);
         if (id !== session.current) return;
         if (decoded.duration < MIN) throw new Error('音声が短すぎるため、範囲を調整できません。元の録音はそのままです。');
@@ -68,20 +73,23 @@ export default function VoiceTrimEditor({ source, disabled, onApply, onPendingCh
       } finally {
         if (id === session.current) setLoading(false);
       }
-    })();
+    })(); });
     return () => {
       session.current++;
+      cancelAnimationFrame(frame);
       dragCleanup.current?.(); dragCleanup.current = null;
       ctl.abort();
       stop();
       cbRef.current.onPendingChange?.(false);
     };
-  }, [source, stop]);
+  }, [source, stop, reload]);
 
   useEffect(() => {
     const c = canvas.current;
     if (!c || !peaks.length) return;
+    const draw = () => {
     const w = c.clientWidth, h = c.clientHeight, d = window.devicePixelRatio || 1;
+    if (!w || !h) return;
     c.width = w * d; c.height = h * d;
     const g = c.getContext('2d');
     if (!g) return;
@@ -93,6 +101,11 @@ export default function VoiceTrimEditor({ source, disabled, onApply, onPendingCh
       const bh = Math.max(2, p * (h - 12));
       g.fillRect(i * bw + 0.5, (h - bh) / 2, Math.max(1, bw - 1), bh);
     });
+    };
+    draw();
+    const observer = new ResizeObserver(draw);
+    observer.observe(c);
+    return () => observer.disconnect();
   }, [peaks, audio]);
 
   const dur = audio?.duration ?? 0;
@@ -195,7 +208,9 @@ export default function VoiceTrimEditor({ source, disabled, onApply, onPendingCh
       <h3 className="vte-title">声の長さをととのえる</h3>
       <p className="vte-help">波形の左のハンドルで前を、右のハンドルで後ろを切ります。親の声などが入った部分を外せます。</p>
       {loading && <div className="vte-load" aria-label="読み込み中" />}
-      {error && <p className="vte-msg err" role="alert" data-testid="status-trim-error">{error}</p>}
+      {error && <div className="vte-msg err" role="alert" data-testid="status-trim-error">{error}
+        {!audio && <button type="button" className="vte-btn" disabled={disabled || loading} onClick={() => setReload((n) => n + 1)} data-testid="button-reload-voice">再読み込み</button>}
+      </div>}
       {audio && (
         <>
           <div className="vte-bar" ref={bar} data-testid="voice-waveform">

@@ -26,12 +26,10 @@ import RecordingGuide from './components/RecordingGuide';
 import { useEditRecording } from './hooks/useEditRecording';
 import { randomVoice, VoicePlayback } from './lib/voicePlayback';
 import DetailDialogShell from './components/DetailDialogShell';
-import UnusedMediaDialog from './components/UnusedMediaDialog';
 import { useCategories } from './hooks/useCategories';
 import { filterByCategory } from './lib/categories';
-import { deleteKeepsake, deleteUnusedMedia, editKeepsake, firebaseError, inspectUnusedMedia, saveKeepsake, subscribeKeepsakes, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
+import { deleteKeepsake, editKeepsake, firebaseError, saveKeepsake, subscribeKeepsakes, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
 import { getVoices } from './lib/voiceAssets';
-import { readLegacyKeepsakes } from './lib/legacyImport';
 import { trimLeadingSilence } from './lib/audioTrim';
 import { isFirebaseConfigured } from './firebaseConfig';
 import './index.css';
@@ -62,8 +60,6 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [processingVoice, setProcessingVoice] = useState(false);
-  const [legacyItems, setLegacyItems] = useState<Keepsake[]>([]);
-  const [migrationNotice, setMigrationNotice] = useState('');
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [cardCategory, setCardCategory] = useState<string | null>(null);
@@ -71,7 +67,6 @@ function App() {
   const [newCatInCreate, setNewCatInCreate] = useState(false);
   const [catBusy, setCatBusy] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [unusedMediaOpen, setUnusedMediaOpen] = useState(false);
   const { categories, error: categoryIssue, create: createCategoryEntry, describeError } = useCategories(connectionAttempt);
   const visibleItems = filterByCategory(items, selectedCategory);
   const categoryName = (id: string | null | undefined) => categories.find((c) => c.id === id)?.name;
@@ -116,11 +111,6 @@ function App() {
   }, [items, selectedCategory, playback]);
 
   useEffect(() => {
-    try { setLegacyItems(readLegacyKeepsakes()); }
-    catch (caught) { setMigrationNotice(firebaseError(caught)); }
-  }, []);
-
-  useEffect(() => {
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
     setLoading(true);
@@ -158,22 +148,6 @@ function App() {
   useEffect(() => () => {
     if (voice?.startsWith('blob:')) URL.revokeObjectURL(voice);
   }, [voice]);
-
-  const importLegacy = async () => {
-    if (mutationLock.current) return;
-    mutationLock.current = true;
-    setBusy(true);
-    setMigrationNotice('旧データをFirebaseへ移しています…');
-    try {
-      for (const item of legacyItems) {
-        await saveKeepsake(item, true);
-        setLegacyItems((remaining) => remaining.filter((entry) => entry.id !== item.id));
-      }
-      setMigrationNotice('移行が完了しました。元の端末内データは削除していません。');
-    } catch (caught) {
-      setMigrationNotice(`移行を中断しました。完了分は保存済みです。再実行できます。${firebaseError(caught)}`);
-    } finally { mutationLock.current = false; setBusy(false); }
-  };
 
   const stopPlayback = () => playback.stop();
 
@@ -322,42 +296,22 @@ function App() {
 
   return (
     <div className="app-shell">
-      <header className="topbar" inert={createOpen || !!detail || categoryOpen || unusedMediaOpen}>
+      <header className="topbar" inert={createOpen || !!detail || categoryOpen}>
         <a className="brand" href="/" aria-label="こどもの こえずかん ホーム">
-          <span className="brand-mark"><BookOpen size={23} strokeWidth={1.8} /></span>
-          <span><span className="brand-title">こどもの こえずかん</span><span className="brand-sub">声で集める 世界にひとつのたからもの図鑑</span></span>
+          <span className="brand-mark"><BookOpen size={20} strokeWidth={1.8} /></span>
+          <h1 className="brand-title" style={{ margin: 0 }}>こどもの こえずかん</h1>
         </a>
-        <div className="saved-count" data-testid="text-saved-count">しまってある声 <b className="count-number">{items.reduce((count, item) => count + getVoices(item).length, 0)}</b> こ</div>
+        <button type="button" className="header-create" onClick={openCreate} data-testid="button-create-card"><Plus size={18} /><span>つくる</span></button>
       </header>
 
-      <main className="page-main" inert={createOpen || !!detail || categoryOpen || unusedMediaOpen}>
-        <section className="intro">
-          <div>
-            <h1 className="headline">こどもの こえずかん</h1>
-            <p className="subtitle"><span>声で集める</span>{' '}<span>世界にひとつのたからもの図鑑</span></p>
-            <p className="intro-note">大好きなもの、とっておきのもの<br />見つけたものを声といっしょにキロクしよう</p>
-          </div>
-          <button type="button" className="add-button" onClick={openCreate} data-testid="button-create-card"><Plus size={19} /> 新しいカードをつくる</button>
-        </section>
-
-        <div className="section-top">
-          <h2 className="section-label"><Sparkles size={17} /> わが家のずかん</h2>
-          <span className="section-hint">写真で声をきく・名前で大きく見る</span>
-        </div>
-
+      <main className="page-main" inert={createOpen || !!detail || categoryOpen}>
         <CategoryBar categories={categories} selected={selectedCategory} onSelect={(id) => { stopPlayback(); setSelectedCategory(id); }} onNew={() => setCategoryOpen(true)} disabled={busy} />
-        <button type="button" className="plain-action unused-entry" disabled={busy || loading || !isFirebaseConfigured}
-          onClick={() => setUnusedMediaOpen(true)} data-testid="button-unused-media" style={{ width: 'auto', height: 'auto', maxWidth: '100%', padding: '8px 14px', borderRadius: 20, lineHeight: 1.6 }}>保護者向け：未使用ファイルの確認</button>
         {categoryIssue && <div className="notice" role="alert" data-testid="status-categories-load-error"><AlertCircle size={16} />{categoryIssue}
           <button type="button" className="record-button" onClick={() => setConnectionAttempt((value) => value + 1)} disabled={busy}>再接続</button>
         </div>}
         {storageIssue && <div className="notice" role="alert" data-testid="status-storage-error"><AlertCircle size={16} />{storageIssue}
           {isFirebaseConfigured && <button type="button" className="record-button" onClick={() => setConnectionAttempt((value) => value + 1)} disabled={busy}>再接続</button>}
         </div>}
-        {legacyItems.length > 0 && <div className="notice neutral" role="status">旧データが{legacyItems.length}件あります。元データを残して移行できます。
-          <button type="button" className="record-button" onClick={importLegacy} disabled={busy || loading || !!storageIssue || createOpen || !!detail} data-testid="button-import-legacy">{busy ? '移行中…' : 'Firebaseへ移行'}</button>
-        </div>}
-        {migrationNotice && <p className="notice neutral" role="status">{migrationNotice}</p>}
         {error && !createOpen && !detail && <p className="form-error" role="alert">{error}</p>}
 
         <div id="category-panel" role="tabpanel" aria-labelledby={`category-tab-${selectedCategory ?? 'all'}`}>
@@ -436,7 +390,7 @@ function App() {
             <div className="form-block">
               <div className="record-panel">
                 <div className="record-top">
-                  <div className="record-title"><Mic size={16} /> 声をのこす <span className="record-status">{recording ? `録音中 ${formatTime(recordSeconds)}` : voice ? '録音できました' : 'あとからでも大丈夫'}</span></div>
+                  <div className="record-title"><Mic size={16} /> 声をのこす <span className="record-status" role="status" aria-live="polite">{rec.guiding ? 'これはなーに？' : recording ? `録音中 ${formatTime(recordSeconds)}` : voice ? '録音できました' : 'あとからでも大丈夫'}</span></div>
                   {recording && <div className="recording-wave" aria-label="録音中"><i /><i /><i /><i /><i /><i /><i /></div>}
                 </div>
                 {photo && <RecordingGuide photo={photo} name={itemName} phase={rec.guiding ? 'guide' : recording ? 'recording' : 'idle'} />}
@@ -459,7 +413,7 @@ function App() {
               {(!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') && <div className="notice" role="status" data-testid="status-unsupported-browser"><CircleHelp size={16} />このブラウザでは録音できません。録音以外のカード機能はお使いいただけます。</div>}
               {recording && <p className="sr-only" aria-live="polite">録音中です。録音時間 {formatTime(recordSeconds)}</p>}
               {processingVoice && <p className="notice neutral" role="status">音声を準備しています。録音後は冒頭の無音をカットします…</p>}
-              <p className="field-hint">{!photo ? '先に写真をえらぼう。' : '合図のあとに話してね。'}録音は最大60秒。</p>
+              <p className="field-hint">{!photo ? '先に写真をえらぼう。' : '「これはなーに？」が終わったら話してね。'}録音は最大60秒。</p>
             </div>
             {error && <p className="form-error" role="alert" data-testid="status-form-error">{error}</p>}
             <div className="dialog-actions">
@@ -522,8 +476,6 @@ function App() {
           onCreated={(made) => { setCardCategory(made.id); setNewCatInCreate(false); }}
         />
       )}
-      {unusedMediaOpen && <UnusedMediaDialog onClose={() => setUnusedMediaOpen(false)}
-        inspectUnusedMedia={inspectUnusedMedia} deleteUnusedMedia={deleteUnusedMedia} describeError={firebaseError} />}
 
       {editOpen && detail && (
         <EditCardDialog

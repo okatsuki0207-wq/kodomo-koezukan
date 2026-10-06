@@ -14,7 +14,7 @@ function Character() {
       <circle cx="38" cy="50" r="4.5" fill="#493d33" />
       <circle cx="62" cy="50" r="4.5" fill="#493d33" />
       <ellipse cx="50" cy="62" rx="8" ry="6" fill="#bd7057" />
-      <path d="M42 72 Q50 80 58 72" fill="none" stroke="#493d33" strokeWidth="2.5" strokeLinecap="round" />
+      <path className="rg-mouth" d="M42 72 Q50 80 58 72" fill="none" stroke="#493d33" strokeWidth="2.5" strokeLinecap="round" />
       <circle cx="28" cy="64" r="5" fill="#f0b7a2" opacity=".7" />
       <circle cx="72" cy="64" r="5" fill="#f0b7a2" opacity=".7" />
     </svg>
@@ -29,14 +29,14 @@ export default function RecordingGuide({ photo, phase, name }: Props) {
         {phase === 'guide' && (
           <div className="rg-guide">
             <Character />
-            <div className="rg-bubble" data-testid="text-guide-bubble">これなーに？</div>
+            <div className="rg-bubble" data-testid="text-guide-bubble">これはなーに？</div>
           </div>
         )}
       </div>
       {name && <p className="rg-name">{name}</p>}
-      {phase === 'guide' && <p className="rg-cue" role="status">合図のあとに話してね</p>}
+      {phase === 'guide' && <p className="rg-cue" role="status">くまさんがお話し中。終わったら話してね</p>}
       {phase === 'recording' && (
-        <p className="rg-cue" role="status"><span className="rg-rec"><span className="rg-dot" /><Mic size={16} />録音中</span></p>
+        <p className="rg-cue" role="status"><span className="rg-rec"><span className="rg-dot" /><Mic size={16} />聴いているよ・録音中</span></p>
       )}
     </div>
   );

@@ -98,7 +98,7 @@ export function createKeepsakeRepository(
       if (error instanceof FirebaseTimeoutError || uploaded.length === 0) throw error;
       // An interrupted commit can finish later. Only a definite rules rejection is safe to roll back.
       if (commitStarted && (error as { code?: string }).code !== 'permission-denied') {
-        throw new Error('保存結果を確認できませんでした。再接続後に一覧を確認してください。結果不明のファイルは安全のため保持します。保護者向けの「未使用ファイルの確認」で確認できます。');
+        throw new Error('保存結果を確認できませんでした。再接続後に一覧を確認してください。結果不明のファイルは安全のため保持します。');
       }
       // If acknowledgement was lost, keep any files referenced by the committed card.
       // If the result cannot be read, preserve all files rather than risk data loss.

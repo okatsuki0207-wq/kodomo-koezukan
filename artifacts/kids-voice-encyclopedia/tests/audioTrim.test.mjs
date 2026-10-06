@@ -123,17 +123,9 @@ test('preload metadata is bounded and playback failures clear the active state',
   p.dispose();
 });
 
-test('recording cue completes only after oscillator end and acoustic tail; cancellation settles immediately', async () => {
-  const osc = { frequency: { setValueAtTime() {} }, connect() {}, disconnect() {}, start() {}, stop() {}, onended: null };
-  const context = { currentTime: 0, destination: {}, createOscillator: () => osc,
-    createGain: () => ({ gain: { setValueAtTime() {}, linearRampToValueAtTime() {} }, connect() {}, disconnect() {} }) };
-  const cue = recordingCue(context);
-  let finished = false;
-  cue.finished.then(() => { finished = true; });
-  await Promise.resolve(); assert.equal(finished, false);
-  osc.onended();
-  await Promise.resolve(); assert.equal(finished, false);
-  await cue.finished; assert.equal(finished, true);
-  const second = recordingCue(context);
-  second.cancel(); await second.finished;
+test('guide playback rejection does not fall back to a beep or successful recording cue', async () => {
+  const audio = { onended: null, onerror: null, pause() {}, load() {}, removeAttribute() {},
+    play() { return Promise.reject(new Error('autoplay denied')); } };
+  const cue = recordingCue('/guide.mp3', () => audio);
+  await assert.rejects(cue.finished, /ガイドボイスを再生できません/);
 });

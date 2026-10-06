@@ -78,10 +78,17 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
       // Unlock Web Audio synchronously in the tap gesture, before microphone
       // permission or any other asynchronous work (important on iPhone).
       const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!Ctx) throw new Error('このブラウザでは録音の合図音を準備できません。');
+      if (!Ctx) throw new Error('このブラウザではガイドボイスと録音を準備できません。');
       const ctx = new Ctx();
       audioCtx.current = ctx;
       const ready = ctx.resume().then(() => null, (error: unknown) => error);
+      setGuiding(true);
+      cue.current = recordingCue();
+      // Attach rejection immediately: permission dialogs can outlast the guide.
+      const guideReady = cue.current.finished.then(
+        () => { if (mine === session.current) setGuiding(false); return null; },
+        (error: unknown) => error,
+      );
       acquired = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (mine !== session.current) { acquired.getTracks().forEach((t) => t.stop()); return; }
       stream.current = acquired;
@@ -89,11 +96,10 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
       if (mine !== session.current) return;
       if (resumeError === null && ctx.state !== 'running') await ctx.resume();
       if (mine !== session.current) return;
-      if (resumeError !== null || ctx.state !== 'running') throw new Error('合図音を再生できませんでした。もう一度録音ボタンを押してください。');
-      setGuiding(true);
-      cue.current = recordingCue(ctx);
-      await cue.current.finished;
+      if (resumeError !== null || ctx.state !== 'running') throw new Error('ガイドボイスと録音を準備できませんでした。もう一度録音ボタンを押してください。');
+      const guideError = await guideReady;
       if (mine !== session.current) return;
+      if (guideError !== null) throw guideError;
       cue.current = null; setGuiding(false);
       const mime = pickMime();
       const rec = mime ? new MediaRecorder(acquired, { mimeType: mime }) : new MediaRecorder(acquired);
@@ -149,7 +155,7 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
       const denied = caught instanceof DOMException && (caught.name === 'NotAllowedError' || caught.name === 'PermissionDeniedError');
       setError(denied
         ? 'マイクが使えませんでした。端末の設定でマイクを許可すると録音できます。'
-        : caught instanceof Error && caught.message.includes('合図音') ? caught.message : 'マイクにつながりませんでした。もう一度お試しください。');
+        : caught instanceof Error && caught.message.includes('ガイドボイス') ? caught.message : 'マイクにつながりませんでした。もう一度お試しください。');
     }
   }, [release, stop]);
 

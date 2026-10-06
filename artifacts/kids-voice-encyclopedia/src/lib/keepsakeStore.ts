@@ -1,7 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { indexedDBLocalPersistence, initializeAuth, signInAnonymously } from 'firebase/auth';
 import { collection, doc, getFirestore, onSnapshot, orderBy, query, runTransaction, serverTimestamp, updateDoc } from 'firebase/firestore';
-import { getStorage } from 'firebase/storage';
+import { getDownloadURL, getStorage, ref } from 'firebase/storage';
 import { firebaseConfig, isFirebaseConfigured } from '../firebaseConfig';
 import { storageFailureMessage } from './storageDiagnostics';
 import { createKeepsakeRepository, FirebaseTimeoutError } from './keepsakeRepository';
@@ -43,6 +43,14 @@ async function userId(): Promise<string> {
 const repository = createKeepsakeRepository(db!, storage!, userId);
 export const { saveKeepsake, deleteKeepsake, subscribeKeepsakes } = repository;
 export const { editKeepsake } = createKeepsakeEditor(db!, storage!, userId);
+/** Read-only link refresh for saved voices; never access another user's paths. */
+export async function refreshVoiceDownloadUrl(path: string): Promise<string> {
+  const uid = await userId();
+  if (!storage || !path.startsWith(`users/${uid}/keepsakes/`) || path.includes('..')) {
+    throw new Error('保存済み音声の参照先を確認できません。元の音声は変更していません。');
+  }
+  return deadline(getDownloadURL(ref(storage, path)), 20_000);
+}
 // Deferred construction avoids touching an unconfigured Storage instance at module load.
 export async function inspectUnusedMedia() {
   await userId();
