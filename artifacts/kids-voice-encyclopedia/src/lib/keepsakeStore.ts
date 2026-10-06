@@ -3,6 +3,7 @@ import { indexedDBLocalPersistence, initializeAuth, signInAnonymously } from 'fi
 import { collection, deleteDoc, doc, getDoc, getFirestore, onSnapshot, orderBy, query, serverTimestamp, setDoc } from 'firebase/firestore';
 import { deleteObject, getDownloadURL, getStorage, ref, uploadBytes } from 'firebase/storage';
 import { firebaseConfig, isFirebaseConfigured } from '../firebaseConfig';
+import { diagnoseStorageError, storageFailureMessage } from './storageDiagnostics';
 
 export type Keepsake = {
   id: string;
@@ -86,12 +87,21 @@ export async function saveKeepsake(item: Keepsake, migrating = false): Promise<v
       if (!response.ok) throw new Error('画像または音声を読み込めませんでした。');
       const blob = await response.blob();
       if (!blob.type.startsWith(kind === 'photo' ? 'image/' : 'audio/')) throw new Error('ファイル形式が正しくありません。');
-      if (blob.size > 20 * 1024 * 1024) throw new Error('ファイルは20MB以内にしてください。');
+      if (!blob.size) throw new Error('ファイルが空です。写真または音声を選び直してください。');
+      if (blob.size >= 20 * 1024 * 1024) throw new Error('ファイルは20MB未満にしてください。');
       const path = `users/${uid}/keepsakes/${item.id}/${kind}`;
       const file = ref(storage!, path);
-      await uploadBytes(file, blob, { contentType: blob.type });
+      try {
+        await uploadBytes(file, blob, { contentType: blob.type });
+      } catch (error) {
+        throw await diagnoseStorageError(error, file.bucket);
+      }
       uploaded.push(path);
-      return { url: await getDownloadURL(file), path };
+      try {
+        return { url: await getDownloadURL(file), path };
+      } catch (error) {
+        throw await diagnoseStorageError(error, file.bucket);
+      }
     };
     const photo = await put(item.photo, 'photo');
     const voice = item.voice ? await put(item.voice, 'voice') : null;
@@ -126,10 +136,8 @@ export async function deleteKeepsake(item: Keepsake): Promise<void> {
 
 export function firebaseError(error: unknown): string {
   const code = (error as { code?: string })?.code ?? '';
-  const response = (error as { customData?: { serverResponse?: string } })?.customData?.serverResponse ?? '';
-  if (code.startsWith('storage/') && response.includes('has not been set up properly for Firebase Storage')) {
-    return 'Storageバケット kids_voice_zukan のFirebase設定が未完了です。Firebase ConsoleのStorageでこのバケットを選び、firebase/storage.rules のルールを公開してください。';
-  }
+  const storageMessage = storageFailureMessage(error, firebaseConfig.storageBucket!);
+  if (storageMessage) return storageMessage;
   if (code.includes('configuration-not-found')) return 'Firebase Authentication が未設定です。Firebase ConsoleでAuthenticationの「始める」を押し、ログイン方法の「匿名」を有効にしてから再接続してください。';
   if (code.includes('permission-denied') || code.includes('unauthorized')) return 'Firebase のアクセス権限がありません。Firestore / Storage のルールとBlazeプランをご確認ください。';
   if (code.includes('operation-not-allowed')) return 'Firebase Authentication の匿名ログインを有効にしてください。';

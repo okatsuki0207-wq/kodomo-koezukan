@@ -47,6 +47,7 @@ Cloud Storage for Firebaseは現在Blazeプランと課金アカウント登録�
 データ移行と再生を確認した後、不要なら自分で旧ブラウザデータを削除してください。
 
 ## Google Cloud Consoleで作成したバケット
+詳細な切り分けとCloud Shellコマンドは `firebase/STORAGE_TROUBLESHOOTING.md` を参照してください。
 `kids_voice_zukan` は対象Firebaseプロジェクトに関連付けて利用してください。
 GCSに作成しただけではFirebase SDKから利用できるとは限りません。
 Firebase ConsoleのStorageで既存バケットを取り込み、Firebaseのサービスエージェントに必要な権限を付与し、

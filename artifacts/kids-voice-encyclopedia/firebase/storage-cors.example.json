@@ -1,0 +1,27 @@
+[
+  {
+    "origin": [
+      "https://YOUR-DEVELOPMENT-DOMAIN.replit.dev",
+      "https://YOUR-PUBLISHED-DOMAIN"
+    ],
+    "method": ["GET", "HEAD", "POST", "PUT", "DELETE"],
+    "responseHeader": [
+      "Authorization",
+      "Content-Type",
+      "Content-Length",
+      "Range",
+      "ETag",
+      "X-Firebase-Storage-Version",
+      "X-Firebase-GMPID",
+      "X-Firebase-AppCheck",
+      "X-Goog-Upload-Protocol",
+      "X-Goog-Upload-Command",
+      "X-Goog-Upload-Header-Content-Length",
+      "X-Goog-Upload-Header-Content-Type",
+      "X-Goog-Upload-URL",
+      "X-Goog-Upload-Status",
+      "X-Goog-Upload-Size-Received"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]

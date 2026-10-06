@@ -1,2 +1,3 @@
 - [AI photo library licensing](ai-photo-licensing.md) — browser background removal uses an Apache-licensed library/model to avoid IMG.LY's AGPL obligations.
 - [Firebase privacy](firebase-privacy.md) — cloud migration does not authorize public sharing; keep child photos and voices separated by user.
+- [Firebase Storage diagnosis](firebase-storage-diagnostics.md) — storage/unknown without a response body does not prove a CORS failure; corroborate bucket setup safely.
