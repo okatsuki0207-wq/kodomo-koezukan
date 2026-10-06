@@ -16,6 +16,15 @@ test('long press tolerates small finger jitter but cancels drags and scroll-size
   assert.equal(gesture.movedTooFar(0, 0, 8, 8), true);
   assert.equal(gesture.movedTooFar(20, 20, 20, -1), true);
 });
+test('child touch taps tolerate 25px final displacement even after native scrolling, but not long presses or cancelled gestures', () => {
+  assert.equal(gesture.TOUCH_TAP_SLOP, 25);
+  assert.equal(gesture.isChildTap(0, 0, 15, 20), true);
+  assert.equal(gesture.isChildTap(0, 0, 0, 25), true);
+  assert.equal(gesture.isChildTap(0, 0, 20, 20), false);
+  assert.equal(gesture.isChildTap(0, 0, 0, 26), false);
+  assert.equal(gesture.isChildTap(0, 0, 0, 0, true), false);
+  assert.equal(gesture.isChildTap(0, 0, 0, 0, false, true), false);
+});
 test('AI selection intersection cannot restore outside-lasso pixels, retains original colour and alpha', () => {
   const original = new Uint8ClampedArray([99, 66, 22, 0, 180, 30, 20, 255, 12, 90, 70, 128]);
   const mask = new Uint8ClampedArray([1, 2, 3, 255, 1, 2, 3, 128, 1, 2, 3, 255]);

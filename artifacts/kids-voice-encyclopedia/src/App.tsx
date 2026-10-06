@@ -23,7 +23,6 @@ import { useLongPress } from './hooks/useLongPress';
 import CategorySelect from './components/CategorySelect';
 import EditCardDialog from './components/EditCardDialog';
 import RecordingGuide from './components/RecordingGuide';
-import VoiceTrimEditor from './components/VoiceTrimEditor';
 import { useEditRecording } from './hooks/useEditRecording';
 import { randomVoice, VoicePlayback } from './lib/voicePlayback';
 import DetailDialogShell from './components/DetailDialogShell';
@@ -53,7 +52,6 @@ function App() {
   const [photo, setPhoto] = useState('');
   const [photoEditorSource, setPhotoEditorSource] = useState('');
   const [voice, setVoice] = useState<string | null>(null);
-  const [trimPending, setTrimPending] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [playing, setPlaying] = useState(false);
@@ -97,7 +95,7 @@ function App() {
         const trimmed = await trimLeadingSilence(blob);
         if (session === recordingSession.current) {
           setVoice(URL.createObjectURL(trimmed));
-          setNotice('冒頭の無音をカットしました。波形で前後を調整できます。');
+          setNotice('声を録音しました。このままカードを保存できます。');
         }
       } catch (caught) {
         if (session === recordingSession.current) setError(caught instanceof Error ? caught.message : '録音を処理できませんでした。');
@@ -182,7 +180,7 @@ function App() {
   const longPress = useLongPress<Keepsake>((item) => {
     const current = items.find((entry) => entry.id === item.id);
     if (!mutationLock.current && current) openDetail(current);
-  });
+  }, undefined, (item) => playKeepsake(item));
   const closeDetail = () => { if (mutationLock.current) return; stopPlayback(); setDetail(null); setEditOpen(false); setConfirmDelete(false); };
 
   const changeDetailCategory = async (categoryId: string | null) => {
@@ -229,7 +227,6 @@ function App() {
     setError('');
     setNotice('');
     rec.setError('');
-    setTrimPending(false);
     setCreateOpen(true);
   };
 
@@ -265,7 +262,7 @@ function App() {
   };
 
   const startRecording = () => {
-    if (processingVoice || busy || recording || rec.starting || trimPending || !photo) return;
+    if (processingVoice || busy || recording || rec.starting || !photo) return;
     recordingSession.current++;
     stopPlayback(); setError(''); setNotice('');
     void rec.start();
@@ -273,7 +270,7 @@ function App() {
   const stopRecording = rec.stop;
 
   const saveCard = async () => {
-    if (mutationLock.current || recording || processingVoice || rec.starting || trimPending) return;
+    if (mutationLock.current || recording || processingVoice || rec.starting) return;
     const cleanItemName = itemName.trim();
     if (!cleanItemName) {
       setError('図鑑に登録するモノの名前を入力してください。');
@@ -393,6 +390,7 @@ function App() {
                   {item.photo
                     ? <img className="sticker-photo" src={item.photo} alt={`${item.itemName}の写真`} data-testid={`img-sticker-${item.id}`} />
                     : <ImageIcon size={44} />}
+                  {playing && playingItemId === item.id && <span className="voice-notes" aria-hidden="true"><span>♪</span><span>♫</span><span>♪</span></span>}
                 </button>
                 <button type="button" className="sticker-name" onClick={() => openDetail(item)} aria-label={`${item.itemName}の写真を大きく表示`} data-testid={`button-detail-${item.id}`}>
                   {item.itemName}
@@ -446,26 +444,27 @@ function App() {
                   {recording ? (
                     <button type="button" className="record-button danger" onClick={stopRecording} data-testid="button-stop-recording"><span className="recording-dot" /> 録音をとめる</button>
                   ) : (
-                    <button type="button" className="record-button primary" disabled={processingVoice || busy || rec.starting || trimPending || !photo} onClick={startRecording} data-testid="button-start-recording"><Mic size={15} /> {rec.starting ? '録音の準備中…' : processingVoice ? '音声を準備しています…' : voice ? 'もう一度録音' : '録音する'}</button>
+                    <button type="button" className="record-button primary" disabled={processingVoice || busy || rec.starting || !photo} onClick={startRecording} data-testid="button-start-recording"><Mic size={15} /> {rec.starting ? '録音の準備中…' : processingVoice ? '音声を準備しています…' : voice ? 'もう一度録音' : '録音する'}</button>
                   )}
                   {rec.starting && <button type="button" className="record-button" onClick={rec.cancel}>やめる</button>}
                   {voice && !recording && !processingVoice && !rec.starting && <>
+                    <button type="button" className="record-button" disabled={busy} onClick={() => playback.play(voice, 'voice-preview')} data-testid="button-preview-recording">{playing && playingUrl === voice ? <Pause size={15} /> : <Play size={15} />}{playing && playingUrl === voice ? 'とめる' : '声をきく'}</button>
                     <button type="button" className="record-button" disabled={busy} onClick={() => { stopPlayback(); setVoice(null); setNotice('録音を消しました。'); }} aria-label="録音を消す" data-testid="button-remove-recording"><RotateCcw size={15} /></button>
                   </>}
                 </div>
-                {voice && !recording && !rec.starting && !processingVoice && <VoiceTrimEditor source={voice} disabled={busy} onPendingChange={setTrimPending} onBeforePreview={stopPlayback} onApply={(blob) => { stopPlayback(); setVoice(URL.createObjectURL(blob)); setNotice('選んだ範囲を声に設定しました。'); }} />}
+                <p className="field-hint">※録音した声は、後から図鑑カード長押しで編集できます</p>
               </div>
               {rec.error && <div className="notice" role="status" data-testid="status-microphone">{<CircleHelp size={16} />}{rec.error}</div>}
               {notice && !rec.error && <div className="notice neutral" role="status"><Check size={15} />{notice}</div>}
               {(!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') && <div className="notice" role="status" data-testid="status-unsupported-browser"><CircleHelp size={16} />このブラウザでは録音できません。録音以外のカード機能はお使いいただけます。</div>}
               {recording && <p className="sr-only" aria-live="polite">録音中です。録音時間 {formatTime(recordSeconds)}</p>}
               {processingVoice && <p className="notice neutral" role="status">音声を準備しています。録音後は冒頭の無音をカットします…</p>}
-              <p className="field-hint">{!photo ? '先に写真をえらぼう。' : '合図のあとに話してね。'}録音は最大60秒。録音後に波形で前後をカットできます。</p>
+              <p className="field-hint">{!photo ? '先に写真をえらぼう。' : '合図のあとに話してね。'}録音は最大60秒。</p>
             </div>
             {error && <p className="form-error" role="alert" data-testid="status-form-error">{error}</p>}
             <div className="dialog-actions">
               <button type="button" className="cancel-button" disabled={busy} onClick={closeCreate} data-testid="button-cancel-create">あとで</button>
-              <button type="button" className="save-button" onClick={saveCard} disabled={recording || rec.starting || trimPending || processingVoice || busy || !isFirebaseConfigured || !!storageIssue || loading} data-testid="button-save-card"><Check size={16} /> {busy ? 'Firebaseに保存中…' : 'このカードをしまう'}</button>
+              <button type="button" className="save-button" onClick={saveCard} disabled={recording || rec.starting || processingVoice || busy || !isFirebaseConfigured || !!storageIssue || loading} data-testid="button-save-card"><Check size={16} /> {busy ? 'Firebaseに保存中…' : 'このカードをしまう'}</button>
             </div>
             {!isFirebaseConfigured && <p className="form-error" role="status">保存にはFirebaseの設定が必要です。src/firebaseConfig.ts をご確認ください。</p>}
           </DetailDialogShell>

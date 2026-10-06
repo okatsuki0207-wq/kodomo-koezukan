@@ -84,11 +84,10 @@ export default function EditCardDialog({ item, categories, onSave, describeError
         return { ...s, url, replaced: true };
       });
     });
-    setTrimKey(key);
   }, []);
 
   const processBlob = useCallback(async (key: string, blob: Blob, session: number) => {
-    setProcessing(true); setVoiceError('');
+    setTrimKey(null); setProcessing(true); setVoiceError('');
     try {
       if (!blob.size) throw new Error('音声が空でした。');
       const trimmed = await trimLeadingSilence(blob);
@@ -257,6 +256,7 @@ export default function EditCardDialog({ item, categories, onSave, describeError
             <span className="field-label"><Mic size={14} /> 声（{slots.length}/{MAX_VOICES}）</span>
             <input ref={audioInput} className="sr-only" type="file" accept="audio/*" tabIndex={-1} disabled={mediaLocked} onChange={onAudioFile} aria-label="音声ファイルを選ぶ" data-testid="input-edit-audio" />
             {(rec.starting || rec.recording) && <RecordingGuide photo={previewPhoto} name={name} phase={rec.guiding ? 'guide' : rec.recording ? 'recording' : 'idle'} />}
+            <p className="field-hint">※録音した声は、後から図鑑カード長押しで編集できます</p>
             {slots.length === 0 && <p className="field-hint">まだ声がありません。録音するか、音声ファイルを追加できます。</p>}
             <ul className="em-voices">
               {slots.map((slot, index) => {

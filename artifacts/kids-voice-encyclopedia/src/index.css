@@ -287,13 +287,21 @@ button:disabled {cursor:not-allowed;opacity:.55;}
 
 /* 再生中フィードバック（待機時は変化なし） */
 .sticker-item { position: relative; }
-.sticker-photo-button { transition: transform .22s ease, box-shadow .22s ease; border-radius: 18px; }
+.sticker-photo-button { transition: transform .22s ease; border-radius: 18px; overflow: visible; -webkit-tap-highlight-color: transparent; }
+.sticker-photo-button:focus:not(:focus-visible) { outline: none; }
+.sticker-photo-button:focus-visible { outline: 2px dashed #9c5947; outline-offset: 6px; }
 .sticker-item.is-playing { position: relative; z-index: 3; }
-.sticker-item.is-playing .sticker-photo-button { transform: scale(1.2); box-shadow: 0 0 0 4px #bd7057; animation: voice-sway .7s ease-in-out infinite; }
+.sticker-item.is-playing .sticker-photo-button { transform: scale(1.2); box-shadow: none; animation: voice-sway .7s ease-in-out infinite; }
+.voice-notes { position: absolute; inset: 0; pointer-events: none; }
+.voice-notes > span { position: absolute; top: 0; left: 45%; color: #e3ad9b; font-size: 23px; font-weight: 700; opacity: 0; animation: voice-note-rise 1.35s ease-out both; }
+.voice-notes > span:nth-child(2) { left: 67%; color: #a8bc9d; animation-delay: .15s; --note-x: 15px; }
+.voice-notes > span:nth-child(3) { left: 25%; color: #dfc27d; animation-delay: .3s; --note-x: -12px; }
+@keyframes voice-note-rise { 0% { opacity: 0; transform: translate(0, 8px) rotate(-8deg) scale(.7); } 20% { opacity: .95; } 100% { opacity: 0; transform: translate(var(--note-x, -6px), -45px) rotate(12deg) scale(1.1); } }
 .play-badge { position: absolute; left: 50%; top: 4px; transform: translateX(-50%); padding: 2px 10px; border-radius: 999px; background: rgba(255,250,240,.95); font-size: 11px; font-weight: 700; color: #bd7057; pointer-events: none; white-space: nowrap; }
 .sticker-item.is-playing .play-badge { min-height: 0; }
 .play-badge:empty { display: none; }
 @keyframes voice-sway { 0%,100% { transform: scale(1.2) rotate(-5deg); } 50% { transform: scale(1.2) rotate(5deg); } }
 @media (prefers-reduced-motion: reduce) {
   .sticker-item.is-playing .sticker-photo-button { animation: none; transition: none; }
+  .voice-notes > span { animation: none; opacity: .85; transform: translateY(-16px); }
 }
