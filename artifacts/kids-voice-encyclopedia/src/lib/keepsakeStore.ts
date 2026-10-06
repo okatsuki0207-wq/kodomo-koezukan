@@ -1,9 +1,10 @@
 import { initializeApp } from 'firebase/app';
 import { indexedDBLocalPersistence, initializeAuth, signInAnonymously } from 'firebase/auth';
-import { collection, deleteDoc, doc, getDoc, getFirestore, onSnapshot, orderBy, query, serverTimestamp, setDoc } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDoc, getFirestore, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { deleteObject, getDownloadURL, getStorage, ref, uploadBytes } from 'firebase/storage';
 import { firebaseConfig, isFirebaseConfigured } from '../firebaseConfig';
 import { diagnoseStorageError, storageFailureMessage } from './storageDiagnostics';
+import { categoryIdForName, DEFAULT_CATEGORIES, keepsakeMetadata, validateCategoryName, type Category } from './categories';
 
 export type Keepsake = {
   id: string;
@@ -13,6 +14,7 @@ export type Keepsake = {
   createdAt: number;
   photoPath?: string;
   voicePath?: string | null;
+  categoryId?: string | null;
 };
 
 const app = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
@@ -58,10 +60,48 @@ export async function subscribeKeepsakes(
       return {
         id: record.id, itemName: value.itemName, photo: value.photo, voice: value.voice ?? null,
         photoPath: value.photoPath, voicePath: value.voicePath ?? null,
+        categoryId: value.categoryId ?? null,
         createdAt: value.createdAt?.toMillis?.() ?? Date.now(),
       };
     }));
   }, onError);
+}
+
+/** カテゴリも匿名認証UID配下で分離。既定のページはクラウド書き込み不要。 */
+export async function subscribeCategories(
+  onChange: (categories: Category[]) => void,
+  onError: (error: unknown) => void,
+): Promise<() => void> {
+  const uid = await userId();
+  return onSnapshot(query(collection(db!, 'users', uid, 'categories'), orderBy('createdAt', 'asc')), (snapshot) => {
+    onChange([
+      ...DEFAULT_CATEGORIES,
+      ...snapshot.docs.map((record) => ({
+        id: record.id, name: String(record.data().name),
+        createdAt: record.data().createdAt?.toMillis?.() ?? 0,
+      })),
+    ]);
+  }, onError);
+}
+
+export async function createCategory(name: string): Promise<Category> {
+  const clean = validateCategoryName(name);
+  const id = await categoryIdForName(clean);
+  const uid = await userId();
+  const record = doc(db!, 'users', uid, 'categories', id);
+  return deadline(runTransaction(db!, async (transaction) => {
+    const existing = await transaction.get(record);
+    if (existing.exists()) return { id, name: String(existing.data().name) };
+    transaction.set(record, { name: clean, createdAt: serverTimestamp() });
+    return { id, name: clean };
+  }));
+}
+
+/** 分類・名前だけの編集。ファイルの再アップロード・置換・削除は行わない。 */
+export async function updateKeepsakeMetadata(id: string, itemName: string, categoryId: string | null): Promise<void> {
+  const patch = keepsakeMetadata(itemName, categoryId);
+  const uid = await userId();
+  await deadline(updateDoc(doc(db!, 'users', uid, 'keepsakes', id), patch));
 }
 
 async function removeFile(path: string, downloadUrl?: string) {
@@ -77,6 +117,7 @@ async function removeFile(path: string, downloadUrl?: string) {
 
 /** ファイルを先にアップロード。Firestore 確定前に失敗したらアップロードを片付ける。 */
 export async function saveKeepsake(item: Keepsake, migrating = false): Promise<void> {
+  const metadata = keepsakeMetadata(item.itemName, item.categoryId ?? null);
   const uid = await userId();
   const record = doc(db!, 'users', uid, 'keepsakes', item.id);
   if (migrating && (await deadline(getDoc(record), 12_000)).exists()) return; // 移行の再実行は重複させない。
@@ -106,7 +147,8 @@ export async function saveKeepsake(item: Keepsake, migrating = false): Promise<v
     const photo = await put(item.photo, 'photo');
     const voice = item.voice ? await put(item.voice, 'voice') : null;
     await deadline(setDoc(record, {
-      itemName: item.itemName, photo: photo.url, voice: voice?.url ?? null,
+      itemName: metadata.itemName, photo: photo.url, voice: voice?.url ?? null,
+      ...(metadata.categoryId ? { categoryId: metadata.categoryId } : {}),
       photoPath: photo.path, voicePath: voice?.path ?? null,
       createdAt: migrating ? new Date(item.createdAt) : serverTimestamp(),
     }));

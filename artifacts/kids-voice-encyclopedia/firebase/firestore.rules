@@ -3,19 +3,47 @@ service cloud.firestore {
   match /databases/{database}/documents {
     match /users/{uid}/keepsakes/{id} {
       function owner() { return request.auth != null && request.auth.uid == uid; }
+      function categoryValid(data) {
+        return !('categoryId' in data) || data.categoryId == null ||
+          (data.categoryId is string &&
+            (data.categoryId in ['default-toys', 'default-animals', 'default-artworks'] ||
+              exists(/databases/$(database)/documents/users/$(uid)/categories/$(data.categoryId))));
+      }
+      function nameValid(data) {
+        return data.itemName is string && data.itemName.size() > 0 && data.itemName.size() <= 48;
+      }
+      function completeCardValid(data) {
+        return data.keys().hasAll(['itemName', 'photo', 'voice', 'photoPath', 'voicePath', 'createdAt'])
+          && data.keys().hasOnly(['itemName', 'photo', 'voice', 'photoPath', 'voicePath', 'createdAt', 'categoryId'])
+          && nameValid(data) && categoryValid(data)
+          && data.photo is string
+          && data.photo.matches('https://firebasestorage.googleapis.com/.*')
+          && data.photoPath == 'users/' + uid + '/keepsakes/' + id + '/photo'
+          && (data.voice == null ||
+            (data.voice is string && data.voice.matches('https://firebasestorage.googleapis.com/.*')))
+          && (data.voicePath == null ||
+            data.voicePath == 'users/' + uid + '/keepsakes/' + id + '/voice')
+          && data.createdAt is timestamp;
+      }
+      function metadataOnlyUpdate() {
+        // 旧カードのファイル情報が古い形式でも、既存メディアを変えずに分類できる。
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['itemName', 'categoryId'])
+          && nameValid(request.resource.data) && categoryValid(request.resource.data);
+      }
       allow read, delete: if owner();
-      allow create, update: if owner()
-        && request.resource.data.keys().hasOnly(['itemName', 'photo', 'voice', 'photoPath', 'voicePath', 'createdAt'])
-        && request.resource.data.itemName is string
-        && request.resource.data.itemName.size() > 0
-        && request.resource.data.itemName.size() <= 48
-        && request.resource.data.photo is string
-        && request.resource.data.photo.matches('https://firebasestorage.googleapis.com/.*')
-        && request.resource.data.photoPath == 'users/' + uid + '/keepsakes/' + id + '/photo'
-        && (request.resource.data.voice == null ||
-          (request.resource.data.voice is string && request.resource.data.voice.matches('https://firebasestorage.googleapis.com/.*')))
-        && (request.resource.data.voicePath == null ||
-          request.resource.data.voicePath == 'users/' + uid + '/keepsakes/' + id + '/voice')
+      allow create: if owner() && completeCardValid(request.resource.data);
+      allow update: if owner() && (metadataOnlyUpdate() || completeCardValid(request.resource.data));
+    }
+    match /users/{uid}/categories/{id} {
+      function owner() { return request.auth != null && request.auth.uid == uid; }
+      allow read: if owner();
+      allow create: if owner()
+        && id.matches('custom-[a-f0-9]{64}')
+        && request.resource.data.keys().hasAll(['name', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['name', 'createdAt'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 24
         && request.resource.data.createdAt is timestamp;
     }
   }

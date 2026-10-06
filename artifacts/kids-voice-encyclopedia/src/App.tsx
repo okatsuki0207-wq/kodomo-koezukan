@@ -8,6 +8,7 @@ import {
   Image as ImageIcon,
   Mic,
   Pause,
+  Pencil,
   Play,
   Plus,
   RotateCcw,
@@ -16,7 +17,13 @@ import {
   X,
 } from 'lucide-react';
 import PhotoEditor from './components/PhotoEditor';
-import { deleteKeepsake, firebaseError, saveKeepsake, subscribeKeepsakes, type Keepsake } from './lib/keepsakeStore';
+import CategoryBar from './components/CategoryBar';
+import CategoryDialog from './components/CategoryDialog';
+import CategorySelect from './components/CategorySelect';
+import EditCardDialog from './components/EditCardDialog';
+import { useCategories } from './hooks/useCategories';
+import { filterByCategory } from './lib/categories';
+import { deleteKeepsake, firebaseError, saveKeepsake, subscribeKeepsakes, updateKeepsakeMetadata, type Keepsake } from './lib/keepsakeStore';
 import { readLegacyKeepsakes } from './lib/legacyImport';
 import { trimLeadingSilence } from './lib/audioTrim';
 import { isFirebaseConfigured } from './firebaseConfig';
@@ -49,6 +56,13 @@ function App() {
   const [legacyItems, setLegacyItems] = useState<Keepsake[]>([]);
   const [migrationNotice, setMigrationNotice] = useState('');
   const [connectionAttempt, setConnectionAttempt] = useState(0);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [cardCategory, setCardCategory] = useState<string | null>(null);
+  const [categoryOpen, setCategoryOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const { categories, error: categoryIssue, create: createCategoryEntry, describeError } = useCategories(connectionAttempt);
+  const visibleItems = filterByCategory(items, selectedCategory);
+  const categoryName = (id: string | null | undefined) => categories.find((c) => c.id === id)?.name;
   const recordingSession = useRef(0);
   const pendingId = useRef<string | null>(null);
   const mutationLock = useRef(false);
@@ -162,6 +176,7 @@ function App() {
     stopPlayback();
     setError('');
     setDetail(item);
+    setEditOpen(false);
     setConfirmDelete(false);
   };
 
@@ -178,6 +193,7 @@ function App() {
     if (busy) return;
     pendingId.current = null;
     setItemName('');
+    setCardCategory(selectedCategory);
     setPhoto('');
     setPhotoEditorSource('');
     setVoice(null);
@@ -335,7 +351,7 @@ function App() {
     setError('');
     pendingId.current ??= crypto.randomUUID();
     try {
-      await saveKeepsake({ id: pendingId.current, itemName: cleanItemName, photo, voice, createdAt: Date.now() });
+      await saveKeepsake({ id: pendingId.current, itemName: cleanItemName, photo, voice, createdAt: Date.now(), categoryId: cardCategory });
       setCreateOpen(false);
       setItemName('');
       setPhoto('');
@@ -369,7 +385,7 @@ function App() {
 
   return (
     <div className="app-shell">
-      <header className="topbar">
+      <header className="topbar" inert={createOpen || !!detail || categoryOpen}>
         <a className="brand" href="/" aria-label="こどもの こえずかん ホーム">
           <span className="brand-mark"><BookOpen size={23} strokeWidth={1.8} /></span>
           <span><span className="brand-title">こどもの こえずかん</span><span className="brand-sub">声で集める 世界にひとつのたからもの図鑑</span></span>
@@ -377,7 +393,7 @@ function App() {
         <div className="saved-count" data-testid="text-saved-count">しまってある声 <b className="count-number">{items.length}</b> こ</div>
       </header>
 
-      <main className="page-main">
+      <main className="page-main" inert={createOpen || !!detail || categoryOpen}>
         <section className="intro">
           <div>
             <h1 className="headline">こどもの こえずかん</h1>
@@ -392,6 +408,10 @@ function App() {
           <span className="section-hint">写真で声をきく・名前で大きく見る</span>
         </div>
 
+        <CategoryBar categories={categories} selected={selectedCategory} onSelect={(id) => { stopPlayback(); setSelectedCategory(id); }} onNew={() => setCategoryOpen(true)} disabled={busy} />
+        {categoryIssue && <div className="notice" role="alert" data-testid="status-categories-load-error"><AlertCircle size={16} />{categoryIssue}
+          <button type="button" className="record-button" onClick={() => setConnectionAttempt((value) => value + 1)} disabled={busy}>再接続</button>
+        </div>}
         {storageIssue && <div className="notice" role="alert" data-testid="status-storage-error"><AlertCircle size={16} />{storageIssue}
           {isFirebaseConfigured && <button type="button" className="record-button" onClick={() => setConnectionAttempt((value) => value + 1)} disabled={busy}>再接続</button>}
         </div>}
@@ -401,16 +421,24 @@ function App() {
         {migrationNotice && <p className="notice neutral" role="status">{migrationNotice}</p>}
         {error && !createOpen && !detail && <p className="form-error" role="alert">{error}</p>}
 
-        {loading ? <p className="notice neutral" role="status">Firebase から図鑑を読み込んでいます…</p> : items.length === 0 ? (
+        <div id="category-panel" role="tabpanel" aria-labelledby={`category-tab-${selectedCategory ?? 'all'}`}>
+        {loading ? <p className="notice neutral" role="status">Firebase から図鑑を読み込んでいます…</p> : items.length === 0 && selectedCategory === null ? (
           <section className="empty-state" data-testid="empty-keepsakes">
             <div className="empty-illustration"><BookOpen size={46} strokeWidth={1.35} /></div>
             <h2 className="empty-title">まだ、まっさらなページ</h2>
             <p className="empty-copy">いちばん最初の一枚をつくってみよう。<br />登録するモノの写真と声を残せます。</p>
             <button type="button" className="empty-action" onClick={openCreate} data-testid="button-empty-create">はじめのカードをつくる</button>
           </section>
+        ) : visibleItems.length === 0 ? (
+          <section className="empty-state category-empty" data-testid="empty-category">
+            <div className="empty-illustration"><BookOpen size={46} strokeWidth={1.35} /></div>
+            <h2 className="empty-title">{categoryName(selectedCategory) ?? 'このカテゴリ'}は、まだ空っぽ</h2>
+            <p className="empty-copy">このカテゴリのカードはまだありません。<br />新しいカードをつくるか、ほかのカードのカテゴリを直せます。</p>
+            <button type="button" className="empty-action" onClick={openCreate} data-testid="button-category-empty-create">このカテゴリにカードをつくる</button>
+          </section>
         ) : (
           <section className="sticker-collage" aria-label="保存した図鑑のシール" data-testid="grid-keepsakes">
-            {items.map((item) => (
+            {visibleItems.map((item) => (
               <article key={item.id} className="sticker-item" data-testid={`card-keepsake-${item.id}`}>
                 <button
                   type="button"
@@ -432,6 +460,7 @@ function App() {
           </section>
         )}
 
+        </div>
         <footer className="footer-note"><Sparkles size={14} /> 写真と声はFirebaseに保存します。同じブラウザの匿名アカウントで閲覧できます。</footer>
       </main>
 
@@ -446,6 +475,9 @@ function App() {
               <label className="field-label" htmlFor="keepsake-item-name">モノの名前</label>
               <p className="field-hint">図鑑に登録するものの名前を入力してください。</p>
               <input id="keepsake-item-name" className="title-input" disabled={busy} value={itemName} onChange={(event) => setItemName(event.currentTarget.value)} placeholder="りんご、ライオン、赤バス など" maxLength={48} data-testid="input-item-name" />
+            </div>
+            <div className="form-block">
+              <CategorySelect id="create-category" categories={categories} value={cardCategory} onChange={setCardCategory} disabled={busy} testId="select-card-category" />
             </div>
             <div className="form-block">
               <span className="field-label">写真</span>
@@ -507,15 +539,16 @@ function App() {
         />
       )}
 
-      {detail && (
+      {detail && !editOpen && (
         <div className="overlay" role="presentation" onMouseDown={(event) => { if (!busy && event.target === event.currentTarget) { stopPlayback(); setDetail(null); } }}>
           <section className="dialog dialog-detail" role="dialog" aria-modal="true" aria-label={`${detail.itemName}のページ`}>
             <button type="button" className="icon-button" disabled={busy} style={{ position: 'absolute', zIndex: 2, right: 25, top: 25 }} onClick={() => { stopPlayback(); setDetail(null); }} aria-label="閉じる" data-testid="button-close-detail"><X size={19} /></button>
             {detail.photo ? <img className="detail-image" src={detail.photo} alt={`${detail.itemName}の写真`} /> : <div className="detail-image-placeholder"><ImageIcon size={54} /></div>}
             <div className="detail-meta">
-              <div><h2 className="detail-name">{detail.itemName}</h2><p className="detail-date">{formatDate(detail.createdAt)} にしまいました</p>{!detail.voice && <p className="detail-date">このページには、まだ声がありません</p>}</div>
+              <div><h2 className="detail-name">{detail.itemName}</h2><p className="detail-date">{formatDate(detail.createdAt)} にしまいました</p><p className="detail-date" data-testid="text-detail-category">カテゴリ: {categoryName(detail.categoryId) ?? (detail.categoryId ? '読み込み中のカテゴリ' : '未分類')}</p>{!detail.voice && <p className="detail-date">このページには、まだ声がありません</p>}</div>
               <div className="detail-actions">
                 {detail.voice && <button type="button" className="record-button primary" onClick={playDetailVoice} data-testid="button-play-detail-voice">{playing && playingItemId === detail.id ? <Pause size={16} /> : <Play size={16} />}{playing && playingItemId === detail.id ? 'とめる' : '声をきく'}</button>}
+                <button type="button" className="record-button" disabled={busy} onClick={() => { stopPlayback(); setEditOpen(true); }} data-testid="button-edit-card"><Pencil size={15} /> へんしゅう</button>
                 <button type="button" className="plain-action" onClick={() => setConfirmDelete((value) => !value)} aria-label="このカードを削除" data-testid="button-delete-card"><Trash2 size={17} /></button>
               </div>
             </div>
@@ -523,6 +556,29 @@ function App() {
             {error && <p className="form-error" role="alert">{error}</p>}
           </section>
         </div>
+      )}
+      {categoryOpen && (
+        <CategoryDialog
+          categories={categories}
+          onCreate={createCategoryEntry}
+          describeError={describeError}
+          onClose={() => setCategoryOpen(false)}
+          onCreated={(made) => { setSelectedCategory(made.id); setCategoryOpen(false); }}
+        />
+      )}
+
+      {editOpen && detail && (
+        <EditCardDialog
+          item={detail}
+          categories={categories}
+          describeError={describeError}
+          onClose={() => setEditOpen(false)}
+          onSave={async (name, categoryId) => {
+            await updateKeepsakeMetadata(detail.id, name, categoryId);
+            setDetail((current) => current && current.id === detail.id ? { ...current, itemName: name, categoryId } : current);
+            setItems((list) => list.map((entry) => entry.id === detail.id ? { ...entry, itemName: name, categoryId } : entry));
+          }}
+        />
       )}
     </div>
   );
