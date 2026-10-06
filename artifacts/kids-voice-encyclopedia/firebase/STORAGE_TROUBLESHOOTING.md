@@ -114,10 +114,18 @@ CORSはブラウザの通信許可であり、データのアクセス権限で�
 
 ## 5. 最終確認
 設定後にアプリを再読み込みして、小さな写真と短い録音を新規保存します。
-Storageに `users/{uid}/keepsakes/{id}/photo` と `voice` ができ、
+新規保存ではStorageに `users/{uid}/keepsakes/{id}/{保存試行ID}/photo` と `voice` ができ、
 Firestoreのカードに両方のURLが保存されることを確認します。
 さらにページ再読み込み、画像表示、音声再生、テストカードの削除を確認します。
 既存データの一括移行・削除は今回行いません。
+旧形式の `users/{uid}/keepsakes/{id}/photo` と `voice` も引き続き読み取り・削除できます。
+この新規保存形式を使用するアプリ変更の公開前に、更新した `firestore.rules` と
+対象バケットの `storage.rules` を先に公開してください。
+
+## 隔離環境での自動確認
+
+実バケットを変更せずに保存・再読み込み・URL取得・削除と障害時の保護を確認する
+コマンド・検証範囲・安全対策は [TESTING.md](TESTING.md) を参照してください。
 
 ## 公式資料
 - [カスタムバケットのSDK初期化](https://firebase.google.com/docs/storage/web/start#use_multiple_storage_buckets)

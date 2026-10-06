@@ -11,6 +11,56 @@ env = { "CI" = "true" }
 [workflows]
 runButton = "Project"
 
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "keepsake-tests"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "keepsake-cloud"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "keepsake-typecheck"
+
+[[workflows.workflow]]
+name = "keepsake-tests"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/kids-voice-encyclopedia run test"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "keepsake-cloud"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/kids-voice-encyclopedia run test:cloud"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "keepsake-typecheck"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/kids-voice-encyclopedia run typecheck"
+
+[workflows.workflow.metadata]
+isValidation = true
+
 [agent]
 stack = "PNPM_WORKSPACE"
 expertMode = true
@@ -21,3 +71,4 @@ timeoutMs = 20000
 
 [nix]
 channel = "stable-25_05"
+packages = ["jdk21_headless"]

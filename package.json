@@ -13,6 +13,8 @@
     "@replit/connectors-sdk": "^0.4.3"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
+    "firebase-tools": "^15.32.1",
     "prettier": "^3.9.6",
     "typescript": "~5.9.3"
   }

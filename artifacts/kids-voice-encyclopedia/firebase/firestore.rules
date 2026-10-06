@@ -3,6 +3,10 @@ service cloud.firestore {
   match /databases/{database}/documents {
     match /users/{uid}/keepsakes/{id} {
       function owner() { return request.auth != null && request.auth.uid == uid; }
+      function mediaPath(path, kind) {
+        return path == 'users/' + uid + '/keepsakes/' + id + '/' + kind
+          || (path is string && path.matches('users/' + uid + '/keepsakes/' + id + '/[a-zA-Z0-9-]+/' + kind));
+      }
       function categoryValid(data) {
         return !('categoryId' in data) || data.categoryId == null ||
           (data.categoryId is string &&
@@ -18,11 +22,11 @@ service cloud.firestore {
           && nameValid(data) && categoryValid(data)
           && data.photo is string
           && data.photo.matches('https://firebasestorage.googleapis.com/.*')
-          && data.photoPath == 'users/' + uid + '/keepsakes/' + id + '/photo'
+          && mediaPath(data.photoPath, 'photo')
           && (data.voice == null ||
             (data.voice is string && data.voice.matches('https://firebasestorage.googleapis.com/.*')))
           && (data.voicePath == null ||
-            data.voicePath == 'users/' + uid + '/keepsakes/' + id + '/voice')
+            mediaPath(data.voicePath, 'voice'))
           && data.createdAt is timestamp;
       }
       function metadataOnlyUpdate() {

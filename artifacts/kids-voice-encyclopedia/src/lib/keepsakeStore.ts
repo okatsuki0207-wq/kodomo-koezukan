@@ -1,21 +1,12 @@
 import { initializeApp } from 'firebase/app';
 import { indexedDBLocalPersistence, initializeAuth, signInAnonymously } from 'firebase/auth';
-import { collection, deleteDoc, doc, getDoc, getFirestore, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
-import { deleteObject, getDownloadURL, getStorage, ref, uploadBytes } from 'firebase/storage';
+import { collection, doc, getFirestore, onSnapshot, orderBy, query, runTransaction, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 import { firebaseConfig, isFirebaseConfigured } from '../firebaseConfig';
-import { diagnoseStorageError, storageFailureMessage } from './storageDiagnostics';
+import { storageFailureMessage } from './storageDiagnostics';
+import { createKeepsakeRepository, FirebaseTimeoutError } from './keepsakeRepository';
+export type { Keepsake } from './keepsakeRepository';
 import { categoryIdForName, DEFAULT_CATEGORIES, keepsakeMetadata, validateCategoryName, type Category } from './categories';
-
-export type Keepsake = {
-  id: string;
-  itemName: string;
-  photo: string;
-  voice: string | null;
-  createdAt: number;
-  photoPath?: string;
-  voicePath?: string | null;
-  categoryId?: string | null;
-};
 
 const app = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
 const auth = app ? initializeAuth(app, { persistence: indexedDBLocalPersistence }) : null;
@@ -28,8 +19,6 @@ if (storage) {
   storage.maxUploadRetryTime = 25_000;
 }
 let ready: Promise<string> | null = null;
-
-class FirebaseTimeoutError extends Error {}
 
 function deadline<T>(operation: Promise<T>, milliseconds = 30_000): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -49,23 +38,8 @@ async function userId(): Promise<string> {
   return deadline(ready, 20_000);
 }
 
-export async function subscribeKeepsakes(
-  onChange: (items: Keepsake[]) => void,
-  onError: (error: unknown) => void,
-): Promise<() => void> {
-  const uid = await userId();
-  return onSnapshot(query(collection(db!, 'users', uid, 'keepsakes'), orderBy('createdAt', 'desc')), (snapshot) => {
-    onChange(snapshot.docs.map((record) => {
-      const value = record.data();
-      return {
-        id: record.id, itemName: value.itemName, photo: value.photo, voice: value.voice ?? null,
-        photoPath: value.photoPath, voicePath: value.voicePath ?? null,
-        categoryId: value.categoryId ?? null,
-        createdAt: value.createdAt?.toMillis?.() ?? Date.now(),
-      };
-    }));
-  }, onError);
-}
+const repository = createKeepsakeRepository(db!, storage!, userId);
+export const { saveKeepsake, deleteKeepsake, subscribeKeepsakes } = repository;
 
 /** カテゴリも匿名認証UID配下で分離。既定のページはクラウド書き込み不要。 */
 export async function subscribeCategories(
@@ -102,78 +76,6 @@ export async function updateKeepsakeMetadata(id: string, itemName: string, categ
   const patch = keepsakeMetadata(itemName, categoryId);
   const uid = await userId();
   await deadline(updateDoc(doc(db!, 'users', uid, 'keepsakes', id), patch));
-}
-
-async function removeFile(path: string, downloadUrl?: string) {
-  // 旧カードのファイルは旧バケットに残っているため、URLから所属バケットを
-  // 解決する。新規アップロードの後片付けは現在の指定バケットを使う。
-  const file = ref(storage!, downloadUrl ?? path);
-  if (file.fullPath !== path) throw new Error('ファイルの保存パスが一致しません。削除は行いませんでした。');
-  try { await deleteObject(file); }
-  catch (error) {
-    if ((error as { code?: string }).code !== 'storage/object-not-found') throw error;
-  }
-}
-
-/** ファイルを先にアップロード。Firestore 確定前に失敗したらアップロードを片付ける。 */
-export async function saveKeepsake(item: Keepsake, migrating = false): Promise<void> {
-  const metadata = keepsakeMetadata(item.itemName, item.categoryId ?? null);
-  const uid = await userId();
-  const record = doc(db!, 'users', uid, 'keepsakes', item.id);
-  if (migrating && (await deadline(getDoc(record), 12_000)).exists()) return; // 移行の再実行は重複させない。
-  const uploaded: string[] = [];
-  try {
-    const put = async (source: string, kind: 'photo' | 'voice') => {
-      const response = await fetch(source);
-      if (!response.ok) throw new Error('画像または音声を読み込めませんでした。');
-      const blob = await response.blob();
-      if (!blob.type.startsWith(kind === 'photo' ? 'image/' : 'audio/')) throw new Error('ファイル形式が正しくありません。');
-      if (!blob.size) throw new Error('ファイルが空です。写真または音声を選び直してください。');
-      if (blob.size >= 20 * 1024 * 1024) throw new Error('ファイルは20MB未満にしてください。');
-      const path = `users/${uid}/keepsakes/${item.id}/${kind}`;
-      const file = ref(storage!, path);
-      try {
-        await uploadBytes(file, blob, { contentType: blob.type });
-      } catch (error) {
-        throw await diagnoseStorageError(error, file.bucket);
-      }
-      uploaded.push(path);
-      try {
-        return { url: await getDownloadURL(file), path };
-      } catch (error) {
-        throw await diagnoseStorageError(error, file.bucket);
-      }
-    };
-    const photo = await put(item.photo, 'photo');
-    const voice = item.voice ? await put(item.voice, 'voice') : null;
-    await deadline(setDoc(record, {
-      itemName: metadata.itemName, photo: photo.url, voice: voice?.url ?? null,
-      ...(metadata.categoryId ? { categoryId: metadata.categoryId } : {}),
-      photoPath: photo.path, voicePath: voice?.path ?? null,
-      createdAt: migrating ? new Date(item.createdAt) : serverTimestamp(),
-    }));
-  } catch (error) {
-    if (error instanceof FirebaseTimeoutError) throw error; // 書き込みが後から完了する可能性がある。
-    if (uploaded.length === 0) throw error; // 初回アップロード失敗なら、元の原因をそのまま案内。
-    // 接続切断等で書き込み結果が不明ならデータを削除しない。
-    try {
-      if (!(await deadline(getDoc(record), 12_000)).exists()) {
-        await Promise.all(uploaded.map((path) => removeFile(path)));
-      }
-    } catch {
-      throw new Error('保存結果を確認できませんでした。再接続後に一覧を確認してください。未使用ファイルが残った場合はFirebaseコンソールから確認できます。');
-    }
-    throw error;
-  }
-}
-
-export async function deleteKeepsake(item: Keepsake): Promise<void> {
-  const uid = await userId();
-  // 他の利用者のパスを削除しない。部分失敗は再実行可能。
-  for (const [path, url] of [[item.photoPath, item.photo], [item.voicePath, item.voice]]) {
-    if (path?.startsWith(`users/${uid}/keepsakes/${item.id}/`)) await removeFile(path, url ?? undefined);
-  }
-  await deadline(deleteDoc(doc(db!, 'users', uid, 'keepsakes', item.id)));
 }
 
 export function firebaseError(error: unknown): string {

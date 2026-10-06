@@ -3,3 +3,4 @@
 - [Firebase Storage diagnosis](firebase-storage-diagnostics.md) — storage/unknown without a response body does not prove a CORS failure; corroborate bucket setup safely.
 - [White-paper theme](white-paper-theme.md) — white backgrounds blend children’s drawings on white paper; retain the existing cute accent colors.
 - [Category editing safety](category-safety.md) — reorganizing pages must not re-upload media, change creation dates, or silently classify older cards.
+- [Cloud save safety](cloud-save-safety.md) — isolate retries and preserve media after ambiguous commits; test only synthetic data in loopback emulators.

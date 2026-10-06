@@ -20,6 +20,7 @@ if (!vm.SourceTextModule) {
     const uid = 'test-owner';
     const context = vm.createContext({
       crypto, TextEncoder, Uint8Array, Date, console,
+      setTimeout, clearTimeout,
       window: { setTimeout, clearTimeout },
       fetch: async () => new Response(new Blob(['test image'], { type: 'image/png' })),
     });
@@ -38,6 +39,7 @@ if (!vm.SourceTextModule) {
         query: (...args) => args,
         serverTimestamp: () => timestamp,
         getDoc: async (path) => ({ exists: () => records.has(path), data: () => records.get(path) }),
+        getDocFromServer: async (path) => ({ exists: () => records.has(path), data: () => records.get(path) }),
         setDoc: async (path, data) => { calls.push(['setDoc', path, data]); records.set(path, data); },
         updateDoc: async (path, data) => {
           calls.push(['updateDoc', path, data]);
@@ -71,9 +73,23 @@ if (!vm.SourceTextModule) {
       { context },
     );
     await categories.link(() => { throw new Error('Unexpected helper import'); });
+    const repository = new vm.SourceTextModule(
+      stripTypeScriptTypes(await readFile(new URL('../src/lib/keepsakeRepository.ts', import.meta.url), 'utf8')),
+      { context },
+    );
+    const link = (name) => {
+      if (name === './categories' || name === './categories.ts') return categories;
+      const values = exports[name.replace(/\.ts$/, '')];
+      assert.ok(values, `Unexpected dependency: ${name}`);
+      return new vm.SyntheticModule(Object.keys(values), function () {
+        for (const [key, value] of Object.entries(values)) this.setExport(key, value);
+      }, { context });
+    };
+    await repository.link(link);
     const source = stripTypeScriptTypes(await readFile(new URL('../src/lib/keepsakeStore.ts', import.meta.url), 'utf8'));
     const store = new vm.SourceTextModule(source, { context });
     await store.link((name) => {
+      if (name === './keepsakeRepository') return repository;
       if (name === './categories') return categories;
       const values = exports[name];
       assert.ok(values, `Unexpected dependency: ${name}`);
