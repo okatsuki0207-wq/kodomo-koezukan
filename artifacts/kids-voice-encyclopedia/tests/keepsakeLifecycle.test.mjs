@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
 import { doc, getDocFromServer, deleteDoc, setDoc, updateDoc, runTransaction, collection, getDocs, Timestamp } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, getMetadata, getBytes, deleteObject } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, getMetadata, getBytes, deleteObject, list } from 'firebase/storage';
 import { createKeepsakeRepository } from '../src/lib/keepsakeRepository.ts';
+import { createUnusedMediaService, MEDIA_RETENTION_MS } from '../src/lib/unusedMedia.ts';
 
 const projectId = 'demo-keepsakes-test';
 const storageOrigin = 'http://127.0.0.1:9197';
@@ -43,7 +44,22 @@ before(async () => {
   bob = clients(env.authenticatedContext('bob'));
   anonymous = clients(env.unauthenticatedContext());
 });
-beforeEach(async () => { await env.clearFirestore(); await env.clearStorage(); });
+beforeEach(async () => {
+  await env.clearFirestore();
+  // rules-unit-testing clearStorage() only deletes root-level items in its default
+  // bucket, not nested prefixes or explicitly selected buckets. Clean both demo
+  // buckets recursively so every inventory test starts with truly isolated data.
+  await env.withSecurityRulesDisabled(async (context) => {
+    async function clearDirectory(directory) {
+      const { items, prefixes } = await directory.listAll();
+      await Promise.all(items.map((file) => file.delete()));
+      for (const prefix of prefixes) await clearDirectory(prefix);
+    }
+    for (const bucket of [`${projectId}.appspot.com`, `${projectId}-old.appspot.com`]) {
+      await clearDirectory(context.storage(bucket).ref());
+    }
+  });
+});
 after(async () => { await env?.cleanup(); });
 
 // Emulator download URLs use HTTP loopback. Production rules intentionally accept only HTTPS
@@ -356,4 +372,198 @@ test('rules reject invalid media kinds, types, size and foreign document paths',
   await assertFails(setDoc(record('valid'), {
     ...value, createdAt: Timestamp.now(), photoPath: 'users/bob/keepsakes/valid/attempt/photo',
   }));
+});
+
+// Storage time cannot be backdated through the Web SDK. Only this adapter simulates
+// elapsed object age, retaining real emulator path/bucket/generation/bytes. Firestore
+// timestamps are seeded via emulator-only rules-disabled context; production rules
+// still enforce their own request.time retention check.
+const oldDate = () => new Date(Date.now() - MEDIA_RETENTION_MS - 60_000).toISOString();
+const cleanup = (faults = {}, client = alice, uid = 'alice') => createUnusedMediaService(
+  client.db, client.storage, async () => uid,
+  { getMetadata: async (file) => ({ ...await getMetadata(file), updated: oldDate() }), ...faults },
+);
+const attemptDoc = (attempt, client = alice) => doc(client.db, 'users', 'alice', 'saveAttempts', attempt);
+async function orphan(cardId, attemptId, state = 'finished', kind = 'photo') {
+  const path = `users/alice/keepsakes/${cardId}/${attemptId}/${kind}`;
+  await uploadBytes(ref(alice.storage, path), kind === 'photo' ? photoBytes : voiceBytes,
+    { contentType: kind === 'photo' ? 'image/png' : 'audio/wav' });
+  await env.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), 'users', 'alice', 'saveAttempts', attemptId), {
+      cardId, bucket: ref(alice.storage).bucket, state,
+      startedAt: Timestamp.fromMillis(Date.now() - MEDIA_RETENTION_MS - 120_000),
+      ...(state !== 'active' ? { finishedAt: Timestamp.fromMillis(Date.now() - MEDIA_RETENTION_MS - 60_000) } : {}),
+    });
+  });
+  return path;
+}
+
+test('read-only inventory protects references, active outcomes, legacy attempts and recent files', async () => {
+  await repository().saveKeepsake(item('in-use'));
+  const value = await stored('in-use');
+  const active = await orphan('pending', 'pending-attempt', 'active');
+  const eligible = await orphan('unused', 'unused-attempt');
+  const historical = 'users/alice/keepsakes/historical/old-attempt/photo';
+  const flat = 'users/alice/keepsakes/flat/photo';
+  for (const path of [historical, flat]) await uploadBytes(ref(alice.storage, path), photoBytes, { contentType: 'image/png' });
+  const inventory = await cleanup().inspectUnusedMedia();
+  const status = (path) => inventory.files.find((file) => file.path === path)?.status;
+  assert.equal(status(value.photoPath), 'referenced');
+  assert.equal(status(value.voicePath), 'referenced');
+  assert.equal(status(active), 'active');
+  assert.equal(status(eligible), 'eligible');
+  assert.equal(status(historical), 'legacy');
+  assert.equal(status(flat), 'legacy');
+  assert.equal(JSON.stringify(inventory).includes('token='), false);
+  for (const file of inventory.files) await assertSucceeds(getMetadata(ref(alice.storage, file.path)));
+  const fresh = createUnusedMediaService(alice.db, alice.storage, async () => 'alice');
+  assert.equal((await fresh.inspectUnusedMedia()).files.find((file) => file.path === eligible).status, 'waiting');
+  const service = cleanup();
+  await service.inspectUnusedMedia();
+  for (const path of [value.photoPath, active, historical, flat]) await assert.rejects(service.deleteUnusedMedia(path, true), /個別/);
+  await unchanged('in-use', value);
+});
+
+test('cleanup needs a fresh report and individual confirmation; permanent fence rejects delayed reuse', async () => {
+  const path = await orphan('discarded', 'discarded-attempt');
+  const service = cleanup();
+  await assert.rejects(service.deleteUnusedMedia(path, true), /個別/);
+  await service.inspectUnusedMedia();
+  await assert.rejects(service.deleteUnusedMedia(path, false), /個別/);
+  await service.deleteUnusedMedia(path, true);
+  await absent(path);
+  assert.equal((await getDocFromServer(attemptDoc('discarded-attempt'))).data().state, 'blocked');
+  await assert.rejects(service.deleteUnusedMedia(path, true), /個別/);
+  await assertFails(deleteDoc(attemptDoc('discarded-attempt')));
+  await assertFails(updateDoc(attemptDoc('discarded-attempt'), { state: 'active' }));
+  await assertFails(setDoc(record('discarded'), {
+    itemName: '遅延確定', photo: `https://firebasestorage.googleapis.com/v0/b/${ref(alice.storage).bucket}/o/${encodeURIComponent(path)}?alt=media`,
+    voice: null, photoPath: path, voicePath: null, createdAt: Timestamp.now(),
+  }));
+});
+
+test('result-unknown transaction is excluded before and after a delayed commit', async () => {
+  let release;
+  let finished;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const repo = repository(alice, 'alice', {
+    runTransaction: (...args) => { finished = gate.then(() => runTransaction(...args)); return finished; },
+  }, 500);
+  await assert.rejects(repo.saveKeepsake(item('pending-cleanup')), /応答がありません/);
+  const service = cleanup();
+  const pending = await service.inspectUnusedMedia();
+  assert.equal(pending.files.length, 2);
+  assert.ok(pending.files.every((file) => file.status === 'active'));
+  for (const file of pending.files) await assert.rejects(service.deleteUnusedMedia(file.path, true), /個別/);
+  release(); await finished;
+  const committed = await service.inspectUnusedMedia();
+  assert.ok(committed.files.every((file) => file.status === 'referenced'));
+  await unchanged('pending-cleanup', await stored('pending-cleanup'));
+});
+
+test('concurrent saves leave only referenced winning files in the inventory', async () => {
+  const other = clients(env.authenticatedContext('alice'));
+  await Promise.all([repository().saveKeepsake(item('cleanup-race')), repository(other).saveKeepsake(item('cleanup-race'))]);
+  const report = await cleanup().inspectUnusedMedia();
+  assert.equal(report.files.length, 2);
+  assert.ok(report.files.every((file) => file.status === 'referenced'));
+});
+
+test('cleanup rechecks server references and transaction state rather than trusting stale inventory', async () => {
+  const path = await orphan('new-reference', 'reference-attempt');
+  const service = cleanup();
+  await service.inspectUnusedMedia();
+  await setDoc(record('new-reference'), {
+    itemName: 'サーバーの参照', photo: await canonicalUrl(ref(alice.storage, path)), photoPath: path,
+    voice: null, voicePath: null, createdAt: Timestamp.now(),
+  });
+  await assert.rejects(service.deleteUnusedMedia(path, true), /参照/);
+  await assertSucceeds(getMetadata(ref(alice.storage, path)));
+  // Race after the initial full collection read: transaction sees the new card.
+  const another = await orphan('transaction-reference', 'transaction-attempt');
+  let readCount = 0;
+  const race = cleanup({
+    getDocsFromServer: async (reference) => {
+      const result = await import('firebase/firestore').then(({ getDocsFromServer }) => getDocsFromServer(reference));
+      if (reference.path.endsWith('/keepsakes') && ++readCount === 2) {
+        await setDoc(record('transaction-reference'), {
+          itemName: '同時確定', photo: await canonicalUrl(ref(alice.storage, another)), photoPath: another,
+          voice: null, voicePath: null, createdAt: Timestamp.now(),
+        });
+      }
+      return result;
+    },
+  });
+  await race.inspectUnusedMedia();
+  await assert.rejects(race.deleteUnusedMedia(another, true), /参照/);
+  await assertSucceeds(getMetadata(ref(alice.storage, another)));
+});
+
+test('server read failure, changed generation and recent ledger all fail closed', async () => {
+  const path = await orphan('safe-error', 'safe-error-attempt');
+  const unavailable = cleanup({ getDocsFromServer: async () => { throw new Error('server unavailable'); } });
+  await assert.rejects(unavailable.inspectUnusedMedia(), /unavailable/);
+  await assert.rejects(unavailable.deleteUnusedMedia(path, true), /個別/);
+  let scans = 0;
+  const changed = cleanup({
+    getMetadata: async (file) => ({
+      ...await getMetadata(file), updated: oldDate(), generation: ++scans === 1 ? 'original' : 'changed',
+    }),
+  });
+  await changed.inspectUnusedMedia();
+  await assert.rejects(changed.deleteUnusedMedia(path, true), /変わりました/);
+  await assertSucceeds(getMetadata(ref(alice.storage, path)));
+  const fresh = await orphan('recent-finish', 'recent-attempt', 'active');
+  await updateDoc(attemptDoc('recent-attempt'), { state: 'finished', finishedAt: (await import('firebase/firestore')).serverTimestamp() });
+  const report = await cleanup().inspectUnusedMedia();
+  assert.equal(report.files.find((file) => file.path === fresh).status, 'waiting');
+  await assertFails(updateDoc(attemptDoc('recent-attempt'), { state: 'blocked' }));
+});
+
+test('old bucket URL-only references protect matching paths; old buckets are never enumerated', async () => {
+  const path = await orphan('old-bucket', 'old-bucket-attempt');
+  const oldStorage = env.authenticatedContext('alice').storage('demo-keepsakes-test-old.appspot.com');
+  await uploadBytes(ref(oldStorage, path), photoBytes, { contentType: 'image/png' });
+  await env.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), 'users', 'alice', 'keepsakes', 'old-url-only'), {
+      itemName: '旧バケット', photo: await canonicalUrl(ref(oldStorage, path)), voice: null, createdAt: Timestamp.now(),
+    });
+  });
+  const report = await cleanup().inspectUnusedMedia();
+  assert.equal(report.files.length, 1);
+  assert.equal(report.files[0].status, 'referenced');
+  assert.equal(report.bucket, ref(alice.storage).bucket);
+  await assertSucceeds(getMetadata(ref(oldStorage, path)));
+});
+
+test('partial cleanup failures retain a fence and need a new scan before explicit retry', async () => {
+  const path = await orphan('retry-cleanup', 'retry-attempt');
+  const voice = await orphan('retry-cleanup', 'retry-attempt', 'finished', 'voice');
+  const service = cleanup({ deleteObject: async () => { throw new Error('delete disconnected'); } });
+  await service.inspectUnusedMedia();
+  await assert.rejects(service.deleteUnusedMedia(path, true), /disconnected/);
+  await assertSucceeds(getMetadata(ref(alice.storage, path)));
+  assert.equal((await getDocFromServer(attemptDoc('retry-attempt'))).data().state, 'blocked');
+  const fresh = cleanup();
+  await fresh.inspectUnusedMedia();
+  await fresh.deleteUnusedMedia(path, true);
+  await absent(path);
+  // Explicitly deleting one photo must not delete the sibling voice.
+  await assertSucceeds(getMetadata(ref(alice.storage, voice)));
+});
+
+test('inventory/attempt records remain private and malformed legacy references fail closed', async () => {
+  const path = await orphan('privacy', 'privacy-attempt');
+  for (const attacker of [bob, anonymous]) {
+    await assertFails(list(ref(attacker.storage, 'users/alice/keepsakes')));
+    await assertFails(getDocs(collection(attacker.db, 'users', 'alice', 'saveAttempts')));
+    await assertFails(getDocFromServer(attemptDoc('privacy-attempt', attacker)));
+  }
+  await env.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), 'users', 'alice', 'keepsakes', 'malformed'), { photo: 'not a download URL' });
+  });
+  // Storage ref accepts plain paths, so invalid URL-shaped references must also be rejected.
+  const service = cleanup();
+  await assert.rejects(service.inspectUnusedMedia(), /参照を確認できません/);
+  await assertSucceeds(getMetadata(ref(alice.storage, path)));
 });

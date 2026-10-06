@@ -5,6 +5,7 @@ import { getStorage } from 'firebase/storage';
 import { firebaseConfig, isFirebaseConfigured } from '../firebaseConfig';
 import { storageFailureMessage } from './storageDiagnostics';
 import { createKeepsakeRepository, FirebaseTimeoutError } from './keepsakeRepository';
+import { createUnusedMediaService } from './unusedMedia';
 export type { Keepsake } from './keepsakeRepository';
 import { categoryIdForName, DEFAULT_CATEGORIES, keepsakeMetadata, validateCategoryName, type Category } from './categories';
 
@@ -40,6 +41,19 @@ async function userId(): Promise<string> {
 
 const repository = createKeepsakeRepository(db!, storage!, userId);
 export const { saveKeepsake, deleteKeepsake, subscribeKeepsakes } = repository;
+// Deferred construction avoids touching an unconfigured Storage instance at module load.
+export async function inspectUnusedMedia() {
+  await userId();
+  return unusedMedia().inspectUnusedMedia();
+}
+export async function deleteUnusedMedia(path: string, confirmed: boolean) {
+  await userId();
+  return unusedMedia().deleteUnusedMedia(path, confirmed);
+}
+let cleanupService: ReturnType<typeof createUnusedMediaService> | undefined;
+function unusedMedia() {
+  return cleanupService ??= createUnusedMediaService(db!, storage!, userId);
+}
 
 /** カテゴリも匿名認証UID配下で分離。既定のページはクラウド書き込み不要。 */
 export async function subscribeCategories(

@@ -7,6 +7,22 @@ service cloud.firestore {
         return path == 'users/' + uid + '/keepsakes/' + id + '/' + kind
           || (path is string && path.matches('users/' + uid + '/keepsakes/' + id + '/[a-zA-Z0-9-]+/' + kind));
       }
+      function attemptAvailable(path) {
+        // Legacy media remains readable. Permanent cleanup fences cannot be reused.
+        let parts = path.split('/');
+        return parts.size() == 5 ||
+          (parts.size() == 6 &&
+            (!existsAfter(/databases/$(database)/documents/users/$(uid)/saveAttempts/$(parts[4])) ||
+              (getAfter(/databases/$(database)/documents/users/$(uid)/saveAttempts/$(parts[4])).data.state != 'blocked'
+                && getAfter(/databases/$(database)/documents/users/$(uid)/saveAttempts/$(parts[4])).data.cardId == id)));
+      }
+      function mediaUrl(url, path) {
+        // A URL cannot secretly reference a different card/attempt than its path.
+        // Current app IDs are UUIDs and anonymous Auth UIDs need no URI escaping.
+        return url is string
+          && url.matches('https://firebasestorage.googleapis.com/v0/b/[^/]+/o/[^/]+([?].*)?')
+          && url.split('/')[7].split('[?]')[0] == path.replace('/', '%2F');
+      }
       function categoryValid(data) {
         return !('categoryId' in data) || data.categoryId == null ||
           (data.categoryId is string &&
@@ -20,13 +36,13 @@ service cloud.firestore {
         return data.keys().hasAll(['itemName', 'photo', 'voice', 'photoPath', 'voicePath', 'createdAt'])
           && data.keys().hasOnly(['itemName', 'photo', 'voice', 'photoPath', 'voicePath', 'createdAt', 'categoryId'])
           && nameValid(data) && categoryValid(data)
-          && data.photo is string
-          && data.photo.matches('https://firebasestorage.googleapis.com/.*')
           && mediaPath(data.photoPath, 'photo')
-          && (data.voice == null ||
-            (data.voice is string && data.voice.matches('https://firebasestorage.googleapis.com/.*')))
+          && mediaUrl(data.photo, data.photoPath)
+          && attemptAvailable(data.photoPath)
+          && ((data.voice == null && data.voicePath == null) ||
+            (data.voicePath is string && mediaUrl(data.voice, data.voicePath)))
           && (data.voicePath == null ||
-            mediaPath(data.voicePath, 'voice'))
+            (mediaPath(data.voicePath, 'voice') && attemptAvailable(data.voicePath)))
           && data.createdAt is timestamp;
       }
       function metadataOnlyUpdate() {
@@ -37,6 +53,36 @@ service cloud.firestore {
       allow read, delete: if owner();
       allow create: if owner() && completeCardValid(request.resource.data);
       allow update: if owner() && (metadataOnlyUpdate() || completeCardValid(request.resource.data));
+    }
+    match /users/{uid}/saveAttempts/{attempt} {
+      function owner() { return request.auth != null && request.auth.uid == uid; }
+      function cardDoesNotUseAttempt() {
+        let card = /databases/$(database)/documents/users/$(uid)/keepsakes/$(resource.data.cardId);
+        let prefix = 'users/' + uid + '/keepsakes/' + resource.data.cardId + '/' + attempt + '/.*';
+        return !exists(card) ||
+          (!get(card).data.get('photoPath', '').matches(prefix)
+            && (get(card).data.get('voicePath', null) == null || !get(card).data.voicePath.matches(prefix)));
+      }
+      allow read: if owner();
+      allow create: if owner()
+        && attempt.matches('[a-zA-Z0-9-]+')
+        && request.resource.data.keys().hasOnly(['cardId', 'bucket', 'state', 'startedAt'])
+        && request.resource.data.cardId is string
+        && request.resource.data.cardId.size() > 0
+        && !request.resource.data.cardId.matches('.*/.*')
+        && request.resource.data.bucket is string
+        && request.resource.data.state == 'active'
+        && request.resource.data.startedAt == request.time;
+      allow update: if owner() && (
+        (resource.data.state == 'active' && request.resource.data.state == 'finished'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['state', 'finishedAt'])
+          && request.resource.data.finishedAt == request.time)
+        || (resource.data.state == 'finished' && request.resource.data.state == 'blocked'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['state'])
+          && resource.data.finishedAt <= request.time - duration.value(7, 'd')
+          && cardDoesNotUseAttempt())
+      );
+      // Never remove a fence or reactivate a completed attempt.
     }
     match /users/{uid}/categories/{id} {
       function owner() { return request.auth != null && request.auth.uid == uid; }

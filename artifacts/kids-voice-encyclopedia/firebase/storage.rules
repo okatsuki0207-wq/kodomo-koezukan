@@ -1,6 +1,10 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    // Listing is private to the authenticated user's namespace (rules v2 required).
+    match /users/{uid}/keepsakes/{rest=**} {
+      allow list: if request.auth != null && request.auth.uid == uid;
+    }
     match /users/{uid}/keepsakes/{id}/{kind} {
       function owner() { return request.auth != null && request.auth.uid == uid; }
       allow read, delete: if owner();

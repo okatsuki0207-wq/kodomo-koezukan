@@ -21,9 +21,10 @@ import CategoryBar from './components/CategoryBar';
 import CategoryDialog from './components/CategoryDialog';
 import CategorySelect from './components/CategorySelect';
 import EditCardDialog from './components/EditCardDialog';
+import UnusedMediaDialog from './components/UnusedMediaDialog';
 import { useCategories } from './hooks/useCategories';
 import { filterByCategory } from './lib/categories';
-import { deleteKeepsake, firebaseError, saveKeepsake, subscribeKeepsakes, updateKeepsakeMetadata, type Keepsake } from './lib/keepsakeStore';
+import { deleteKeepsake, deleteUnusedMedia, firebaseError, inspectUnusedMedia, saveKeepsake, subscribeKeepsakes, updateKeepsakeMetadata, type Keepsake } from './lib/keepsakeStore';
 import { readLegacyKeepsakes } from './lib/legacyImport';
 import { trimLeadingSilence } from './lib/audioTrim';
 import { isFirebaseConfigured } from './firebaseConfig';
@@ -60,6 +61,7 @@ function App() {
   const [cardCategory, setCardCategory] = useState<string | null>(null);
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [unusedMediaOpen, setUnusedMediaOpen] = useState(false);
   const { categories, error: categoryIssue, create: createCategoryEntry, describeError } = useCategories(connectionAttempt);
   const visibleItems = filterByCategory(items, selectedCategory);
   const categoryName = (id: string | null | undefined) => categories.find((c) => c.id === id)?.name;
@@ -385,7 +387,7 @@ function App() {
 
   return (
     <div className="app-shell">
-      <header className="topbar" inert={createOpen || !!detail || categoryOpen}>
+      <header className="topbar" inert={createOpen || !!detail || categoryOpen || unusedMediaOpen}>
         <a className="brand" href="/" aria-label="こどもの こえずかん ホーム">
           <span className="brand-mark"><BookOpen size={23} strokeWidth={1.8} /></span>
           <span><span className="brand-title">こどもの こえずかん</span><span className="brand-sub">声で集める 世界にひとつのたからもの図鑑</span></span>
@@ -393,7 +395,7 @@ function App() {
         <div className="saved-count" data-testid="text-saved-count">しまってある声 <b className="count-number">{items.length}</b> こ</div>
       </header>
 
-      <main className="page-main" inert={createOpen || !!detail || categoryOpen}>
+      <main className="page-main" inert={createOpen || !!detail || categoryOpen || unusedMediaOpen}>
         <section className="intro">
           <div>
             <h1 className="headline">こどもの こえずかん</h1>
@@ -409,6 +411,8 @@ function App() {
         </div>
 
         <CategoryBar categories={categories} selected={selectedCategory} onSelect={(id) => { stopPlayback(); setSelectedCategory(id); }} onNew={() => setCategoryOpen(true)} disabled={busy} />
+        <button type="button" className="plain-action unused-entry" disabled={busy || loading || !isFirebaseConfigured}
+          onClick={() => setUnusedMediaOpen(true)} data-testid="button-unused-media">保護者向け：未使用ファイルの確認</button>
         {categoryIssue && <div className="notice" role="alert" data-testid="status-categories-load-error"><AlertCircle size={16} />{categoryIssue}
           <button type="button" className="record-button" onClick={() => setConnectionAttempt((value) => value + 1)} disabled={busy}>再接続</button>
         </div>}
@@ -566,6 +570,8 @@ function App() {
           onCreated={(made) => { setSelectedCategory(made.id); setCategoryOpen(false); }}
         />
       )}
+      {unusedMediaOpen && <UnusedMediaDialog onClose={() => setUnusedMediaOpen(false)}
+        inspectUnusedMedia={inspectUnusedMedia} deleteUnusedMedia={deleteUnusedMedia} describeError={firebaseError} />}
 
       {editOpen && detail && (
         <EditCardDialog
