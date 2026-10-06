@@ -62,16 +62,17 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(194, 104, 78
 .topbar { max-width: 1200px; margin: auto; height: 94px; padding: 0 32px; display:flex; align-items:center; justify-content:space-between; }
 .brand { display:flex; align-items:center; gap:14px; color:inherit; text-decoration:none; }
 .brand-mark { width:44px;height:44px;display:grid;place-items:center;border-radius:50% 50% 48% 42%;background:#d8e4d7;color:#627b68;transform:rotate(-7deg); }
-.brand-title { margin:0; font-size:21px; font-weight:700; letter-spacing:.09em; line-height:1.15; }
-.brand-sub { font-size:10px; letter-spacing:.18em; color:#8e8172; display:block; margin-top:4px; }
+.brand { min-width:0; }
+.brand-title { display:block; margin:0; font-size:21px; font-weight:700; letter-spacing:.09em; line-height:1.15; }
+.brand-sub { font-size:10px; letter-spacing:.08em; color:#8e8172; display:block; margin-top:4px; }
 .saved-count { color:#887e71; font-size:13px; display:flex; align-items:center; gap:8px; }
 .count-number { color:#bc6a52; font-family:var(--app-font-serif); font-size:22px; }
 .page-main { max-width:1120px; margin:auto; padding:28px 32px 80px; }
 .intro { position:relative; display:flex;justify-content:space-between;align-items:flex-end;padding:42px 6px 36px;margin-bottom:20px; }
 .intro::after { content:"";position:absolute;right:7%;top:7px;width:150px;height:110px;opacity:.48;background:radial-gradient(ellipse at center,transparent 30%,#e9d7b7 31%,transparent 32%),radial-gradient(circle at 51% 49%,#e5bd7f 0 3px,transparent 4px); background-size:42px 42px,100% 100%; transform:rotate(16deg);pointer-events:none; }
-.eyebrow { font-size:11px; letter-spacing:.23em; color:#b5755e; font-weight:700; margin:0 0 12px; }
-.headline { font-size:clamp(30px,4.2vw,48px); line-height:1.45; letter-spacing:.055em; margin:0; font-weight:700; }
-.headline em { font-style:normal; color:#bf725a; position:relative; white-space:nowrap; }
+.headline { font-size:clamp(28px,4.2vw,48px); line-height:1.35; letter-spacing:.04em; margin:0; font-weight:700; }
+.subtitle { margin:10px 0 0; color:#bf725a; font-size:clamp(14px,1.8vw,18px); font-weight:700; letter-spacing:.06em; line-height:1.6; }
+.subtitle > span {display:inline-block;}
 .intro-note { color:#8e8172;font-size:13px;line-height:1.9; margin:16px 0 0; }
 .add-button { flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;gap:9px;border:0;border-radius:999px;background:#bd7057;color:#fff8ed;padding:15px 24px;font-weight:700;font-size:14px;box-shadow:0 6px 0 #9c5947, 0 12px 22px rgba(127,82,60,.12);transition:transform .2s,box-shadow .2s; }
 .add-button:hover { transform:translateY(-2px);box-shadow:0 8px 0 #9c5947,0 14px 24px rgba(127,82,60,.14); }
@@ -81,50 +82,40 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(194, 104, 78
 .section-hint { color:#a29687;font-size:11px;letter-spacing:.05em; }
 .sticker-collage {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: start;
-  gap: 12px 14px;
+  gap: 20px 16px;
   padding: 22px 8px 48px;
 }
-.sticker-item {
-  --sticker-tilt: -5deg;
-  position: relative;
-  min-width: 0;
-  margin: var(--sticker-offset, 12px) -2px 0;
-  padding: 2px;
-  transform: rotate(var(--sticker-tilt)) scale(var(--sticker-scale, 1));
-  transition: transform .22s ease;
-  animation: card-arrive .48s both;
-  text-align: center;
-}
-.sticker-item:hover { z-index: 2; transform: translateY(-4px) rotate(0deg); }
+.sticker-item { min-width: 0; text-align: center; animation: card-arrive .48s both; }
 .sticker-photo-button {
   display: grid;
   place-items: center;
   width: 100%;
-  max-width: 150px;
-  margin-inline: auto;
   aspect-ratio: 1;
+  margin: 0;
   padding: 0;
   border: 0;
-  background: transparent;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
   color: #80977f;
   touch-action: manipulation;
 }
-.sticker-photo { display: block; width: 100%; height: 100%; object-fit: contain; }
+.sticker-photo { display: block; width: 100%; height: 100%; object-fit: contain; border-radius: 0; }
 .sticker-name {
   display: block;
-  max-width: 100%;
-  margin: 6px auto 0;
+  width: 100%;
+  margin: 4px 0 0;
   padding: 4px 2px;
   min-height: 44px;
   border: 0;
-  background: transparent;
+  background: none;
   color: #65513d;
   font-family: var(--app-font-serif);
   font-size: 16px;
   line-height: 1.5;
-  letter-spacing: .08em;
+  letter-spacing: .06em;
   overflow-wrap: anywhere;
   text-align: center;
 }
@@ -198,21 +189,20 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(194, 104, 78
 @keyframes wave {to{height:20px}}
 
 @media (max-width:760px) {
-  .topbar {height:76px;padding:0 19px;}
+  .topbar {min-height:76px;padding:8px 19px;}
   .brand-mark {width:39px;height:39px;}
-  .brand-title {font-size:18px;}
+  .brand-title {font-size:17px;letter-spacing:.04em;}
+  .brand-sub {font-size:9px;letter-spacing:.02em;line-height:1.4;}
   .page-main {padding:15px 19px 60px;}
   .intro {padding:30px 2px 27px;display:block;}
   .intro::after {right:1%;top:4px;transform:scale(.72) rotate(16deg);transform-origin:top right;}
-  .headline {max-width:450px;font-size:34px;}
-  .intro-note {font-size:12px;max-width:280px;margin-top:10px;}
+  .headline {max-width:450px;font-size:32px;}
+  .intro-note {font-size:12px;max-width:none;margin-top:12px;}
   .intro .add-button {margin-top:21px;width:100%;height:50px;}
   .section-top {padding-top:13px;}
   .section-hint {display:none;}
-   .sticker-collage {grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 8px;padding:12px 4px 28px;}
-   .sticker-item {padding:2px;}
-   .sticker-photo-button {max-width:110px;}
-   .sticker-name {font-size:13px;margin-top:4px;letter-spacing:.03em;}
+  .sticker-collage {gap:16px 8px;padding:12px 0 28px;}
+  .sticker-name {font-size:13px;letter-spacing:.02em;}
   .empty-state {min-height:320px;}
   .footer-note {margin-top:32px;text-align:center;}
   .dialog {padding:22px 18px 20px;border-radius:16px;}
@@ -220,10 +210,13 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(194, 104, 78
   .detail-meta {align-items:flex-start;}
 }
 @media (max-width:419px) {
-   .sticker-collage {grid-template-columns:repeat(3,minmax(0,1fr));column-gap:10px;}
-   .sticker-name {font-size:13px;}
-  .headline {font-size:30px;}
-  .saved-count {font-size:11px;}
+  .topbar {flex-wrap:wrap;gap:8px;padding-block:12px;}
+  .brand {flex:1 1 100%;gap:10px;}
+  .brand-mark {flex-shrink:0;}
+  .brand-title {white-space:nowrap;}
+  .headline {font-size:28px;}
+  .saved-count {font-size:11px;margin-left:auto;}
+  .count-number {font-size:18px;}
 }
 button:disabled {cursor:not-allowed;opacity:.55;}
 @media (prefers-reduced-motion: reduce) {
@@ -231,9 +224,6 @@ button:disabled {cursor:not-allowed;opacity:.55;}
 }
 
 /* White-paper restyle: neutral surfaces, clear separation */
-.sticker-photo-button { background:#fff; border:1px solid #dfe3e8; border-radius:14px; padding:6px; box-shadow:0 1px 2px rgba(31,41,55,.08),0 6px 14px rgba(31,41,55,.09); }
-.sticker-photo { border-radius:9px; }
-.sticker-item:hover .sticker-photo-button { box-shadow:0 2px 4px rgba(31,41,55,.1),0 12px 22px rgba(31,41,55,.14); }
 .section-top { border-bottom-color:#e2e6ea; }
 .empty-state { background:#fff; border:1px dashed #cfd5db; box-shadow:0 1px 3px rgba(31,41,55,.06); }
 .empty-action { background:#fff; border-color:#d9ad8e; }

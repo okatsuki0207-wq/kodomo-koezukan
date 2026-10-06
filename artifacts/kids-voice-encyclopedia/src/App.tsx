@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   BookOpen,
@@ -24,18 +24,6 @@ import './index.css';
 
 function formatDate(timestamp: number) {
   return new Intl.DateTimeFormat('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }).format(timestamp);
-}
-
-/** IDから固定のばらつきを生成。再読み込み・並べ替えで位置がちらつかない。 */
-function stickerStyle(id: string, index: number): CSSProperties {
-  let seed = 0;
-  for (let i = 0; i < id.length; i++) seed = (Math.imul(seed, 31) + id.charCodeAt(i)) >>> 0;
-  return {
-    '--sticker-tilt': `${(seed % 15) - 7}deg`,
-    '--sticker-offset': `${6 + ((seed >>> 4) % 17)}px`,
-    '--sticker-scale': `${0.9 + ((seed >>> 9) % 11) / 100}`,
-    animationDelay: `${Math.min(index, 12) * 70}ms`,
-  } as CSSProperties;
 }
 
 function App() {
@@ -382,9 +370,9 @@ function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <a className="brand" href="/" aria-label="こえのずかん ホーム">
+        <a className="brand" href="/" aria-label="こどもの こえずかん ホーム">
           <span className="brand-mark"><BookOpen size={23} strokeWidth={1.8} /></span>
-          <span><span className="brand-title">こえのずかん</span><span className="brand-sub">ちいさな声の、たからもの</span></span>
+          <span><span className="brand-title">こどもの こえずかん</span><span className="brand-sub">声で集める 世界にひとつのたからもの図鑑</span></span>
         </a>
         <div className="saved-count" data-testid="text-saved-count">しまってある声 <b className="count-number">{items.length}</b> こ</div>
       </header>
@@ -392,9 +380,9 @@ function App() {
       <main className="page-main">
         <section className="intro">
           <div>
-            <p className="eyebrow">かぞくの ちいさな ずかん</p>
-            <h1 className="headline">すきなモノを、<br /><em>声ごと</em>のこそう。</h1>
-            <p className="intro-note">りんごも、ライオンも、赤バスも。<br />見つけたものを声と一緒に記録しよう。</p>
+            <h1 className="headline">こどもの こえずかん</h1>
+            <p className="subtitle"><span>声で集める</span>{' '}<span>世界にひとつのたからもの図鑑</span></p>
+            <p className="intro-note">大好きなもの、とっておきのもの<br />見つけたものを声といっしょにキロクしよう</p>
           </div>
           <button type="button" className="add-button" onClick={openCreate} data-testid="button-create-card"><Plus size={19} /> 新しいカードをつくる</button>
         </section>
@@ -422,8 +410,8 @@ function App() {
           </section>
         ) : (
           <section className="sticker-collage" aria-label="保存した図鑑のシール" data-testid="grid-keepsakes">
-            {items.map((item, index) => (
-              <article key={item.id} className="sticker-item" style={stickerStyle(item.id, index)} data-testid={`card-keepsake-${item.id}`}>
+            {items.map((item) => (
+              <article key={item.id} className="sticker-item" data-testid={`card-keepsake-${item.id}`}>
                 <button
                   type="button"
                   className="sticker-photo-button"
