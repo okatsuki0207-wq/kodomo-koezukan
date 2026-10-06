@@ -28,15 +28,20 @@ export async function categoryIdForName(name: string): Promise<string> {
   return `custom-${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 }
 
-export function keepsakeMetadata(itemName: string, categoryId: string | null = null) {
-  const clean = itemName.trim();
-  if (!clean) throw new Error('図鑑に登録するモノの名前を入力してください。');
-  if (clean.length > 48) throw new Error('モノの名前は48文字以内にしてください。');
+export function validateCategoryId(categoryId: string | null) {
   if (categoryId !== null &&
       !DEFAULT_CATEGORIES.some((category) => category.id === categoryId) &&
       !/^custom-[a-f0-9]{64}$/.test(categoryId)) {
     throw new Error('カテゴリを選び直してください。');
   }
+  return categoryId;
+}
+
+export function keepsakeMetadata(itemName: string, categoryId: string | null = null) {
+  const clean = itemName.trim();
+  if (!clean) throw new Error('図鑑に登録するモノの名前を入力してください。');
+  if (clean.length > 48) throw new Error('モノの名前は48文字以内にしてください。');
+  validateCategoryId(categoryId);
   // 編集ではこれ以外を書き換えない。画像・音声・作成日時を必ず維持する。
   return { itemName: clean, categoryId };
 }

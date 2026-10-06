@@ -278,3 +278,7 @@ button:disabled {cursor:not-allowed;opacity:.55;}
   .category-bar { flex-direction:column; align-items:stretch; }
   .category-new { width:100%; justify-content:center; }
 }
+
+.sticker-photo-button { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; touch-action: pan-y; }
+.sticker-photo { pointer-events: none; -webkit-user-drag: none; }
+.detail-category { margin-top: 10px; }

@@ -19,16 +19,22 @@ import {
 import PhotoEditor from './components/PhotoEditor';
 import CategoryBar from './components/CategoryBar';
 import CategoryDialog from './components/CategoryDialog';
+import { useLongPress } from './hooks/useLongPress';
 import CategorySelect from './components/CategorySelect';
 import EditCardDialog from './components/EditCardDialog';
+import DetailDialogShell from './components/DetailDialogShell';
 import UnusedMediaDialog from './components/UnusedMediaDialog';
 import { useCategories } from './hooks/useCategories';
 import { filterByCategory } from './lib/categories';
-import { deleteKeepsake, deleteUnusedMedia, firebaseError, inspectUnusedMedia, saveKeepsake, subscribeKeepsakes, updateKeepsakeMetadata, type Keepsake } from './lib/keepsakeStore';
+import { deleteKeepsake, deleteUnusedMedia, firebaseError, inspectUnusedMedia, saveKeepsake, subscribeKeepsakes, updateKeepsakeCategory, updateKeepsakeMetadata, type Keepsake } from './lib/keepsakeStore';
 import { readLegacyKeepsakes } from './lib/legacyImport';
 import { trimLeadingSilence } from './lib/audioTrim';
 import { isFirebaseConfigured } from './firebaseConfig';
 import './index.css';
+
+function formatStamp(timestamp: number) {
+  return new Intl.DateTimeFormat('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(timestamp);
+}
 
 function formatDate(timestamp: number) {
   return new Intl.DateTimeFormat('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }).format(timestamp);
@@ -60,6 +66,8 @@ function App() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [cardCategory, setCardCategory] = useState<string | null>(null);
   const [categoryOpen, setCategoryOpen] = useState(false);
+  const [newCatInCreate, setNewCatInCreate] = useState(false);
+  const [catBusy, setCatBusy] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [unusedMediaOpen, setUnusedMediaOpen] = useState(false);
   const { categories, error: categoryIssue, create: createCategoryEntry, describeError } = useCategories(connectionAttempt);
@@ -97,7 +105,11 @@ function App() {
     };
     void subscribeKeepsakes((next) => {
       window.clearTimeout(timer);
-      if (!cancelled) { setItems(next); setLoading(false); setStorageIssue(''); }
+      if (!cancelled) {
+        setItems(next);
+        setDetail((current) => current ? next.find((item) => item.id === current.id) ?? null : null);
+        setLoading(false); setStorageIssue('');
+      }
     }, fail).then((stop) => { if (cancelled) stop(); else unsubscribe = stop; }).catch(fail);
     return () => { cancelled = true; window.clearTimeout(timer); unsubscribe?.(); };
   }, [connectionAttempt]);
@@ -172,6 +184,24 @@ function App() {
       if (player.current === audio) stopPlayback();
       setError('録音を再生できませんでした。');
     }
+  };
+
+  const longPress = useLongPress<Keepsake>((item) => {
+    const current = items.find((entry) => entry.id === item.id);
+    if (!mutationLock.current && current) openDetail(current);
+  });
+  const closeDetail = () => { if (mutationLock.current) return; stopPlayback(); setDetail(null); setEditOpen(false); setConfirmDelete(false); };
+
+  const changeDetailCategory = async (categoryId: string | null) => {
+    if (!detail || mutationLock.current) return;
+    const target = detail;
+    mutationLock.current = true; setBusy(true); setCatBusy(true); setError('');
+    try {
+      await updateKeepsakeCategory(target.id, categoryId);
+      setDetail((c) => c && c.id === target.id ? { ...c, categoryId } : c);
+      setItems((list) => list.map((e) => e.id === target.id ? { ...e, categoryId } : e));
+    } catch (caught) { setError(describeError(caught)); }
+    finally { mutationLock.current = false; setBusy(false); setCatBusy(false); }
   };
 
   const openDetail = (item: Keepsake) => {
@@ -412,7 +442,7 @@ function App() {
 
         <CategoryBar categories={categories} selected={selectedCategory} onSelect={(id) => { stopPlayback(); setSelectedCategory(id); }} onNew={() => setCategoryOpen(true)} disabled={busy} />
         <button type="button" className="plain-action unused-entry" disabled={busy || loading || !isFirebaseConfigured}
-          onClick={() => setUnusedMediaOpen(true)} data-testid="button-unused-media">保護者向け：未使用ファイルの確認</button>
+          onClick={() => setUnusedMediaOpen(true)} data-testid="button-unused-media" style={{ width: 'auto', height: 'auto', maxWidth: '100%', padding: '8px 14px', borderRadius: 20, lineHeight: 1.6 }}>保護者向け：未使用ファイルの確認</button>
         {categoryIssue && <div className="notice" role="alert" data-testid="status-categories-load-error"><AlertCircle size={16} />{categoryIssue}
           <button type="button" className="record-button" onClick={() => setConnectionAttempt((value) => value + 1)} disabled={busy}>再接続</button>
         </div>}
@@ -448,6 +478,7 @@ function App() {
                   type="button"
                   className="sticker-photo-button"
                   onClick={() => playKeepsake(item)}
+                  {...longPress(item)}
                   aria-label={item.voice ? `${item.itemName}の声を再生` : `${item.itemName}の写真をひらく`}
                   data-testid={`button-play-card-${item.id}`}
                 >
@@ -469,10 +500,10 @@ function App() {
       </main>
 
       {createOpen && !photoEditorSource && (
-        <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCreate(); }}>
-          <section className="dialog" role="dialog" aria-modal="true" aria-labelledby="create-title">
+        <div className="overlay" role="presentation" inert={newCatInCreate} onMouseDown={(event) => { if (event.target === event.currentTarget) closeCreate(); }}>
+          <DetailDialogShell className="dialog" label="新しいカードをつくる" returnSelector='[data-testid="button-create-card"]' onClose={closeCreate}>
             <div className="dialog-head">
-              <div><h2 id="create-title" className="dialog-title">新しいページをつくる</h2><p className="dialog-lede">図鑑に登録するモノの写真と声を残します。</p></div>
+              <div><h2 id="create-title" className="dialog-title">新しいカードをつくる</h2><p className="dialog-lede">図鑑に登録するモノの写真と声を残します。</p></div>
               <button type="button" className="icon-button" disabled={busy} onClick={closeCreate} aria-label="閉じる" data-testid="button-close-create"><X size={19} /></button>
             </div>
             <div className="form-block">
@@ -481,7 +512,7 @@ function App() {
               <input id="keepsake-item-name" className="title-input" disabled={busy} value={itemName} onChange={(event) => setItemName(event.currentTarget.value)} placeholder="りんご、ライオン、赤バス など" maxLength={48} data-testid="input-item-name" />
             </div>
             <div className="form-block">
-              <CategorySelect id="create-category" categories={categories} value={cardCategory} onChange={setCardCategory} disabled={busy} testId="select-card-category" />
+              <CategorySelect id="create-category" categories={categories} value={cardCategory} onChange={setCardCategory} disabled={busy} testId="select-card-category" onNew={() => setNewCatInCreate(true)} />
             </div>
             <div className="form-block">
               <span className="field-label">写真</span>
@@ -523,10 +554,10 @@ function App() {
             {error && <p className="form-error" role="alert" data-testid="status-form-error">{error}</p>}
             <div className="dialog-actions">
               <button type="button" className="cancel-button" disabled={busy} onClick={closeCreate} data-testid="button-cancel-create">あとで</button>
-              <button type="button" className="save-button" onClick={saveCard} disabled={recording || processingVoice || busy || !isFirebaseConfigured || !!storageIssue || loading} data-testid="button-save-card"><Check size={16} /> {busy ? 'Firebaseに保存中…' : 'このページをしまう'}</button>
+              <button type="button" className="save-button" onClick={saveCard} disabled={recording || processingVoice || busy || !isFirebaseConfigured || !!storageIssue || loading} data-testid="button-save-card"><Check size={16} /> {busy ? 'Firebaseに保存中…' : 'このカードをしまう'}</button>
             </div>
             {!isFirebaseConfigured && <p className="form-error" role="status">保存にはFirebaseの設定が必要です。src/firebaseConfig.ts をご確認ください。</p>}
-          </section>
+          </DetailDialogShell>
         </div>
       )}
 
@@ -544,21 +575,21 @@ function App() {
       )}
 
       {detail && !editOpen && (
-        <div className="overlay" role="presentation" onMouseDown={(event) => { if (!busy && event.target === event.currentTarget) { stopPlayback(); setDetail(null); } }}>
-          <section className="dialog dialog-detail" role="dialog" aria-modal="true" aria-label={`${detail.itemName}のページ`}>
-            <button type="button" className="icon-button" disabled={busy} style={{ position: 'absolute', zIndex: 2, right: 25, top: 25 }} onClick={() => { stopPlayback(); setDetail(null); }} aria-label="閉じる" data-testid="button-close-detail"><X size={19} /></button>
+        <div className="overlay" role="presentation" onMouseDown={(event) => { if (!busy && event.target === event.currentTarget) closeDetail(); }}>
+          <DetailDialogShell label={`${detail.itemName}のカード`} returnSelector={`[data-testid="button-detail-${detail.id}"]`} onClose={closeDetail}>
+            <button type="button" className="icon-button" disabled={busy} style={{ position: 'absolute', zIndex: 2, right: 25, top: 25 }} onClick={closeDetail} aria-label="閉じる" data-testid="button-close-detail"><X size={19} /></button>
             {detail.photo ? <img className="detail-image" src={detail.photo} alt={`${detail.itemName}の写真`} /> : <div className="detail-image-placeholder"><ImageIcon size={54} /></div>}
             <div className="detail-meta">
-              <div><h2 className="detail-name">{detail.itemName}</h2><p className="detail-date">{formatDate(detail.createdAt)} にしまいました</p><p className="detail-date" data-testid="text-detail-category">カテゴリ: {categoryName(detail.categoryId) ?? (detail.categoryId ? '読み込み中のカテゴリ' : '未分類')}</p>{!detail.voice && <p className="detail-date">このページには、まだ声がありません</p>}</div>
+              <div><h2 className="detail-name">{detail.itemName}</h2><p className="detail-date" data-testid="text-detail-created-at">登録日時：{formatStamp(detail.createdAt)}</p><p className="detail-date" data-testid="text-detail-category">カテゴリ: {categoryName(detail.categoryId) ?? (detail.categoryId ? '読み込み中のカテゴリ' : '未分類')}</p><div className="detail-category"><CategorySelect id="detail-category" categories={categories} value={detail.categoryId ?? null} onChange={(id) => void changeDetailCategory(id)} disabled={busy || catBusy} testId="select-detail-category" /></div>{!detail.voice && <p className="detail-date">このカードには、まだ声がありません</p>}</div>
               <div className="detail-actions">
                 {detail.voice && <button type="button" className="record-button primary" onClick={playDetailVoice} data-testid="button-play-detail-voice">{playing && playingItemId === detail.id ? <Pause size={16} /> : <Play size={16} />}{playing && playingItemId === detail.id ? 'とめる' : '声をきく'}</button>}
                 <button type="button" className="record-button" disabled={busy} onClick={() => { stopPlayback(); setEditOpen(true); }} data-testid="button-edit-card"><Pencil size={15} /> へんしゅう</button>
-                <button type="button" className="plain-action" onClick={() => setConfirmDelete((value) => !value)} aria-label="このカードを削除" data-testid="button-delete-card"><Trash2 size={17} /></button>
+                <button type="button" className="plain-action" disabled={busy} onClick={() => setConfirmDelete((value) => !value)} aria-label="このカードを削除" data-testid="button-delete-card"><Trash2 size={17} /></button>
               </div>
             </div>
-            {confirmDelete && <div className="delete-confirm" role="alert"><AlertCircle size={16} />Firebaseから写真・音声・このページを削除しますか？<button type="button" disabled={busy} onClick={deleteCard} data-testid="button-confirm-delete">{busy ? '削除中…' : '削除する'}</button><button type="button" disabled={busy} onClick={() => setConfirmDelete(false)} data-testid="button-cancel-delete">やめる</button></div>}
+            {confirmDelete && <div className="delete-confirm" role="alert"><AlertCircle size={16} />Firebaseから写真・音声・このカードを削除しますか？<button type="button" disabled={busy} onClick={deleteCard} data-testid="button-confirm-delete">{busy ? '削除中…' : '削除する'}</button><button type="button" disabled={busy} onClick={() => setConfirmDelete(false)} data-testid="button-cancel-delete">やめる</button></div>}
             {error && <p className="form-error" role="alert">{error}</p>}
-          </section>
+          </DetailDialogShell>
         </div>
       )}
       {categoryOpen && (
@@ -568,6 +599,16 @@ function App() {
           describeError={describeError}
           onClose={() => setCategoryOpen(false)}
           onCreated={(made) => { setSelectedCategory(made.id); setCategoryOpen(false); }}
+        />
+      )}
+      {newCatInCreate && (
+        <CategoryDialog
+          categories={categories}
+          onCreate={createCategoryEntry}
+          describeError={describeError}
+          returnSelector='[data-testid="select-card-category"]'
+          onClose={() => setNewCatInCreate(false)}
+          onCreated={(made) => { setCardCategory(made.id); setNewCatInCreate(false); }}
         />
       )}
       {unusedMediaOpen && <UnusedMediaDialog onClose={() => setUnusedMediaOpen(false)}

@@ -56,6 +56,7 @@ if (!vm.SourceTextModule) {
         runTransaction: async (_db, execute) => execute({
           get: async (path) => ({ exists: () => records.has(path), data: () => records.get(path) }),
           set: (path, data) => { calls.push(['transaction.set', path, data]); records.set(path, data); },
+          update: (path, data) => { calls.push(['transaction.update', path, data]); records.set(path, { ...records.get(path), ...data }); },
         }),
       },
       'firebase/storage': {
@@ -67,6 +68,7 @@ if (!vm.SourceTextModule) {
       },
       '../firebaseConfig': { firebaseConfig: { storageBucket: 'test-bucket' }, isFirebaseConfigured: true },
       './storageDiagnostics': { diagnoseStorageError: async (error) => error, storageFailureMessage: () => null },
+      './unusedMedia': { createUnusedMediaService: () => { throw new Error('Metadata edits must not inspect or delete unused media'); } },
     };
     const categories = new vm.SourceTextModule(
       stripTypeScriptTypes(await readFile(new URL('../src/lib/categories.ts', import.meta.url), 'utf8')),
@@ -143,6 +145,19 @@ if (!vm.SourceTextModule) {
     await assert.rejects(api.createCategory('すべて'));
     assert.equal(records.size, 0);
     assert.ok(calls.every(([operation]) => operation === 'updateDoc'));
+  });
+
+  test('category-only edit preserves the current name, URLs and timestamps and only writes categoryId', async () => {
+    const { api, records, calls, uid } = await fixture();
+    const path = `users/${uid}/keepsakes/card`;
+    const latest = { itemName: '別の端末で直した名前', photo: 'photo-url', voice: 'voice-url', createdAt: 123 };
+    records.set(path, latest);
+    await api.updateKeepsakeCategory('card', 'default-animals');
+    assert.deepEqual(records.get(path), { ...latest, categoryId: 'default-animals' });
+    assert.deepEqual(calls.map(([op, target, patch]) => [op, target, { ...patch }]), [['updateDoc', path, { categoryId: 'default-animals' }]]);
+    await api.updateKeepsakeCategory('card', null);
+    assert.equal(records.get(path).categoryId, null);
+    await assert.rejects(api.updateKeepsakeCategory('card', 'untrusted'));
   });
 
   test('new card persists assigned category; unclassified legacy saves stay compatible', async () => {

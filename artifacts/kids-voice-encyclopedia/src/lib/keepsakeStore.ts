@@ -7,7 +7,7 @@ import { storageFailureMessage } from './storageDiagnostics';
 import { createKeepsakeRepository, FirebaseTimeoutError } from './keepsakeRepository';
 import { createUnusedMediaService } from './unusedMedia';
 export type { Keepsake } from './keepsakeRepository';
-import { categoryIdForName, DEFAULT_CATEGORIES, keepsakeMetadata, validateCategoryName, type Category } from './categories';
+import { categoryIdForName, DEFAULT_CATEGORIES, keepsakeMetadata, validateCategoryId, validateCategoryName, type Category } from './categories';
 
 const app = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
 const auth = app ? initializeAuth(app, { persistence: indexedDBLocalPersistence }) : null;
@@ -90,6 +90,13 @@ export async function updateKeepsakeMetadata(id: string, itemName: string, categ
   const patch = keepsakeMetadata(itemName, categoryId);
   const uid = await userId();
   await deadline(updateDoc(doc(db!, 'users', uid, 'keepsakes', id), patch));
+}
+
+/** A category-only change must not overwrite a name edited in another session. */
+export async function updateKeepsakeCategory(id: string, categoryId: string | null): Promise<void> {
+  validateCategoryId(categoryId);
+  const uid = await userId();
+  await deadline(updateDoc(doc(db!, 'users', uid, 'keepsakes', id), { categoryId }));
 }
 
 export function firebaseError(error: unknown): string {

@@ -1,7 +1,8 @@
 - [AI photo library licensing](ai-photo-licensing.md) — browser background removal uses an Apache-licensed library/model to avoid IMG.LY's AGPL obligations.
-- [Photo mask selection](photo-mask-selection.md) — painted selection stays on-device; do not silently substitute raw brush clipping for automatic inference.
+- [Photo mask selection](photo-mask-selection.md) — lasso closes only on release; local subject inference must respect the selected region, with no silent clipping fallback.
 - [Firebase privacy](firebase-privacy.md) — cloud migration does not authorize public sharing; keep child photos and voices separated by user.
 - [Firebase Storage diagnosis](firebase-storage-diagnostics.md) — storage/unknown without a response body does not prove a CORS failure; corroborate bucket setup safely.
 - [White-paper theme](white-paper-theme.md) — white backgrounds blend children’s drawings on white paper; retain the existing cute accent colors.
 - [Category editing safety](category-safety.md) — reorganizing pages must not re-upload media, change creation dates, or silently classify older cards.
 - [Cloud save safety](cloud-save-safety.md) — isolate retries and preserve media after ambiguous commits; test only synthetic data in loopback emulators.
+- [SDK unit verification](sdk-unit-verification.md) — enable Node VM modules; source-only fallbacks can hide stale Firebase fixtures and give false-green results.

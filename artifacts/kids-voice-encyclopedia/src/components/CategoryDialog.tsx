@@ -9,15 +9,16 @@ type Props = {
   describeError: (caught: unknown) => string;
   onCreated: (category: Category) => void;
   onClose: () => void;
+  returnSelector?: string;
 };
 
-export default function CategoryDialog({ categories, onCreate, describeError, onCreated, onClose }: Props) {
+export default function CategoryDialog({ categories, onCreate, describeError, onCreated, onClose, returnSelector = '[data-testid="button-new-category"]' }: Props) {
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
   const dialog = useRef<HTMLFormElement | null>(null);
-  useDialogFocus(dialog, '[data-testid="button-new-category"]');
+  useDialogFocus(dialog, returnSelector, () => { if (!busy) onClose(); });
 
   const close = () => { if (!lock.current) onClose(); };
 

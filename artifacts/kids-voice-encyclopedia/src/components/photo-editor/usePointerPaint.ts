@@ -4,7 +4,7 @@ import type { Point, Size } from '../../lib/cropGeometry';
 import type { MaskStroke } from '../../lib/guidedSegmentation';
 import { clientToStage, containMap, samples, stageToNatural } from './contain';
 
-type Options = { stageRef: RefObject<HTMLDivElement | null>; enabled: boolean; image: Size; viewport: Size };
+type Options = { stageRef: RefObject<HTMLDivElement | null>; enabled: boolean; image: Size; viewport: Size; onComplete?: (points: Point[]) => void };
 
 
 /** Freehand lasso: natural-coordinate points only; view coords are derived at render time. */
@@ -12,13 +12,29 @@ export function useFreehand(options: Options) {
   const [points, setPoints] = useState<Point[]>([]);
   const [drawing, setDrawing] = useState(false);
   const activeId = useRef<number | null>(null);
+  const currentPoints = useRef<Point[]>([]);
+  const completedPoints = useRef<Point[]>([]);
   const opts = useRef(options);
   opts.current = options;
 
-  const finish = (event: React.PointerEvent<SVGSVGElement>) => {
+  const finish = (event: React.PointerEvent<SVGSVGElement>, cancelled = false) => {
     if (activeId.current !== event.pointerId) return;
     activeId.current = null;
     setDrawing(false);
+    const { stageRef, enabled, image, viewport, onComplete } = opts.current;
+    if (!cancelled && enabled && stageRef.current) {
+      const p = stageToNatural(clientToStage(event, stageRef.current), containMap(image, viewport), true);
+      const last = currentPoints.current.at(-1);
+      if (p && last && Math.hypot(p.x - last.x, p.y - last.y) > 0.01) {
+        currentPoints.current = [...currentPoints.current, p];
+      }
+      completedPoints.current = [...currentPoints.current];
+      setPoints(completedPoints.current);
+      if (completedPoints.current.length >= 3) onComplete?.(completedPoints.current);
+    } else {
+      currentPoints.current = [...completedPoints.current];
+      setPoints(currentPoints.current);
+    }
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
       try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
     }
@@ -29,11 +45,13 @@ export function useFreehand(options: Options) {
       const { stageRef, enabled, image, viewport } = opts.current;
       const stage = stageRef.current;
       if (!enabled || !stage || activeId.current !== null) return;
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
       const p = stageToNatural(clientToStage(event, stage), containMap(image, viewport), false);
       if (!p) return;
       event.preventDefault();
       try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* ignore */ }
       activeId.current = event.pointerId;
+      currentPoints.current = [p];
       setPoints([p]);
       setDrawing(true);
     },
@@ -47,21 +65,20 @@ export function useFreehand(options: Options) {
       const next = samples(event.nativeEvent)
         .map((s) => stageToNatural(clientToStage(s, stage), map, true))
         .filter((p): p is Point => p !== null);
-      setPoints((cur) => {
-        const out = [...cur];
+      const out = [...currentPoints.current];
         for (const p of next) {
           const last = out[out.length - 1];
           if (!last || Math.hypot(last.x - p.x, last.y - p.y) >= minGap) out.push(p);
         }
-        return out;
-      });
+      currentPoints.current = out;
+      setPoints(out);
     },
-    onPointerUp: finish,
-    onPointerCancel: finish,
-    onLostPointerCapture: finish,
+    onPointerUp: (event: React.PointerEvent<SVGSVGElement>) => finish(event),
+    onPointerCancel: (event: React.PointerEvent<SVGSVGElement>) => finish(event, true),
+    onLostPointerCapture: (event: React.PointerEvent<SVGSVGElement>) => finish(event, true),
   };
 
-  const clear = useCallback(() => { activeId.current = null; setDrawing(false); setPoints([]); }, []);
+  const clear = useCallback(() => { activeId.current = null; currentPoints.current = []; completedPoints.current = []; setDrawing(false); setPoints([]); }, []);
   return { points, drawing, surfaceProps, clear };
 }
 
