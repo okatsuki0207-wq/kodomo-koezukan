@@ -5,6 +5,7 @@ import { getStorage } from 'firebase/storage';
 import { firebaseConfig, isFirebaseConfigured } from '../firebaseConfig';
 import { storageFailureMessage } from './storageDiagnostics';
 import { createKeepsakeRepository, FirebaseTimeoutError } from './keepsakeRepository';
+import { createKeepsakeEditor } from './keepsakeEditor';
 import { createUnusedMediaService } from './unusedMedia';
 export type { Keepsake } from './keepsakeRepository';
 import { categoryIdForName, DEFAULT_CATEGORIES, keepsakeMetadata, validateCategoryId, validateCategoryName, type Category } from './categories';
@@ -41,6 +42,7 @@ async function userId(): Promise<string> {
 
 const repository = createKeepsakeRepository(db!, storage!, userId);
 export const { saveKeepsake, deleteKeepsake, subscribeKeepsakes } = repository;
+export const { editKeepsake } = createKeepsakeEditor(db!, storage!, userId);
 // Deferred construction avoids touching an unconfigured Storage instance at module load.
 export async function inspectUnusedMedia() {
   await userId();

@@ -1,11 +1,16 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function mediaUrl(url, path) {
+      return url is string
+        && url.matches('https://firebasestorage.googleapis.com/v0/b/[^/]+/o/[^/]+([?].*)?')
+        && url.split('/')[7].split('[?]')[0] == path.replace('/', '%2F');
+    }
     match /users/{uid}/keepsakes/{id} {
       function owner() { return request.auth != null && request.auth.uid == uid; }
       function mediaPath(path, kind) {
-        return path == 'users/' + uid + '/keepsakes/' + id + '/' + kind
-          || (path is string && path.matches('users/' + uid + '/keepsakes/' + id + '/[a-zA-Z0-9-]+/' + kind));
+        let prefix = 'users/' + uid + '/keepsakes/' + id + '/';
+        return path is string && path.matches(prefix + '([a-zA-Z0-9-]+/)?' + kind);
       }
       function attemptAvailable(path) {
         // Legacy media remains readable. Permanent cleanup fences cannot be reused.
@@ -16,12 +21,21 @@ service cloud.firestore {
               (getAfter(/databases/$(database)/documents/users/$(uid)/saveAttempts/$(parts[4])).data.state != 'blocked'
                 && getAfter(/databases/$(database)/documents/users/$(uid)/saveAttempts/$(parts[4])).data.cardId == id)));
       }
-      function mediaUrl(url, path) {
-        // A URL cannot secretly reference a different card/attempt than its path.
-        // Current app IDs are UUIDs and anonymous Auth UIDs need no URI escaping.
-        return url is string
-          && url.matches('https://firebasestorage.googleapis.com/v0/b/[^/]+/o/[^/]+([?].*)?')
-          && url.split('/')[7].split('[?]')[0] == path.replace('/', '%2F');
+      function uploadedVoice(v) {
+        let parts = v.path.split('/');
+        let attempt = getAfter(/databases/$(database)/documents/users/$(uid)/saveAttempts/$(parts[4])).data;
+        // Validate expensive URL/path binding once when the upload finishes.
+        // Each card checks that immutable binding and its permanent cleanup fence.
+        return parts.size() == 6 && parts[5] == 'voice'
+          && attempt.cardId == id && attempt.state != 'blocked'
+          && attempt.get('media', {}) == {'url': v.url, 'path': v.path};
+      }
+      function uploadedPhoto(url, path) {
+        let parts = path.split('/');
+        let attempt = getAfter(/databases/$(database)/documents/users/$(uid)/saveAttempts/$(parts[4])).data;
+        return parts.size() == 6 && parts[5] == 'photo'
+          && attempt.cardId == id && attempt.state != 'blocked'
+          && attempt.get('media', {}) == {'url': url, 'path': path};
       }
       function categoryValid(data) {
         return !('categoryId' in data) || data.categoryId == null ||
@@ -32,17 +46,37 @@ service cloud.firestore {
       function nameValid(data) {
         return data.itemName is string && data.itemName.size() > 0 && data.itemName.size() <= 48;
       }
-      function completeCardValid(data) {
-        return data.keys().hasAll(['itemName', 'photo', 'voice', 'photoPath', 'voicePath', 'createdAt'])
-          && data.keys().hasOnly(['itemName', 'photo', 'voice', 'photoPath', 'voicePath', 'createdAt', 'categoryId'])
-          && nameValid(data) && categoryValid(data)
-          && mediaPath(data.photoPath, 'photo')
-          && mediaUrl(data.photo, data.photoPath)
-          && attemptAvailable(data.photoPath)
-          && ((data.voice == null && data.voicePath == null) ||
-            (data.voicePath is string && mediaUrl(data.voice, data.voicePath)))
-          && (data.voicePath == null ||
-            (mediaPath(data.voicePath, 'voice') && attemptAvailable(data.voicePath)))
+      function voiceValid(v, old) {
+        return v is map && v.keys().hasOnly(['id', 'url', 'path'])
+          && v.id is string && v.id.matches('[a-zA-Z0-9-]{1,64}')
+          && v.url is string && (v.path == null || v.path is string)
+          && (v in old.get('voices', []) ||
+            (v.url == old.get('voice', null) && v.path == old.get('voicePath', null)) ||
+            (v.path is string && uploadedVoice(v)));
+      }
+      function voiceAtValid(data, old, i) {
+        return data.voices.size() <= i || voiceValid(data.voices[i], old);
+      }
+      function voicesValid(data, old) {
+        return !('voices' in data) || (data.voices is list && data.voices.size() <= 5
+          && voiceAtValid(data, old, 0) && voiceAtValid(data, old, 1)
+          && voiceAtValid(data, old, 2) && voiceAtValid(data, old, 3) && voiceAtValid(data, old, 4)
+          && ((data.voices.size() == 0 && data.voice == null && data.get('voicePath', null) == null) ||
+            (data.voices.size() > 0 && data.voice == data.voices[0].url && data.get('voicePath', null) == data.voices[0].path)));
+      }
+      function completeCardValid(data, old) {
+        return data.keys().hasAll(['itemName', 'photo', 'voice', 'createdAt'])
+          && data.keys().hasOnly(['itemName', 'photo', 'voice', 'photoPath', 'voicePath', 'createdAt', 'categoryId', 'voices'])
+          && nameValid(data) && categoryValid(data) && data.photo is string && data.photo.size() > 0
+          && ((data.photo == old.get('photo', null) && data.get('photoPath', null) == old.get('photoPath', null)) ||
+            (('photo' in old)
+              ? (data.get('photoPath', null) is string && uploadedPhoto(data.photo, data.photoPath))
+              : (mediaPath(data.get('photoPath', null), 'photo') && mediaUrl(data.photo, data.photoPath) && attemptAvailable(data.photoPath))))
+          && (('voices' in data) || (data.voice == old.get('voice', null) && data.get('voicePath', null) == old.get('voicePath', null)) ||
+            (data.voice == null && data.get('voicePath', null) == null) ||
+            (data.get('voicePath', null) is string && mediaPath(data.voicePath, 'voice')
+              && mediaUrl(data.voice, data.voicePath) && attemptAvailable(data.voicePath)))
+          && voicesValid(data, old)
           && data.createdAt is timestamp;
       }
       function metadataOnlyUpdate() {
@@ -51,17 +85,31 @@ service cloud.firestore {
           && nameValid(request.resource.data) && categoryValid(request.resource.data);
       }
       allow read, delete: if owner();
-      allow create: if owner() && completeCardValid(request.resource.data);
-      allow update: if owner() && (metadataOnlyUpdate() || completeCardValid(request.resource.data));
+      allow create: if owner() && completeCardValid(request.resource.data, {});
+      allow update: if owner() && (metadataOnlyUpdate() ||
+        (request.resource.data.createdAt == resource.data.createdAt && completeCardValid(request.resource.data, resource.data)));
     }
     match /users/{uid}/saveAttempts/{attempt} {
       function owner() { return request.auth != null && request.auth.uid == uid; }
+      function finishedMediaValid(data) {
+        let prefix = 'users/' + uid + '/keepsakes/' + resource.data.cardId + '/' + attempt + '/';
+        return !('media' in data) || (data.media is map
+          && data.media.keys().hasOnly(['url', 'path'])
+          && (data.media.path == prefix + 'photo' || data.media.path == prefix + 'voice')
+          && mediaUrl(data.media.url, data.media.path));
+      }
       function cardDoesNotUseAttempt() {
         let card = /databases/$(database)/documents/users/$(uid)/keepsakes/$(resource.data.cardId);
         let prefix = 'users/' + uid + '/keepsakes/' + resource.data.cardId + '/' + attempt + '/.*';
         return !exists(card) ||
           (!get(card).data.get('photoPath', '').matches(prefix)
-            && (get(card).data.get('voicePath', null) == null || !get(card).data.voicePath.matches(prefix)));
+            && (get(card).data.get('voicePath', null) == null || !get(card).data.voicePath.matches(prefix))
+            && !voiceUsesAttempt(get(card).data, prefix, 0) && !voiceUsesAttempt(get(card).data, prefix, 1)
+            && !voiceUsesAttempt(get(card).data, prefix, 2) && !voiceUsesAttempt(get(card).data, prefix, 3)
+            && !voiceUsesAttempt(get(card).data, prefix, 4));
+      }
+      function voiceUsesAttempt(data, prefix, i) {
+        return data.get('voices', []).size() > i && data.voices[i].path is string && data.voices[i].path.matches(prefix);
       }
       allow read: if owner();
       allow create: if owner()
@@ -75,7 +123,8 @@ service cloud.firestore {
         && request.resource.data.startedAt == request.time;
       allow update: if owner() && (
         (resource.data.state == 'active' && request.resource.data.state == 'finished'
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['state', 'finishedAt'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['state', 'finishedAt', 'media'])
+          && finishedMediaValid(request.resource.data)
           && request.resource.data.finishedAt == request.time)
         || (resource.data.state == 'finished' && request.resource.data.state == 'blocked'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['state'])
@@ -83,6 +132,15 @@ service cloud.firestore {
           && cardDoesNotUseAttempt())
       );
       // Never remove a fence or reactivate a completed attempt.
+    }
+    match /users/{uid}/mediaEdits/{edit} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create: if request.auth != null && request.auth.uid == uid
+        && edit.matches('[a-zA-Z0-9-]{1,80}')
+        && request.resource.data.keys().hasOnly(['cardId', 'createdAt'])
+        && request.resource.data.cardId is string && request.resource.data.cardId.size() > 0
+        && !request.resource.data.cardId.matches('.*/.*') && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
     }
     match /users/{uid}/categories/{id} {
       function owner() { return request.auth != null && request.auth.uid == uid; }

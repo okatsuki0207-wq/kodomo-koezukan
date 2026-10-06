@@ -2,6 +2,7 @@ import { collection, deleteDoc, doc, getDocFromServer, onSnapshot, orderBy, quer
 import { deleteObject, getDownloadURL, ref, uploadBytes, type FirebaseStorage } from 'firebase/storage';
 import { diagnoseStorageError } from './storageDiagnostics.ts';
 import { keepsakeMetadata } from './categories.ts';
+import { getVoices, keepsakeFromData, type VoiceAsset } from './voiceAssets.ts';
 
 export type Keepsake = {
   id: string;
@@ -12,11 +13,12 @@ export type Keepsake = {
   photoPath?: string;
   voicePath?: string | null;
   categoryId?: string | null;
+  voices?: VoiceAsset[];
 };
 
 export class FirebaseTimeoutError extends Error {}
 
-function deadline<T>(operation: Promise<T>, milliseconds: number): Promise<T> {
+export function deadline<T>(operation: Promise<T>, milliseconds: number): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new FirebaseTimeoutError('Firebase の応答がありません。処理が後から完了する場合があります。再接続後に一覧を確認してからもう一度お試しください。')), milliseconds);
     operation.then(resolve, reject).finally(() => clearTimeout(timer));
@@ -123,8 +125,21 @@ export function createKeepsakeRepository(
 
   async function deleteKeepsake(item: Keepsake): Promise<void> {
     const uid = await userId();
-    for (const [path, url] of [[item.photoPath, item.photo], [item.voicePath, item.voice]]) {
+    // Validate the supplied snapshot before resolving the current server version.
+    // A stale but valid snapshot may be refreshed; a mismatched URL is never trusted.
+    for (const [path, url] of [[item.photoPath, item.photo], ...getVoices(item).map((v) => [v.path, v.url])]) {
+      if (path?.startsWith(`users/${uid}/keepsakes/${item.id}/`) && url && io.ref(storage, url).fullPath !== path) {
+        throw new Error('ファイルの保存パスが一致しません。削除していません。');
+      }
+    }
+    const latest = await deadline(io.getDoc(doc(db, 'users', uid, 'keepsakes', item.id)), timeoutMs);
+    const current = latest.exists() ? keepsakeFromData(item.id, latest.data()!) : item;
+    const files = [[current.photoPath, current.photo], ...getVoices(current).map((v) => [v.path, v.url])];
+    const removed = new Set<string>();
+    for (const [path, url] of files) {
+      if (!path || removed.has(path)) continue;
       if (path?.startsWith(`users/${uid}/keepsakes/${item.id}/`)) await removeFile(path, url ?? undefined);
+      removed.add(path);
     }
     await deadline(io.deleteDoc(doc(db, 'users', uid, 'keepsakes', item.id)), timeoutMs);
   }
@@ -132,15 +147,7 @@ export function createKeepsakeRepository(
   async function subscribeKeepsakes(onChange: (items: Keepsake[]) => void, onError: (error: unknown) => void) {
     const uid = await userId();
     return onSnapshot(query(collection(db, 'users', uid, 'keepsakes'), orderBy('createdAt', 'desc')), (snapshot) => {
-      onChange(snapshot.docs.map((record) => {
-        const value = record.data();
-        return {
-          id: record.id, itemName: value.itemName, photo: value.photo, voice: value.voice ?? null,
-          photoPath: value.photoPath, voicePath: value.voicePath ?? null,
-          categoryId: value.categoryId ?? null,
-          createdAt: value.createdAt?.toMillis?.() ?? Date.now(),
-        };
-      }));
+      onChange(snapshot.docs.map((record) => keepsakeFromData(record.id, record.data())));
     }, onError);
   }
   return { saveKeepsake, deleteKeepsake, subscribeKeepsakes };

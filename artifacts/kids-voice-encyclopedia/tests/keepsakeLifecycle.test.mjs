@@ -6,6 +6,7 @@ import { doc, getDocFromServer, deleteDoc, setDoc, updateDoc, runTransaction, co
 import { ref, uploadBytes, getDownloadURL, getMetadata, getBytes, deleteObject, list } from 'firebase/storage';
 import { createKeepsakeRepository } from '../src/lib/keepsakeRepository.ts';
 import { createUnusedMediaService, MEDIA_RETENTION_MS } from '../src/lib/unusedMedia.ts';
+import { createKeepsakeEditor } from '../src/lib/keepsakeEditor.ts';
 
 const projectId = 'demo-keepsakes-test';
 const storageOrigin = 'http://127.0.0.1:9197';
@@ -76,6 +77,119 @@ const repository = (client = alice, uid = 'alice', faults = {}, timeout = 5000) 
       diagnoseStorageError: async (error) => error,
       ...faults,
     }, timeout);
+
+const editor = (client = alice, uid = 'alice', faults = {}, timeout = 5000) =>
+  createKeepsakeEditor(client.db, client.storage, async () => uid, {
+    uploadBytes: nodeUpload, getDownloadURL: canonicalUrl,
+    ref: (storage, path) => ref(storage, path?.replace('https://firebasestorage.googleapis.com', storageOrigin)),
+    diagnoseStorageError: async (error) => error, ...faults,
+  }, timeout);
+
+test('media editing atomically replaces photo/voice, adds clips, preserves dates and old bytes; receipt retry is idempotent', async () => {
+  const repo = repository();
+  await repo.saveKeepsake(item('edited'));
+  const original = (await getDocFromServer(doc(alice.db, 'users/alice/keepsakes/edited'))).data();
+  const base = { ...item('edited'), ...original };
+  const api = editor();
+  const changed = await api.editKeepsake(base, {
+    photo: source(photoBytes, 'image/png'), itemName: '編集後',
+    voices: [{ id: 'primary', source: source(voiceBytes, 'audio/wav') }, { id: 'extra', source: source(voiceBytes, 'audio/wav') }],
+  }, 'edit-one');
+  assert.equal(changed.voices.length, 2);
+  assert.equal(changed.voice, changed.voices[0].url);
+  assert.equal(changed.itemName, '編集後');
+  assert.equal(changed.createdAt, original.createdAt.toMillis());
+  assert.notEqual(changed.photoPath, original.photoPath);
+  assert.notEqual(changed.voicePath, original.voicePath);
+  assert.deepEqual(Buffer.from(await getBytes(ref(alice.storage, original.voicePath))), voiceBytes);
+  assert.deepEqual(Buffer.from(await getBytes(ref(alice.storage, original.photoPath))), photoBytes);
+  const retry = await api.editKeepsake(base, { voices: [{ id: 'extra', source: source(voiceBytes, 'audio/wav') }] }, 'edit-one');
+  assert.deepEqual(retry.voices, changed.voices);
+  const restored = (await getDocFromServer(doc(alice.db, 'users/alice/keepsakes/edited'))).data();
+  assert.deepEqual(restored.voices, changed.voices);
+  assert.equal(restored.createdAt.toMillis(), original.createdAt.toMillis());
+  await repo.deleteKeepsake(changed);
+  for (const v of changed.voices) await assert.rejects(getMetadata(ref(alice.storage, v.path)), (e) => e.code === 'storage/object-not-found');
+});
+
+test('voice-less card accepts added audio, metadata edits upload nothing, maximum five is enforced', async () => {
+  await repository().saveKeepsake(item('silent-edit', false));
+  const stored = (await getDocFromServer(doc(alice.db, 'users/alice/keepsakes/silent-edit'))).data();
+  const base = { ...item('silent-edit', false), ...stored };
+  const named = await editor(alice, 'alice', { uploadBytes: () => { throw new Error('unexpected upload'); } })
+    .editKeepsake(base, { itemName: '新しい名前' }, 'name-only');
+  assert.equal(named.photoPath, stored.photoPath);
+  assert.equal(named.voice, null);
+  const categoryId = `custom-${'a'.repeat(64)}`;
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), `users/alice/categories/${categoryId}`), { name: 'テスト分類', createdAt: Timestamp.now() });
+  });
+  // Six-file edits fail before any upload. Worst supported edit: a new photo,
+  // four new voices and a custom category
+  // in one commit, including real Firestore expression/access-call limits.
+  const firstFour = Array.from({ length: 4 }, (_, i) => ({ id: `clip-${i}`, source: source(voiceBytes, 'audio/wav') }));
+  await assert.rejects(editor(alice, 'alice', { uploadBytes: () => { throw new Error('should not upload'); } })
+    .editKeepsake(named, { photo: source(photoBytes, 'image/png'), voices: [...firstFour, { id: 'clip-4', source: source(voiceBytes, 'audio/wav') }] }, 'too-many-files'), /合計5ファイル/);
+  const four = await editor().editKeepsake(named, { photo: source(photoBytes, 'image/png'), categoryId, voices: firstFour }, 'add-four');
+  const voiced = await editor().editKeepsake(four, { voices: [{ id: 'clip-4', source: source(voiceBytes, 'audio/wav') }] }, 'add-last');
+  assert.equal(voiced.voices.length, 5);
+  await assert.rejects(editor().editKeepsake(voiced, { voices: [{ id: 'sixth', source: source(voiceBytes, 'audio/wav') }] }, 'add-six'), /5件/);
+  assert.equal((await getDocFromServer(doc(alice.db, 'users/alice/keepsakes/silent-edit'))).data().voices.length, 5);
+});
+
+test('failed upload or missing card cannot replace existing data or remove original media', async () => {
+  await repository().saveKeepsake(item('fail-edit'));
+  const stored = (await getDocFromServer(doc(alice.db, 'users/alice/keepsakes/fail-edit'))).data();
+  const base = { ...item('fail-edit'), ...stored };
+  await assert.rejects(editor(alice, 'alice', { uploadBytes: async () => { throw new Error('injected upload failure'); } })
+    .editKeepsake(base, { photo: source(photoBytes, 'image/png') }, 'fail-edit'), /upload failure/);
+  assert.deepEqual((await getDocFromServer(doc(alice.db, 'users/alice/keepsakes/fail-edit'))).data(), stored);
+  assert.deepEqual(Buffer.from(await getBytes(ref(alice.storage, stored.voicePath))), voiceBytes);
+  await assert.rejects(editor().editKeepsake({ ...base, id: 'missing' }, { photo: source(photoBytes, 'image/png') }, 'missing-edit'), /削除/);
+});
+
+test('lost edit acknowledgement retains committed bytes and retry cannot duplicate added voices', async () => {
+  await repository().saveKeepsake(item('unknown-edit'));
+  const stored = (await getDocFromServer(doc(alice.db, 'users/alice/keepsakes/unknown-edit'))).data();
+  const base = { ...item('unknown-edit'), ...stored };
+  const faulty = editor(alice, 'alice', { runTransaction: async (...args) => {
+    await runTransaction(...args); throw Object.assign(new Error('lost ack'), { code: 'unavailable' });
+  } });
+  await assert.rejects(faulty.editKeepsake(base, { voices: [{ id: 'added', source: source(voiceBytes, 'audio/wav') }] }, 'unknown-one'), /結果を確認/);
+  const result = await editor().editKeepsake(base, { voices: [{ id: 'added', source: source(voiceBytes, 'audio/wav') }] }, 'unknown-one');
+  assert.equal(result.voices.length, 2);
+  for (const voice of result.voices) assert.deepEqual(Buffer.from(await getBytes(ref(alice.storage, voice.path))), voiceBytes);
+});
+
+test('concurrent replacements conflict without overwriting the winner; concurrent additions merge', async () => {
+  await repository().saveKeepsake(item('race-edit'));
+  const base = { ...item('race-edit'), ...(await getDocFromServer(doc(alice.db, 'users/alice/keepsakes/race-edit'))).data() };
+  const replacements = await Promise.allSettled(['replace-one', 'replace-two'].map((id) =>
+    editor().editKeepsake(base, { photo: source(photoBytes, 'image/png') }, id)));
+  assert.equal(replacements.filter((r) => r.status === 'fulfilled').length, 1);
+  assert.equal(replacements.filter((r) => r.status === 'rejected').length, 1);
+  await Promise.all(['audio-one', 'audio-two'].map((id) =>
+    editor().editKeepsake(base, { voices: [{ id, source: source(voiceBytes, 'audio/wav') }] }, id)));
+  const data = (await getDocFromServer(doc(alice.db, 'users/alice/keepsakes/race-edit'))).data();
+  assert.equal(data.voices.length, 3);
+  assert.equal(new Set(data.voices.map((v) => v.id)).size, 3);
+});
+
+test('additional audio is protected from orphan cleanup and foreign UID writes; creation date and immutable receipts are fenced', async () => {
+  await repository().saveKeepsake(item('protected-edit'));
+  const base = { ...item('protected-edit'), ...(await getDocFromServer(doc(alice.db, 'users/alice/keepsakes/protected-edit'))).data() };
+  const changed = await editor().editKeepsake(base, { voices: [{ id: 'additional', source: source(voiceBytes, 'audio/wav') }] }, 'protected-one');
+  const attempt = changed.voices[1].path.split('/')[4];
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await updateDoc(doc(ctx.firestore(), `users/alice/saveAttempts/${attempt}`), { finishedAt: Timestamp.fromMillis(Date.now() - MEDIA_RETENTION_MS * 2) });
+  });
+  await assertFails(updateDoc(doc(alice.db, `users/alice/saveAttempts/${attempt}`), { state: 'blocked' }));
+  await assertFails(updateDoc(doc(bob.db, 'users/alice/keepsakes/protected-edit'), { voices: [] }));
+  await assertFails(updateDoc(doc(alice.db, 'users/alice/keepsakes/protected-edit'), { createdAt: Timestamp.now() }));
+  await assertFails(deleteDoc(doc(alice.db, 'users/alice/mediaEdits/protected-one')));
+  const report = await createUnusedMediaService(alice.db, alice.storage, async () => 'alice').inspectUnusedMedia();
+  assert.equal(report.files.find((f) => f.path === changed.voices[1].path).status, 'referenced');
+});
 const record = (id, client = alice, uid = 'alice') => doc(client.db, 'users', uid, 'keepsakes', id);
 async function stored(id) {
   const snapshot = await getDocFromServer(record(id));

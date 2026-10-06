@@ -69,18 +69,24 @@ if (!vm.SourceTextModule) {
       '../firebaseConfig': { firebaseConfig: { storageBucket: 'test-bucket' }, isFirebaseConfigured: true },
       './storageDiagnostics': { diagnoseStorageError: async (error) => error, storageFailureMessage: () => null },
       './unusedMedia': { createUnusedMediaService: () => { throw new Error('Metadata edits must not inspect or delete unused media'); } },
+      './keepsakeEditor': { createKeepsakeEditor: () => ({ editKeepsake: () => { throw new Error('Not a metadata-only operation'); } }) },
     };
     const categories = new vm.SourceTextModule(
       stripTypeScriptTypes(await readFile(new URL('../src/lib/categories.ts', import.meta.url), 'utf8')),
       { context },
     );
     await categories.link(() => { throw new Error('Unexpected helper import'); });
+    const voices = new vm.SourceTextModule(
+      stripTypeScriptTypes(await readFile(new URL('../src/lib/voiceAssets.ts', import.meta.url), 'utf8')), { context },
+    );
+    await voices.link(() => { throw new Error('Unexpected voice helper import'); });
     const repository = new vm.SourceTextModule(
       stripTypeScriptTypes(await readFile(new URL('../src/lib/keepsakeRepository.ts', import.meta.url), 'utf8')),
       { context },
     );
     const link = (name) => {
       if (name === './categories' || name === './categories.ts') return categories;
+      if (name === './voiceAssets' || name === './voiceAssets.ts') return voices;
       const values = exports[name.replace(/\.ts$/, '')];
       assert.ok(values, `Unexpected dependency: ${name}`);
       return new vm.SyntheticModule(Object.keys(values), function () {

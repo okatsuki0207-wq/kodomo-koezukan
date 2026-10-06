@@ -26,7 +26,8 @@ import DetailDialogShell from './components/DetailDialogShell';
 import UnusedMediaDialog from './components/UnusedMediaDialog';
 import { useCategories } from './hooks/useCategories';
 import { filterByCategory } from './lib/categories';
-import { deleteKeepsake, deleteUnusedMedia, firebaseError, inspectUnusedMedia, saveKeepsake, subscribeKeepsakes, updateKeepsakeCategory, updateKeepsakeMetadata, type Keepsake } from './lib/keepsakeStore';
+import { deleteKeepsake, deleteUnusedMedia, editKeepsake, firebaseError, inspectUnusedMedia, saveKeepsake, subscribeKeepsakes, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
+import { getVoices } from './lib/voiceAssets';
 import { readLegacyKeepsakes } from './lib/legacyImport';
 import { trimLeadingSilence } from './lib/audioTrim';
 import { isFirebaseConfigured } from './firebaseConfig';
@@ -55,6 +56,7 @@ function App() {
   const [permissionError, setPermissionError] = useState('');
   const [playing, setPlaying] = useState(false);
   const [playingItemId, setPlayingItemId] = useState<string | null>(null);
+  const [playingUrl, setPlayingUrl] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [storageIssue, setStorageIssue] = useState('');
   const [loading, setLoading] = useState(true);
@@ -81,6 +83,7 @@ function App() {
   const timer = useRef<number | null>(null);
   const player = useRef<HTMLAudioElement | null>(null);
   const activePlaybackId = useRef<string | null>(null);
+  const playToken = useRef(0);
   const photoInput = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -147,6 +150,8 @@ function App() {
   };
 
   const stopPlayback = () => {
+    playToken.current++;
+    setPlayingUrl(null);
     player.current?.pause();
     player.current = null;
     activePlaybackId.current = null;
@@ -186,6 +191,24 @@ function App() {
     }
   };
 
+  const playQueue = (id: string, urls: string[], index: number) => {
+    if (index >= urls.length) { stopPlayback(); return; }
+    player.current?.pause();
+    const token = ++playToken.current;
+    const audio = new Audio(urls[index]);
+    player.current = audio;
+    activePlaybackId.current = id;
+    setPlayingItemId(id);
+    setPlayingUrl(urls[index]);
+    setPlaying(false);
+    const live = () => token === playToken.current && player.current === audio;
+    audio.onended = () => { if (live()) playQueue(id, urls, index + 1); };
+    audio.onpause = () => { if (live() && !audio.ended && audio.currentTime > 0) stopPlayback(); };
+    audio.onerror = () => { if (live()) { stopPlayback(); setError('録音を再生できませんでした。'); } };
+    audio.play().then(() => { if (live()) setPlaying(true); })
+      .catch(() => { if (live()) { stopPlayback(); setError('録音を再生できませんでした。'); } });
+  };
+
   const longPress = useLongPress<Keepsake>((item) => {
     const current = items.find((entry) => entry.id === item.id);
     if (!mutationLock.current && current) openDetail(current);
@@ -213,12 +236,14 @@ function App() {
   };
 
   const playKeepsake = (item: Keepsake) => {
-    if (!item.voice) {
+    const voices = getVoices(item);
+    if (!voices.length) {
       openDetail(item);
       return;
     }
     setError('');
-    void playAudio(item.voice, item.id);
+    if (activePlaybackId.current === item.id) { stopPlayback(); return; }
+    playQueue(item.id, voices.map((v) => v.url), 0);
   };
 
   const openCreate = () => {
@@ -408,9 +433,11 @@ function App() {
     finally { mutationLock.current = false; setBusy(false); }
   };
 
-  const playDetailVoice = () => {
-    if (!detail?.voice) return;
-    void playAudio(detail.voice, detail.id);
+  const playDetailVoice = (url: string) => {
+    if (!detail) return;
+    if (playing && playingUrl === url && playingItemId === detail.id) { stopPlayback(); return; }
+    setError('');
+    playQueue(detail.id, [url], 0);
   };
 
   const formatTime = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
@@ -422,7 +449,7 @@ function App() {
           <span className="brand-mark"><BookOpen size={23} strokeWidth={1.8} /></span>
           <span><span className="brand-title">こどもの こえずかん</span><span className="brand-sub">声で集める 世界にひとつのたからもの図鑑</span></span>
         </a>
-        <div className="saved-count" data-testid="text-saved-count">しまってある声 <b className="count-number">{items.length}</b> こ</div>
+        <div className="saved-count" data-testid="text-saved-count">しまってある声 <b className="count-number">{items.reduce((count, item) => count + getVoices(item).length, 0)}</b> こ</div>
       </header>
 
       <main className="page-main" inert={createOpen || !!detail || categoryOpen || unusedMediaOpen}>
@@ -473,13 +500,13 @@ function App() {
         ) : (
           <section className="sticker-collage" aria-label="保存した図鑑のシール" data-testid="grid-keepsakes">
             {visibleItems.map((item) => (
-              <article key={item.id} className="sticker-item" data-testid={`card-keepsake-${item.id}`}>
+              <article key={item.id} className={`sticker-item${playing && playingItemId === item.id ? ' is-playing' : ''}`} data-testid={`card-keepsake-${item.id}`}>
                 <button
                   type="button"
                   className="sticker-photo-button"
                   onClick={() => playKeepsake(item)}
                   {...longPress(item)}
-                  aria-label={item.voice ? `${item.itemName}の声を再生` : `${item.itemName}の写真をひらく`}
+                  aria-label={getVoices(item).length ? `${item.itemName}の声を再生` : `${item.itemName}の写真をひらく`}
                   data-testid={`button-play-card-${item.id}`}
                 >
                   {item.photo
@@ -490,6 +517,7 @@ function App() {
                   {item.itemName}
                 </button>
                 <span className="sr-only" role="status">{playing && playingItemId === item.id ? `${item.itemName}の声を再生中` : ''}</span>
+                <span className="play-badge" aria-hidden="true">{playing && playingItemId === item.id ? '声を再生中' : ''}</span>
               </article>
             ))}
           </section>
@@ -580,9 +608,10 @@ function App() {
             <button type="button" className="icon-button" disabled={busy} style={{ position: 'absolute', zIndex: 2, right: 25, top: 25 }} onClick={closeDetail} aria-label="閉じる" data-testid="button-close-detail"><X size={19} /></button>
             {detail.photo ? <img className="detail-image" src={detail.photo} alt={`${detail.itemName}の写真`} /> : <div className="detail-image-placeholder"><ImageIcon size={54} /></div>}
             <div className="detail-meta">
-              <div><h2 className="detail-name">{detail.itemName}</h2><p className="detail-date" data-testid="text-detail-created-at">登録日時：{formatStamp(detail.createdAt)}</p><p className="detail-date" data-testid="text-detail-category">カテゴリ: {categoryName(detail.categoryId) ?? (detail.categoryId ? '読み込み中のカテゴリ' : '未分類')}</p><div className="detail-category"><CategorySelect id="detail-category" categories={categories} value={detail.categoryId ?? null} onChange={(id) => void changeDetailCategory(id)} disabled={busy || catBusy} testId="select-detail-category" /></div>{!detail.voice && <p className="detail-date">このカードには、まだ声がありません</p>}</div>
+              <div><h2 className="detail-name">{detail.itemName}</h2><p className="detail-date" data-testid="text-detail-created-at">登録日時：{formatStamp(detail.createdAt)}</p><p className="detail-date" data-testid="text-detail-category">カテゴリ: {categoryName(detail.categoryId) ?? (detail.categoryId ? '読み込み中のカテゴリ' : '未分類')}</p><div className="detail-category"><CategorySelect id="detail-category" categories={categories} value={detail.categoryId ?? null} onChange={(id) => void changeDetailCategory(id)} disabled={busy || catBusy} testId="select-detail-category" /></div>{getVoices(detail).length === 0 && <p className="detail-date">このカードには、まだ声がありません</p>}</div>
               <div className="detail-actions">
-                {detail.voice && <button type="button" className="record-button primary" onClick={playDetailVoice} data-testid="button-play-detail-voice">{playing && playingItemId === detail.id ? <Pause size={16} /> : <Play size={16} />}{playing && playingItemId === detail.id ? 'とめる' : '声をきく'}</button>}
+                {getVoices(detail).map((v, i, all) => { const on = playing && playingItemId === detail.id && playingUrl === v.url; return (
+                  <button key={v.id} type="button" className="record-button primary" onClick={() => playDetailVoice(v.url)} data-testid={i === 0 ? 'button-play-detail-voice' : `button-play-detail-voice-${i}`}>{on ? <Pause size={16} /> : <Play size={16} />}{on ? 'とめる' : all.length > 1 ? `声${i + 1}をきく` : '声をきく'}</button>); })}
                 <button type="button" className="record-button" disabled={busy} onClick={() => { stopPlayback(); setEditOpen(true); }} data-testid="button-edit-card"><Pencil size={15} /> へんしゅう</button>
                 <button type="button" className="plain-action" disabled={busy} onClick={() => setConfirmDelete((value) => !value)} aria-label="このカードを削除" data-testid="button-delete-card"><Trash2 size={17} /></button>
               </div>
@@ -620,10 +649,10 @@ function App() {
           categories={categories}
           describeError={describeError}
           onClose={() => setEditOpen(false)}
-          onSave={async (name, categoryId) => {
-            await updateKeepsakeMetadata(detail.id, name, categoryId);
-            setDetail((current) => current && current.id === detail.id ? { ...current, itemName: name, categoryId } : current);
-            setItems((list) => list.map((entry) => entry.id === detail.id ? { ...entry, itemName: name, categoryId } : entry));
+          onSave={async (base, changes, editId) => {
+            const saved = await editKeepsake(base, changes, editId);
+            setDetail((current) => current && current.id === saved.id ? saved : current);
+            setItems((list) => list.map((entry) => entry.id === saved.id ? saved : entry));
           }}
         />
       )}

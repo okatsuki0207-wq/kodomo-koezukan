@@ -6,3 +6,4 @@
 - [Category editing safety](category-safety.md) — reorganizing pages must not re-upload media, change creation dates, or silently classify older cards.
 - [Cloud save safety](cloud-save-safety.md) — isolate retries and preserve media after ambiguous commits; test only synthetic data in loopback emulators.
 - [SDK unit verification](sdk-unit-verification.md) — enable Node VM modules; source-only fallbacks can hide stale Firebase fixtures and give false-green results.
+- [Firestore rule budgets](firestore-rule-budgets.md) — verify the maximum combined media edit; small edits can pass while larger atomic commits exceed the expression budget.

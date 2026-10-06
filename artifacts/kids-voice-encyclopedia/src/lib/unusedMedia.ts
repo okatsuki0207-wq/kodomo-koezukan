@@ -22,6 +22,13 @@ function references(data: Record<string, unknown>): Set<string> {
   for (const field of ['photoPath', 'voicePath']) {
     if (typeof data[field] === 'string') paths.add(data[field] as string);
   }
+  if (data.voices !== undefined) {
+    if (!Array.isArray(data.voices)) throw new Error('音声ファイルの参照を確認できません。削除しません。');
+    for (const voice of data.voices) {
+      if (!voice || typeof voice.url !== 'string') throw new Error('音声ファイルの参照を確認できません。削除しません。');
+      for (const path of references({ voice: voice.url, voicePath: voice.path })) paths.add(path);
+    }
+  }
   for (const field of ['photo', 'voice']) {
     const url = data[field];
     if (url == null) continue;
