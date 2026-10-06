@@ -24,7 +24,7 @@ export const firebaseConfig: FirebaseOptions = {
   apiKey: 'AIzaSyC3_8iu6dW6CA0dDieQogrejlCRO8cyba4',
   authDomain: 'klds-voice-zukan.firebaseapp.com',
   projectId: 'klds-voice-zukan',
-  storageBucket: 'klds-voice-zukan.firebasestorage.app',
+  storageBucket: 'kids_voice_zukan',
   messagingSenderId: '986617757603',
   appId: '1:986617757603:web:bb333e795a5cc472c16416',
   measurementId: 'G-3BN1L97SR5',

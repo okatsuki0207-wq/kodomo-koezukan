@@ -17,7 +17,9 @@ export type Keepsake = {
 const app = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
 const auth = app ? initializeAuth(app, { persistence: indexedDBLocalPersistence }) : null;
 const db = app ? getFirestore(app) : null;
-const storage = app ? getStorage(app) : null;
+// GCSで作成した指定バケットを明示。写真・音声のアップロード、URL取得、
+// 削除はすべてこのStorageインスタンスからrefを作成する。
+const storage = app ? getStorage(app, `gs://${firebaseConfig.storageBucket}`) : null;
 if (storage) {
   storage.maxOperationRetryTime = 25_000;
   storage.maxUploadRetryTime = 25_000;
@@ -61,8 +63,12 @@ export async function subscribeKeepsakes(
   }, onError);
 }
 
-async function removeFile(path: string) {
-  try { await deleteObject(ref(storage!, path)); }
+async function removeFile(path: string, downloadUrl?: string) {
+  // 旧カードのファイルは旧バケットに残っているため、URLから所属バケットを
+  // 解決する。新規アップロードの後片付けは現在の指定バケットを使う。
+  const file = ref(storage!, downloadUrl ?? path);
+  if (file.fullPath !== path) throw new Error('ファイルの保存パスが一致しません。削除は行いませんでした。');
+  try { await deleteObject(file); }
   catch (error) {
     if ((error as { code?: string }).code !== 'storage/object-not-found') throw error;
   }
@@ -96,10 +102,11 @@ export async function saveKeepsake(item: Keepsake, migrating = false): Promise<v
     }));
   } catch (error) {
     if (error instanceof FirebaseTimeoutError) throw error; // 書き込みが後から完了する可能性がある。
+    if (uploaded.length === 0) throw error; // 初回アップロード失敗なら、元の原因をそのまま案内。
     // 接続切断等で書き込み結果が不明ならデータを削除しない。
     try {
       if (!(await deadline(getDoc(record), 12_000)).exists()) {
-        await Promise.all(uploaded.map(removeFile));
+        await Promise.all(uploaded.map((path) => removeFile(path)));
       }
     } catch {
       throw new Error('保存結果を確認できませんでした。再接続後に一覧を確認してください。未使用ファイルが残った場合はFirebaseコンソールから確認できます。');
@@ -111,14 +118,18 @@ export async function saveKeepsake(item: Keepsake, migrating = false): Promise<v
 export async function deleteKeepsake(item: Keepsake): Promise<void> {
   const uid = await userId();
   // 他の利用者のパスを削除しない。部分失敗は再実行可能。
-  for (const path of [item.photoPath, item.voicePath]) {
-    if (path?.startsWith(`users/${uid}/keepsakes/${item.id}/`)) await removeFile(path);
+  for (const [path, url] of [[item.photoPath, item.photo], [item.voicePath, item.voice]]) {
+    if (path?.startsWith(`users/${uid}/keepsakes/${item.id}/`)) await removeFile(path, url ?? undefined);
   }
   await deadline(deleteDoc(doc(db!, 'users', uid, 'keepsakes', item.id)));
 }
 
 export function firebaseError(error: unknown): string {
   const code = (error as { code?: string })?.code ?? '';
+  const response = (error as { customData?: { serverResponse?: string } })?.customData?.serverResponse ?? '';
+  if (code.startsWith('storage/') && response.includes('has not been set up properly for Firebase Storage')) {
+    return 'Storageバケット kids_voice_zukan のFirebase設定が未完了です。Firebase ConsoleのStorageでこのバケットを選び、firebase/storage.rules のルールを公開してください。';
+  }
   if (code.includes('configuration-not-found')) return 'Firebase Authentication が未設定です。Firebase ConsoleでAuthenticationの「始める」を押し、ログイン方法の「匿名」を有効にしてから再接続してください。';
   if (code.includes('permission-denied') || code.includes('unauthorized')) return 'Firebase のアクセス権限がありません。Firestore / Storage のルールとBlazeプランをご確認ください。';
   if (code.includes('operation-not-allowed')) return 'Firebase Authentication の匿名ログインを有効にしてください。';

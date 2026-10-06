@@ -23,6 +23,7 @@ Cloud Storage for Firebaseは現在Blazeプランと課金アカウント登録�
    Storage/Firestoreの設定が無い状態では、クラウド保存はできません。
 
 ## 保存内容
+- 使用するバケットは `kids_voice_zukan`。初期化時に `getStorage(app, 'gs://kids_voice_zukan')` として明示しています。
 - Storage: `users/{uid}/keepsakes/{cardId}/photo` と `voice`。ファイルのContent-Typeを保存。
 - Firestore: `users/{uid}/keepsakes/{cardId}`。
   名前、画像/音声ダウンロードURL、ファイルパス、サーバー作成日時を保存。
@@ -44,6 +45,16 @@ Cloud Storage for Firebaseは現在Blazeプランと課金アカウント登録�
 旧音声は元のまま移行し、新しい録音だけを自動トリミングします。
 クラウド側を削除しても旧バックアップは残るため、移行ボタンを再度押すと再インポートされます。
 データ移行と再生を確認した後、不要なら自分で旧ブラウザデータを削除してください。
+
+## Google Cloud Consoleで作成したバケット
+`kids_voice_zukan` は対象Firebaseプロジェクトに関連付けて利用してください。
+GCSに作成しただけではFirebase SDKから利用できるとは限りません。
+Firebase ConsoleのStorageで既存バケットを取り込み、Firebaseのサービスエージェントに必要な権限を付与し、
+このバケットにも `firebase/storage.rules` を公開してください。
+全員公開のIAM権限や、全員読み書きできるルールに変更しないでください。
+公式手順: https://firebase.google.com/docs/storage/web/start#working_with_imported_buckets
+すでに旧バケットに保存したカードは、元のダウンロードURLを使って読み込みます。
+今回の変更では既存ファイルのコピー・削除・Firestore内のURL書き換えは行いません。
 
 ## 匿名アカウントの注意
 匿名認証のIDだけをIndexedDBで維持します。写真・音声・カードはFirebaseに保存します。
