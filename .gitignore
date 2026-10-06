@@ -47,3 +47,6 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+firebase-debug.log
+firestore-debug.log
+storage-debug.log
