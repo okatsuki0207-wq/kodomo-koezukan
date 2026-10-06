@@ -4,34 +4,34 @@
 @plugin "@tailwindcss/typography";
 
 :root {
-  --background: 43 53% 95%;
+  --background: 210 17% 98%;
   --foreground: 27 28% 22%;
-  --border: 37 29% 85%;
-  --card: 45 63% 98%;
+  --border: 214 14% 88%;
+  --card: 0 0% 100%;
   --card-foreground: 27 28% 22%;
-  --card-border: 39 33% 87%;
-  --sidebar: 43 53% 95%;
+  --card-border: 214 14% 88%;
+  --sidebar: 210 17% 98%;
   --sidebar-foreground: 27 28% 22%;
-  --sidebar-border: 37 29% 85%;
+  --sidebar-border: 214 14% 88%;
   --sidebar-primary: 15 61% 55%;
   --sidebar-primary-foreground: 45 63% 98%;
   --sidebar-accent: 40 49% 89%;
   --sidebar-accent-foreground: 27 28% 22%;
   --sidebar-ring: 15 61% 55%;
-  --popover: 45 63% 98%;
+  --popover: 0 0% 100%;
   --popover-foreground: 27 28% 22%;
-  --popover-border: 39 33% 87%;
+  --popover-border: 214 14% 88%;
   --primary: 15 61% 55%;
   --primary-foreground: 45 63% 98%;
   --secondary: 154 25% 84%;
   --secondary-foreground: 152 27% 29%;
-  --muted: 40 34% 90%;
+  --muted: 210 17% 96%;
   --muted-foreground: 27 13% 49%;
   --accent: 43 79% 75%;
   --accent-foreground: 27 28% 22%;
   --destructive: 4 57% 53%;
   --destructive-foreground: 0 0% 100%;
-  --input: 37 29% 82%;
+  --input: 214 14% 83%;
   --ring: 15 61% 55%;
   --chart-1: 15 61% 55%;
   --chart-2: 154 25% 60%;
@@ -49,9 +49,7 @@ html { min-width: 320px; background: hsl(var(--background)); }
 body {
   margin: 0;
   color: hsl(var(--foreground));
-  background:
-    radial-gradient(ellipse at 10% 5%, rgba(240, 207, 138, .19), transparent 32rem),
-    hsl(var(--background));
+  background: #F8F9FA;
   font-family: var(--app-font-sans);
   -webkit-font-smoothing: antialiased;
 }
@@ -231,3 +229,32 @@ button:disabled {cursor:not-allowed;opacity:.55;}
 @media (prefers-reduced-motion: reduce) {
   *,*::before,*::after {animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important;}
 }
+
+/* White-paper restyle: neutral surfaces, clear separation */
+.sticker-photo-button { background:#fff; border:1px solid #dfe3e8; border-radius:14px; padding:6px; box-shadow:0 1px 2px rgba(31,41,55,.08),0 6px 14px rgba(31,41,55,.09); }
+.sticker-photo { border-radius:9px; }
+.sticker-item:hover .sticker-photo-button { box-shadow:0 2px 4px rgba(31,41,55,.1),0 12px 22px rgba(31,41,55,.14); }
+.section-top { border-bottom-color:#e2e6ea; }
+.empty-state { background:#fff; border:1px dashed #cfd5db; box-shadow:0 1px 3px rgba(31,41,55,.06); }
+.empty-action { background:#fff; border-color:#d9ad8e; }
+.empty-action:hover { background:#fbf1ea; }
+.overlay { background:rgba(40,44,48,.42); }
+.dialog { background:#fff; border:1px solid #e0e4e8; box-shadow:0 20px 60px rgba(31,41,55,.2),0 2px 6px rgba(31,41,55,.06); }
+.icon-button { background:#f1f3f5; color:#5f676f; }
+.icon-button:hover { background:#e6e9ec; }
+.title-input { background:#fff; border-color:#d5dadf; }
+.photo-picker { background:#fff; border:1px dashed #bfc6cd; }
+.photo-picker:hover { background:#f8f9fa; }
+.picker-content { background:rgba(255,255,255,.92); box-shadow:0 1px 3px rgba(31,41,55,.1); }
+.record-panel { background:#fff; border:1px solid #dfe3e8; box-shadow:0 1px 3px rgba(31,41,55,.07); }
+.record-button { background:#fff; border-color:#d5dadf; }
+.record-button:hover { background:#f8f9fa; }
+.record-button.primary { background:#bd7057; border-color:#bd7057; }
+.record-button.danger { border-color:#e3c3b8; }
+.cancel-button { border-color:#d5dadf; }
+.detail-image { background:#fff; border:1px solid #e3e6ea; box-shadow:0 1px 3px rgba(31,41,55,.08); }
+.detail-image-placeholder { background:#f8f9fa; border:1px solid #e3e6ea; }
+.plain-action { background:#fff; border-color:#d5dadf; }
+.plain-action:hover { background:#f1f3f5; }
+.notice { background:#fbf0ea; }
+.notice.neutral { background:#eef3ec; }

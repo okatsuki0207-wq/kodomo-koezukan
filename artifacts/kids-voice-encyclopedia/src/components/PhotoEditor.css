@@ -6,7 +6,7 @@
   align-items: center;
   justify-content: center;
   padding: 18px;
-  background: rgba(47, 43, 35, .62);
+  background: rgba(40, 44, 48, .58);
   backdrop-filter: blur(5px);
 }
 
@@ -15,10 +15,10 @@
   max-height: min(94dvh, 900px);
   overflow: auto;
   padding: 24px;
-  border: 1px solid #eee1cf;
+  border: 1px solid #e0e4e8;
   border-radius: 19px;
-  background: #fcf8ef;
-  box-shadow: 0 25px 80px rgba(51, 41, 29, .28);
+  background: #fff;
+  box-shadow: 0 20px 60px rgba(31, 41, 55, .2), 0 2px 6px rgba(31, 41, 55, .06);
   color: #493d33;
 }
 
@@ -50,8 +50,8 @@
   place-items: center;
   border: 0;
   border-radius: 50%;
-  background: #f0eadd;
-  color: #756d61;
+  background: #f1f3f5;
+  color: #5f676f;
 }
 
 .photo-editor-close:disabled {
@@ -74,9 +74,9 @@
   justify-content: center;
   gap: 7px;
   padding: 7px 10px;
-  border: 1px solid #e4d7c2;
+  border: 1px solid #dfe3e8;
   border-radius: 11px;
-  background: #fffaf1;
+  background: #fff;
   color: #756c5e;
   font: inherit;
   font-size: 12px;
@@ -86,7 +86,7 @@
 .photo-editor-tabs button[aria-selected="true"],
 .photo-editor-shapes button[aria-pressed="true"] {
   border-color: #bd7057;
-  background: #f4e5d8;
+  background: #fbf0ea;
   color: #9c5947;
 }
 
@@ -104,14 +104,14 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  border: 1px solid #e2d8c9;
+  border: 1px solid #dfe3e8;
   border-radius: 13px;
-  background-color: #f6f1e8;
+  background-color: #fff;
   background-image:
-    linear-gradient(45deg, #eae3d8 25%, transparent 25%),
-    linear-gradient(-45deg, #eae3d8 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #eae3d8 75%),
-    linear-gradient(-45deg, transparent 75%, #eae3d8 75%);
+    linear-gradient(45deg, #edf0f2 25%, transparent 25%),
+    linear-gradient(-45deg, #edf0f2 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #edf0f2 75%),
+    linear-gradient(-45deg, transparent 75%, #edf0f2 75%);
   background-size: 18px 18px;
   background-position: 0 0, 0 9px, 9px -9px, -9px 0;
 }
@@ -148,8 +148,8 @@
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  border: 2px solid #fff8ed;
-  box-shadow: 0 0 0 1000px rgba(35, 30, 25, .48);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1000px rgba(40, 44, 48, .48);
   pointer-events: none;
 }
 .photo-editor-crop-frame.is-circle { border-radius: 50%; }
@@ -178,7 +178,7 @@
   position: absolute;
   padding: 9px 13px;
   border-radius: 999px;
-  background: rgba(252, 248, 239, .92);
+  background: rgba(255, 255, 255, .94);
   color: #847968;
   font-size: 12px;
 }
@@ -192,8 +192,8 @@
   justify-content: center;
   gap: 12px;
   padding: 25px;
-  background: rgba(47, 43, 35, .72);
-  color: #fff8ed;
+  background: rgba(40, 44, 48, .72);
+  color: #fff;
   text-align: center;
 }
 
@@ -204,7 +204,7 @@
 
 .photo-editor-processing span {
   max-width: 390px;
-  color: #f1e5d4;
+  color: #e9ecef;
   font-size: 11px;
   line-height: 1.7;
 }
@@ -257,8 +257,8 @@
 }
 
 .photo-editor-secondary {
-  border: 1px solid #d8cbb8;
-  background: transparent;
+  border: 1px solid #d5dadf;
+  background: #fff;
   color: #756c5e;
 }
 
