@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { recordingCue } from '../lib/recordingCue';
+import { primeMicrophonePermission } from '../lib/microphonePermission';
 
 export const MAX_RECORD_SECONDS = 60;
 const MIME_CANDIDATES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
@@ -19,6 +20,7 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
   const [seconds, setSeconds] = useState(0);
   const [level, setLevel] = useState(0);
   const [error, setError] = useState('');
+  const [micStatus, setMicStatus] = useState<'idle' | 'preparing' | 'ready' | 'denied' | 'unsupported'>('idle');
   const session = useRef(0);
   const recorder = useRef<MediaRecorder | null>(null);
   const stream = useRef<MediaStream | null>(null);
@@ -29,6 +31,7 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
   const startingRef = useRef(false);
   const resultRef = useRef(onResult);
   resultRef.current = onResult;
+  const preparingRef = useRef(false);
 
   const release = useCallback(() => {
     cue.current?.cancel(); cue.current = null;
@@ -63,11 +66,35 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
     setRecording(false);
     setStarting(false);
     startingRef.current = false;
+    preparingRef.current = false;
+    setMicStatus('idle');
     setSeconds(0);
   }, [release]);
 
+  const prepareMicrophone = useCallback(async () => {
+    if (preparingRef.current || startingRef.current || recorder.current) return;
+    if (!canRecord()) { setMicStatus('unsupported'); return; }
+    const mine = ++session.current;
+    preparingRef.current = true;
+    setMicStatus('preparing');
+    setError('');
+    try {
+      await primeMicrophonePermission(navigator.mediaDevices);
+      if (mine === session.current) setMicStatus('ready');
+    } catch (caught) {
+      if (mine !== session.current) return;
+      const denied = caught instanceof DOMException && (caught.name === 'NotAllowedError' || caught.name === 'PermissionDeniedError');
+      setMicStatus(denied ? 'denied' : 'idle');
+      setError(denied
+        ? 'マイクの使用が許可されませんでした。ブラウザで許可すると録音できます。'
+        : 'マイクを準備できませんでした。録音ボタンからもう一度お試しください。');
+    } finally {
+      if (mine === session.current) preparingRef.current = false;
+    }
+  }, []);
+
   const start = useCallback(async () => {
-    if (recorder.current || startingRef.current) return;
+    if (recorder.current || startingRef.current || preparingRef.current) return;
     setError('');
     if (!canRecord()) { setError('このブラウザではマイク録音をご利用いただけません。'); return; }
     const mine = ++session.current;
@@ -92,6 +119,7 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
       acquired = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (mine !== session.current) { acquired.getTracks().forEach((t) => t.stop()); return; }
       stream.current = acquired;
+      setMicStatus('ready');
       const resumeError = await ready;
       if (mine !== session.current) return;
       if (resumeError === null && ctx.state !== 'running') await ctx.resume();
@@ -161,5 +189,5 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
 
   useEffect(() => cancel, [cancel]);
 
-  return { recording, starting, guiding, seconds, level, error, setError, start, stop, cancel };
+  return { recording, starting, guiding, seconds, level, error, setError, micStatus, prepareMicrophone, start, stop, cancel };
 }

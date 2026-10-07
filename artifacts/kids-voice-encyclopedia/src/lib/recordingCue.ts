@@ -10,6 +10,13 @@ if (preloadedGuideAudio) {
   preloadedGuideAudio.load();
 }
 
+/** Warm the fixed guide again as soon as the creation form is opened. */
+export function preloadRecordingGuide() {
+  if (!preloadedGuideAudio) return;
+  preloadedGuideAudio.preload = 'auto';
+  preloadedGuideAudio.load();
+}
+
 export function recordingCue(
   url = GUIDE_URL,
   createAudio?: (url: string) => HTMLAudioElement,
@@ -17,6 +24,12 @@ export function recordingCue(
   const usingPreloaded = !createAudio && url === GUIDE_URL && preloadedGuideAudio !== null;
   const audio = createAudio ? createAudio(url) : usingPreloaded ? preloadedGuideAudio : new Audio(url);
   audio.preload = 'auto';
+  // A small rate increase makes the guide brighter without replacing its voice.
+  // Disable pitch preservation where supported so the voice actually sounds higher.
+  audio.playbackRate = 1.12;
+  audio.preservesPitch = false;
+  const prefixed = audio as HTMLAudioElement & { webkitPreservesPitch?: boolean };
+  if ('webkitPreservesPitch' in prefixed) prefixed.webkitPreservesPitch = false;
   // Rewind a previously used shared element without discarding its cached data.
   if (usingPreloaded) audio.currentTime = 0;
   let resolve: () => void = () => {};

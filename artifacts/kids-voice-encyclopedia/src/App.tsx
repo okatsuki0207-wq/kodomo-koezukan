@@ -4,6 +4,7 @@ import {
   BookOpen,
   Camera,
   Check,
+  ChevronDown,
   CircleHelp,
   Eye,
   Image as ImageIcon,
@@ -14,6 +15,7 @@ import {
   Play,
   Plus,
   RotateCcw,
+  Scissors,
   Share2,
   Sparkles,
   Trash2,
@@ -26,7 +28,9 @@ import { useLongPress } from './hooks/useLongPress';
 import CategorySelect from './components/CategorySelect';
 import EditCardDialog from './components/EditCardDialog';
 import RecordingGuide from './components/RecordingGuide';
+import VoiceTrimEditor from './components/VoiceTrimEditor';
 import { useEditRecording } from './hooks/useEditRecording';
+import { useNewKeepsakeDraft } from './hooks/useNewKeepsakeDraft';
 import { randomVoice, VoicePlayback } from './lib/voicePlayback';
 import DetailDialogShell from './components/DetailDialogShell';
 import StartScreen from './components/StartScreen';
@@ -40,6 +44,8 @@ import type { SharedBook, ShareId } from './lib/shareRepository';
 import { decodeShareToken } from './lib/shareCrypto';
 import { getVoices } from './lib/voiceAssets';
 import { trimLeadingSilence } from './lib/audioTrim';
+import { preloadRecordingGuide } from './lib/recordingCue';
+import type { NewKeepsakeDraftInput } from './lib/newKeepsakeDraft';
 import { isFirebaseConfigured } from './firebaseConfig';
 import './index.css';
 import './components/sharing.css';
