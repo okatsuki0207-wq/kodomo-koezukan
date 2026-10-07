@@ -5,6 +5,18 @@ service firebase.storage {
     match /users/{uid}/keepsakes/{rest=**} {
       allow list: if request.auth != null && request.auth.uid == uid;
     }
+    match /users/{uid}/shares/{shareId} {
+      allow list: if request.auth != null && request.auth.uid == uid
+        && shareId.matches('[a-f0-9]{64}');
+    }
+    match /users/{uid}/shares/{shareId}/assets {
+      allow list: if request.auth != null && request.auth.uid == uid
+        && shareId.matches('[a-f0-9]{64}');
+    }
+    match /users/{uid}/shares/{shareId}/{rest=**} {
+      allow list: if request.auth != null && request.auth.uid == uid
+        && shareId.matches('[a-f0-9]{64}');
+    }
     match /users/{uid}/keepsakes/{id}/{kind} {
       function owner() { return request.auth != null && request.auth.uid == uid; }
       allow read, delete: if owner();
@@ -22,6 +34,24 @@ service firebase.storage {
         && request.resource.size < 20 * 1024 * 1024
         && ((kind == 'photo' && request.resource.contentType.matches('image/(jpeg|png|webp)'))
           || (kind == 'voice' && request.resource.contentType.matches('audio/.*')));
+    }
+    match /users/{uid}/shares/{shareId}/assets/{assetId} {
+      function owner() { return request.auth != null && request.auth.uid == uid; }
+      // Share objects are AES-GCM ciphertext only. The owner's original media
+      // remains private under /keepsakes and is never exposed by this rule.
+      allow get: if shareId.matches('[a-f0-9]{64}') && assetId.matches('[a-f0-9]{32}');
+      allow list: if owner()
+        && shareId.matches('[a-f0-9]{64}')
+        && assetId.matches('[a-f0-9]{32}');
+      allow create: if owner()
+        && shareId.matches('[a-f0-9]{64}')
+        && assetId.matches('[a-f0-9]{32}')
+        && request.resource.size < 20 * 1024 * 1024
+        && request.resource.contentType == 'application/octet-stream';
+      allow update: if false;
+      allow delete: if owner()
+        && shareId.matches('[a-f0-9]{64}')
+        && assetId.matches('[a-f0-9]{32}');
     }
   }
 }

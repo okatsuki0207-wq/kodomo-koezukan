@@ -4,13 +4,20 @@ import { createCategory, firebaseError, subscribeCategories } from '../lib/keeps
 
 const RULES_NOTE = 'カテゴリの保存権限がありません。firebase/firestore.rules を Firebase Console で公開してから、再接続してください。標準タブと既存カードの表示は継続できます。';
 
-export function useCategories(connectionAttempt: number) {
+export function useCategories(connectionAttempt: number, enabled = true) {
   const [categories, setCategories] = useState<Category[]>([...DEFAULT_CATEGORIES]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [denied, setDenied] = useState(false);
 
   useEffect(() => {
+    if (!enabled) {
+      setCategories([...DEFAULT_CATEGORIES]);
+      setLoading(false);
+      setError('');
+      setDenied(false);
+      return;
+    }
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
     setLoading(true);
@@ -40,7 +47,7 @@ export function useCategories(connectionAttempt: number) {
       setError(''); setDenied(false); setLoading(false);
     }, fail).then((stop) => { if (cancelled) stop(); else unsubscribe = stop; }).catch(fail);
     return () => { cancelled = true; window.clearTimeout(timer); unsubscribe?.(); };
-  }, [connectionAttempt]);
+  }, [connectionAttempt, enabled]);
 
   const create = useCallback(async (name: string): Promise<Category> => {
     const made = await createCategory(name);

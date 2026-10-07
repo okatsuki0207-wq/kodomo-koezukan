@@ -70,6 +70,13 @@ if (!vm.SourceTextModule) {
       './storageDiagnostics': { diagnoseStorageError: async (error) => error, storageFailureMessage: () => null },
       './unusedMedia': { createUnusedMediaService: () => { throw new Error('Metadata edits must not inspect or delete unused media'); } },
       './keepsakeEditor': { createKeepsakeEditor: () => ({ editKeepsake: () => { throw new Error('Not a metadata-only operation'); } }) },
+      './shareRepository': {
+        configureShareRepository: () => {},
+        createPasswordShare: async () => {},
+        listPasswordShares: async () => [],
+        openPasswordShare: async () => {},
+        revokePasswordShare: async () => {},
+      },
     };
     const categories = new vm.SourceTextModule(
       stripTypeScriptTypes(await readFile(new URL('../src/lib/categories.ts', import.meta.url), 'utf8')),

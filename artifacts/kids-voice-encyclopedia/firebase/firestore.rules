@@ -154,5 +154,32 @@ service cloud.firestore {
         && request.resource.data.name.size() <= 24
         && request.resource.data.createdAt is timestamp;
     }
+    match /users/{uid}/shares/{shareId} {
+      function owner() { return request.auth != null && request.auth.uid == uid; }
+      function validEncryptedShare(data) {
+        return data.keys().hasAll(['active', 'version', 'kdf', 'iterations', 'salt', 'manifestIv', 'manifest', 'createdAt'])
+          && data.keys().hasOnly(['active', 'version', 'kdf', 'iterations', 'salt', 'manifestIv', 'manifest', 'createdAt'])
+          && data.active == true
+          && data.version == 1
+          && data.kdf == 'PBKDF2-SHA256'
+          && data.iterations == 600000
+          && data.salt is string && data.salt.matches('[A-Za-z0-9+/]{22}==')
+          && data.manifestIv is string && data.manifestIv.matches('[A-Za-z0-9+/]{16}')
+          && data.manifest is string && data.manifest.size() <= 960000
+          && data.createdAt == request.time;
+      }
+      // A share ID is a random 256-bit capability. Only get is public; the
+      // owner is the only party allowed to enumerate, create, stop or delete it.
+      allow get: if owner() || resource.data.active == true;
+      allow list: if owner();
+      allow create: if owner()
+        && shareId.matches('[a-f0-9]{64}')
+        && validEncryptedShare(request.resource.data);
+      allow update: if owner()
+        && resource.data.active == true
+        && request.resource.data.active == false
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active']);
+      allow delete: if owner() && resource.data.active == false;
+    }
   }
 }

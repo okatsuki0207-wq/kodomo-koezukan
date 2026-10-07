@@ -7,9 +7,10 @@ type Props = {
   onSelect: (id: string | null) => void;
   onNew: () => void;
   disabled?: boolean;
+  readOnly?: boolean;
 };
 
-export default function CategoryBar({ categories, selected, onSelect, onNew, disabled }: Props) {
+export default function CategoryBar({ categories, selected, onSelect, onNew, disabled, readOnly }: Props) {
   return (
     <div className="category-bar" data-testid="category-bar">
       <div className="category-tabs" role="tablist" aria-label="カテゴリ" onKeyDown={(event) => {
@@ -28,7 +29,7 @@ export default function CategoryBar({ categories, selected, onSelect, onNew, dis
           <button key={c.id} id={`category-tab-${c.id}`} type="button" role="tab" aria-controls="category-panel" tabIndex={selected === c.id ? 0 : -1} aria-selected={selected === c.id} className={`category-chip${selected === c.id ? ' active' : ''}`} onClick={() => onSelect(c.id)} data-testid={`tab-category-${c.id}`}>{c.name}</button>
         ))}
       </div>
-      <button type="button" className="category-chip category-new" onClick={onNew} disabled={disabled} data-testid="button-new-category"><Plus size={15} /> 新しいカテゴリ</button>
+      {!readOnly && <button type="button" className="category-chip category-new" onClick={onNew} disabled={disabled} data-testid="button-new-category"><Plus size={15} /> 新しいカテゴリ</button>}
     </div>
   );
 }

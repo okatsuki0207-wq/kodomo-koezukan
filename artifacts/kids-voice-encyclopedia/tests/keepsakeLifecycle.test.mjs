@@ -2,7 +2,7 @@ import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { doc, getDocFromServer, deleteDoc, setDoc, updateDoc, runTransaction, collection, getDocs, Timestamp } from 'firebase/firestore';
+import { doc, getDocFromServer, deleteDoc, setDoc, updateDoc, runTransaction, collection, getDocs, Timestamp, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, getMetadata, getBytes, deleteObject, list } from 'firebase/storage';
 import { createKeepsakeRepository } from '../src/lib/keepsakeRepository.ts';
 import { createUnusedMediaService, MEDIA_RETENTION_MS } from '../src/lib/unusedMedia.ts';
@@ -680,4 +680,51 @@ test('inventory/attempt records remain private and malformed legacy references f
   const service = cleanup();
   await assert.rejects(service.inspectUnusedMedia(), /参照を確認できません/);
   await assertSucceeds(getMetadata(ref(alice.storage, path)));
+});
+
+test('password-share rules expose only active encrypted share reads; owners alone can create, list, revoke and delete', async () => {
+  const shareId = 'd'.repeat(64);
+  const assetId = 'e'.repeat(32);
+  const shareDoc = doc(alice.db, 'users', 'alice', 'shares', shareId);
+  const encrypted = {
+    active: true,
+    version: 1,
+    kdf: 'PBKDF2-SHA256',
+    iterations: 600000,
+    salt: `${'A'.repeat(22)}==`,
+    manifestIv: 'B'.repeat(16),
+    manifest: 'C'.repeat(256),
+    createdAt: serverTimestamp(),
+  };
+  await assertSucceeds(setDoc(shareDoc, encrypted));
+  await assertSucceeds(getDocFromServer(doc(bob.db, 'users', 'alice', 'shares', shareId)));
+  await assertSucceeds(getDocFromServer(doc(anonymous.db, 'users', 'alice', 'shares', shareId)));
+  await assertSucceeds(getDocs(collection(alice.db, 'users', 'alice', 'shares')));
+  await assertFails(getDocs(collection(bob.db, 'users', 'alice', 'shares')));
+  await assertFails(setDoc(doc(bob.db, 'users', 'alice', 'shares', 'f'.repeat(64)), encrypted));
+  await assertFails(updateDoc(doc(bob.db, 'users', 'alice', 'shares', shareId), { active: false }));
+  await assertFails(deleteDoc(doc(bob.db, 'users', 'alice', 'shares', shareId)));
+  await assertFails(setDoc(doc(alice.db, 'users', 'alice', 'shares', 'bad-id'), encrypted));
+  await assertFails(setDoc(doc(alice.db, 'users', 'alice', 'shares', 'a'.repeat(64)), {
+    ...encrypted, password: 'plaintext-never-stored',
+  }));
+
+  const path = `users/alice/shares/${shareId}/assets/${assetId}`;
+  const ownerAsset = ref(alice.storage, path);
+  const publicAsset = ref(bob.storage, path);
+  const bytes = Buffer.from('synthetic encrypted bytes');
+  await assertSucceeds(uploadBytes(ownerAsset, bytes, { contentType: 'application/octet-stream' }));
+  assert.deepEqual(Buffer.from(await getBytes(publicAsset)), bytes);
+  await assertSucceeds(getBytes(ref(anonymous.storage, path)));
+  await assertSucceeds(list(ref(alice.storage, `users/alice/shares/${shareId}`)));
+  await assertFails(list(ref(bob.storage, `users/alice/shares/${shareId}`)));
+  await assertFails(uploadBytes(ref(bob.storage, `users/alice/shares/${shareId}/assets/${assetId}`), bytes, { contentType: 'application/octet-stream' }));
+  await assertFails(uploadBytes(ref(alice.storage, `users/alice/shares/${shareId}/assets/${'f'.repeat(32)}`), bytes, { contentType: 'image/png' }));
+
+  await assertSucceeds(updateDoc(shareDoc, { active: false }));
+  await assertFails(getDocFromServer(doc(bob.db, 'users', 'alice', 'shares', shareId)));
+  await assertFails(getDocFromServer(doc(anonymous.db, 'users', 'alice', 'shares', shareId)));
+  await assertSucceeds(deleteObject(ownerAsset));
+  await assert.rejects(getBytes(publicAsset), (error) => error.code === 'storage/object-not-found');
+  await assertSucceeds(deleteDoc(shareDoc));
 });

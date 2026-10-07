@@ -7,6 +7,7 @@ import { storageFailureMessage } from './storageDiagnostics';
 import { createKeepsakeRepository, FirebaseTimeoutError } from './keepsakeRepository';
 import { createKeepsakeEditor } from './keepsakeEditor';
 import { createUnusedMediaService } from './unusedMedia';
+import { configureShareRepository } from './shareRepository';
 export type { Keepsake } from './keepsakeRepository';
 import { categoryIdForName, DEFAULT_CATEGORIES, keepsakeMetadata, validateCategoryId, validateCategoryName, type Category } from './categories';
 
@@ -40,9 +41,12 @@ async function userId(): Promise<string> {
   return deadline(ready, 20_000);
 }
 
+if (db && storage) configureShareRepository(db, storage, userId);
+
 const repository = createKeepsakeRepository(db!, storage!, userId);
 export const { saveKeepsake, deleteKeepsake, subscribeKeepsakes } = repository;
 export const { editKeepsake } = createKeepsakeEditor(db!, storage!, userId);
+export { createPasswordShare, listPasswordShares, openPasswordShare, revokePasswordShare } from './shareRepository';
 /** Read-only link refresh for saved voices; never access another user's paths. */
 export async function refreshVoiceDownloadUrl(path: string): Promise<string> {
   const uid = await userId();
