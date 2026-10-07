@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type FormEvent } from 'react';
-import { ArrowDown, ArrowUp, Check, ListOrdered, Shuffle, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, Eye, ListOrdered, Pencil, Shuffle, X } from 'lucide-react';
 import type { Category } from '../lib/categories';
 import {
   normalizeGallerySettings,
@@ -15,7 +15,10 @@ type Props = {
   categories: readonly Category[];
   items: readonly Keepsake[];
   settings: GallerySettings;
+  readOnly: boolean;
   onSave: (settings: GallerySettings) => Promise<void>;
+  onChooseViewMode: () => void;
+  onChooseEditMode: () => void;
   onClose: () => void;
 };
 
@@ -34,7 +37,16 @@ function nextShuffleSeed() {
   return Math.floor(Math.random() * 0x1_0000_0000);
 }
 
-export default function SettingsDialog({ categories, items, settings, onSave, onClose }: Props) {
+export default function SettingsDialog({
+  categories,
+  items,
+  settings,
+  readOnly,
+  onSave,
+  onChooseViewMode,
+  onChooseEditMode,
+  onClose,
+}: Props) {
   const [draft, setDraft] = useState(() => normalizeGallerySettings(settings));
   const initialCategory = orderCategories(categories, settings)[0]?.id ?? UNCATEGORIZED_CATEGORY_KEY;
   const [cardCategoryKey, setCardCategoryKey] = useState(initialCategory);
@@ -90,11 +102,38 @@ export default function SettingsDialog({ categories, items, settings, onSave, on
         <div className="dialog-head">
           <div>
             <h2 id="settings-title" className="dialog-title">ずかんの設定</h2>
-            <p className="dialog-lede">ページとキロクの並び方を整えます。</p>
+            <p className="dialog-lede">{readOnly ? '見るだけのモードです。編集するときはロックを解除します。' : 'ずかんのモードと、キロクの並び方を選べます。'}</p>
           </div>
           <button type="button" className="icon-button" disabled={busy} onClick={close} aria-label="閉じる" data-testid="button-close-settings"><X size={19} /></button>
         </div>
 
+        <section className="settings-section" aria-labelledby="settings-mode-title">
+          <h3 id="settings-mode-title" className="settings-heading">モードを選ぶ</h3>
+          <div className="settings-mode-options" role="group" aria-label="ずかんのモード">
+            <button
+              type="button"
+              className={`settings-mode-option${readOnly ? ' selected' : ''}`}
+              aria-pressed={readOnly}
+              disabled={readOnly}
+              onClick={onChooseViewMode}
+              data-testid="button-mode-view"
+            >
+              <Eye size={18} />
+              <span><strong>閲覧モード</strong><small>キロクを見たり、声をきいたりできます。</small></span>
+            </button>
+            <button
+              type="button"
+              className="settings-mode-option"
+              onClick={onChooseEditMode}
+              data-testid="button-mode-edit"
+            >
+              <Pencil size={18} />
+              <span><strong>編集モード</strong><small>{readOnly ? 'ロックを解除して、ずかんの並び替えをします。' : 'ずかんを見ながら、カテゴリやキロクを動かします。'}</small></span>
+            </button>
+          </div>
+        </section>
+
+        {!readOnly && <>
         <section className="settings-section" aria-labelledby="settings-display-title">
           <h3 id="settings-display-title" className="settings-heading">キロクの表示</h3>
           <div className="settings-mode-options" role="group" aria-label="キロクの表示順">
@@ -147,11 +186,12 @@ export default function SettingsDialog({ categories, items, settings, onSave, on
             </ol>
           ) : <p className="settings-empty">このページには、まだキロクがありません。</p>}
         </section>
+        </>}
 
         {error && <p className="form-error" role="alert" data-testid="status-settings-error">{error}</p>}
         <div className="dialog-actions">
-          <button type="button" className="cancel-button" disabled={busy} onClick={close} data-testid="button-cancel-settings">やめる</button>
-          <button type="submit" className="save-button" disabled={busy} data-testid="button-save-settings"><Check size={16} />{busy ? '保存中…' : '設定を保存'}</button>
+          <button type="button" className="cancel-button" disabled={busy} onClick={close} data-testid="button-cancel-settings">{readOnly ? '閉じる' : 'やめる'}</button>
+          {!readOnly && <button type="submit" className="save-button" disabled={busy} data-testid="button-save-settings"><Check size={16} />{busy ? '保存中…' : '設定を保存'}</button>}
         </div>
       </form>
     </div>

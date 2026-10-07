@@ -30,6 +30,12 @@ export function recordingCue(
   audio.preservesPitch = false;
   const prefixed = audio as HTMLAudioElement & { webkitPreservesPitch?: boolean };
   if ('webkitPreservesPitch' in prefixed) prefixed.webkitPreservesPitch = false;
+  const getDurationMs = () => Number.isFinite(audio.duration) && audio.duration > 0
+    ? Math.round((audio.duration / audio.playbackRate) * 1000)
+    : 5000;
+  const getProgress = () => Number.isFinite(audio.duration) && audio.duration > 0
+    ? Math.min(1, Math.max(0, audio.currentTime / audio.duration))
+    : 0;
   // Rewind a previously used shared element without discarding its cached data.
   if (usingPreloaded) audio.currentTime = 0;
   let resolve: () => void = () => {};
@@ -59,5 +65,10 @@ export function recordingCue(
   } catch {
     finish(new Error('ガイドボイスを再生できませんでした。'));
   }
-  return { finished, cancel: () => finish(new DOMException('Guide cancelled', 'AbortError')) };
+  return {
+    finished,
+    cancel: () => finish(new DOMException('Guide cancelled', 'AbortError')),
+    get durationMs() { return getDurationMs(); },
+    get progress() { return getProgress(); },
+  };
 }

@@ -8,7 +8,7 @@ export default function ModeLockDialog({ onClose, onUnlock }: Props) {
   const dialog = useRef<HTMLDivElement>(null);
   const timer = useRef<number | null>(null);
   const [holding, setHolding] = useState(false);
-  useDialogFocus(dialog, '[data-testid="button-unlock-edit-mode"]', onClose);
+  useDialogFocus(dialog, '[data-testid="button-settings"]', onClose);
 
   const stopHold = () => {
     if (timer.current !== null) window.clearTimeout(timer.current);

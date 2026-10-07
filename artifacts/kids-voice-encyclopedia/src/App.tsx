@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import {
   AlertCircle,
   BookOpen,
@@ -7,8 +7,8 @@ import {
   ChevronDown,
   CircleHelp,
   Eye,
+  GripVertical,
   Image as ImageIcon,
-  LockKeyhole,
   Mic,
   Pause,
   Pencil,
@@ -41,7 +41,7 @@ import SharePasswordGate from './components/SharePasswordGate';
 import ModeLockDialog from './components/ModeLockDialog';
 import { useCategories } from './hooks/useCategories';
 import { filterByCategory } from './lib/categories';
-import { DEFAULT_GALLERY_SETTINGS, orderCategories, sortGalleryItems, type GallerySettings } from './lib/gallerySettings';
+import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, orderCardsInCategory, orderCategories, sortGalleryItems, UNCATEGORIZED_CATEGORY_KEY, type GallerySettings } from './lib/gallerySettings';
 import { deleteKeepsake, editKeepsake, firebaseError, saveGallerySettings, saveKeepsake, subscribeGallerySettings, subscribeKeepsakes, subscribeLiveShare, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
 import type { SharedBook, ShareId } from './lib/shareRepository';
 import { decodeShareToken } from './lib/shareCrypto';
@@ -67,6 +67,26 @@ function readShareRoute(): { token: ShareId | null } | null {
   return { token: decodeShareToken(rawToken) };
 }
 
+type ReorderPointerState = {
+  pointerId: number;
+  kind: 'category' | 'card';
+  sourceId: string;
+  sourceElement: HTMLElement;
+  startX: number;
+  startY: number;
+  dragging: boolean;
+  lastTargetId: string | null;
+};
+
+function swapOrderIds(ids: readonly string[], firstId: string, secondId: string) {
+  const first = ids.indexOf(firstId);
+  const second = ids.indexOf(secondId);
+  if (first < 0 || second < 0 || first === second) return [...ids];
+  const next = [...ids];
+  [next[first], next[second]] = [next[second], next[first]];
+  return next;
+}
+
 function App() {
   const [items, setItems] = useState<Keepsake[]>([]);
   const [shareRoute] = useState(readShareRoute);
@@ -77,6 +97,13 @@ function App() {
   const [unlockOpen, setUnlockOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [reorderEditMode, setReorderEditMode] = useState(false);
+  const [reorderSettings, setReorderSettings] = useState<GallerySettings | null>(null);
+  const [reorderSaving, setReorderSaving] = useState(false);
+  const [reorderError, setReorderError] = useState('');
+  const [reorderStatus, setReorderStatus] = useState('');
+  const [reorderDraggingId, setReorderDraggingId] = useState<string | null>(null);
+  const [reorderOverId, setReorderOverId] = useState<string | null>(null);
   const [gallerySettings, setGallerySettings] = useState<GallerySettings>(() => ({
     ...DEFAULT_GALLERY_SETTINGS,
     categoryOrder: [...DEFAULT_GALLERY_SETTINGS.categoryOrder],
@@ -113,6 +140,9 @@ function App() {
   const [newCatInCreate, setNewCatInCreate] = useState(false);
   const [catBusy, setCatBusy] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const reorderPointer = useRef<ReorderPointerState | null>(null);
+  const suppressClickUntil = useRef(0);
+  const pendingReorderAfterUnlock = useRef(false);
   const localDraft = useNewKeepsakeDraft();
   const { categories, error: categoryIssue, create: createCategoryEntry, describeError } = useCategories(connectionAttempt, !shareRoute);
   useEffect(() => {
@@ -148,8 +178,11 @@ function App() {
   const readOnly = !!shareRoute || localReadOnly;
   const shownItems = sharedBook?.items ?? items;
   const activeGallerySettings = sharedBook?.settings ?? gallerySettings;
-  const shownCategories = orderCategories(sharedBook?.categories ?? categories, activeGallerySettings);
-  const visibleItems = sortGalleryItems(filterByCategory(shownItems, selectedCategory), shownCategories, activeGallerySettings, selectedCategory);
+  const displayedGallerySettings = reorderEditMode && reorderSettings
+    ? { ...reorderSettings, displayMode: 'ordered' as const }
+    : activeGallerySettings;
+  const shownCategories = orderCategories(sharedBook?.categories ?? categories, displayedGallerySettings);
+  const visibleItems = sortGalleryItems(filterByCategory(shownItems, selectedCategory), shownCategories, displayedGallerySettings, selectedCategory);
   const categoryName = (id: string | null | undefined) => shownCategories.find((c) => c.id === id)?.name;
   const recordingSession = useRef(0);
   const createDraftSession = useRef(0);
@@ -360,6 +393,145 @@ function App() {
   }, [sharedBook]);
 
   const stopPlayback = () => playback.stop();
+
+  const beginReorderEditing = () => {
+    createDraftSession.current++;
+    stopPlayback();
+    setSettingsOpen(false);
+    setView('library');
+    setSelectedCategory(null);
+    setReorderSettings(normalizeGallerySettings(gallerySettings));
+    setReorderError('');
+    setReorderStatus('カテゴリやキロクをつかんで動かせます。');
+    setReorderEditMode(true);
+  };
+
+  const finishReorderEditing = async () => {
+    if (!reorderSettings || reorderSaving) return;
+    setReorderSaving(true);
+    setReorderError('');
+    try {
+      await saveGallerySettings(normalizeGallerySettings(reorderSettings));
+      setGallerySettings(normalizeGallerySettings(reorderSettings));
+      setReorderEditMode(false);
+      setReorderSettings(null);
+      setReorderStatus('');
+      setReorderDraggingId(null);
+      setReorderOverId(null);
+    } catch (caught) {
+      setReorderError(firebaseError(caught));
+    } finally {
+      setReorderSaving(false);
+    }
+  };
+
+  const moveCategory = (sourceId: string, targetId: string) => {
+    const current = reorderSettings;
+    if (!current) return false;
+    const ids = orderCategories(categories, current).map((category) => category.id);
+    const nextIds = swapOrderIds(ids, sourceId, targetId);
+    if (nextIds.every((id, index) => id === ids[index])) return false;
+    setReorderSettings((value) => value ? { ...value, categoryOrder: swapOrderIds(orderCategories(categories, value).map((category) => category.id), sourceId, targetId) } : value);
+    const name = categories.find((category) => category.id === sourceId)?.name ?? 'カテゴリ';
+    setReorderStatus(`${name}を並べ替えました。`);
+    return true;
+  };
+
+  const moveCategoryByOffset = (id: string, offset: number) => {
+    const ids = orderCategories(categories, reorderSettings ?? activeGallerySettings).map((category) => category.id);
+    const index = ids.indexOf(id);
+    const targetId = ids[index + offset];
+    if (targetId) moveCategory(id, targetId);
+  };
+
+  const moveCard = (sourceId: string, targetId: string) => {
+    const source = shownItems.find((item) => item.id === sourceId);
+    const target = shownItems.find((item) => item.id === targetId);
+    if (!source || !target || (source.categoryId ?? null) !== (target.categoryId ?? null)) return false;
+    const current = reorderSettings;
+    if (!current) return false;
+    const categoryId = source.categoryId ?? null;
+    const ids = orderCardsInCategory(shownItems, categoryId, current).map((item) => item.id);
+    const nextIds = swapOrderIds(ids, sourceId, targetId);
+    if (nextIds.every((id, index) => id === ids[index])) return false;
+    const key = categoryId ?? UNCATEGORIZED_CATEGORY_KEY;
+    setReorderSettings((value) => value ? {
+      ...value,
+      cardOrderByCategory: {
+        ...value.cardOrderByCategory,
+        [key]: swapOrderIds(orderCardsInCategory(shownItems, categoryId, value).map((item) => item.id), sourceId, targetId),
+      },
+    } : value);
+    setReorderStatus(`${source.itemName}を並べ替えました。`);
+    return true;
+  };
+
+  const moveCardByOffset = (id: string, offset: number) => {
+    const item = shownItems.find((entry) => entry.id === id);
+    if (!item || !reorderSettings) return;
+    const ordered = orderCardsInCategory(shownItems, item.categoryId ?? null, reorderSettings);
+    const index = ordered.findIndex((entry) => entry.id === id);
+    const target = ordered[index + offset];
+    if (target) moveCard(id, target.id);
+  };
+
+  const handleReorderPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!reorderEditMode) return;
+    const source = (event.target as HTMLElement).closest<HTMLElement>('[data-reorder-kind][data-reorder-id]');
+    const kind = source?.dataset.reorderKind;
+    const sourceId = source?.dataset.reorderId;
+    if ((kind !== 'category' && kind !== 'card') || !sourceId) return;
+    reorderPointer.current = {
+      pointerId: event.pointerId,
+      kind,
+      sourceId,
+      sourceElement: source,
+      startX: event.clientX,
+      startY: event.clientY,
+      dragging: false,
+      lastTargetId: null,
+    };
+  };
+
+  const handleReorderPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const gesture = reorderPointer.current;
+    if (!reorderEditMode || !gesture || gesture.pointerId !== event.pointerId) return;
+    if (!gesture.dragging) {
+      if (Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY) < 9) return;
+      gesture.dragging = true;
+      try { gesture.sourceElement.setPointerCapture(event.pointerId); } catch { /* pointer capture is an optional drag enhancement */ }
+      setReorderDraggingId(gesture.sourceId);
+    }
+    event.preventDefault();
+    const target = document.elementFromPoint(event.clientX, event.clientY)
+      ?.closest<HTMLElement>('[data-reorder-drop-kind][data-reorder-drop-id]');
+    if (!target || target.dataset.reorderDropKind !== gesture.kind) return;
+    const targetId = target.dataset.reorderDropId;
+    if (!targetId || targetId === gesture.sourceId || targetId === gesture.lastTargetId) return;
+    const moved = gesture.kind === 'category'
+      ? moveCategory(gesture.sourceId, targetId)
+      : moveCard(gesture.sourceId, targetId);
+    if (moved) {
+      gesture.lastTargetId = targetId;
+      setReorderOverId(targetId);
+    }
+  };
+
+  const handleReorderPointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const gesture = reorderPointer.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    if (gesture.dragging) suppressClickUntil.current = performance.now() + 350;
+    reorderPointer.current = null;
+    setReorderDraggingId(null);
+    setReorderOverId(null);
+  };
+
+  const handleReorderClickCapture = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (performance.now() >= suppressClickUntil.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    suppressClickUntil.current = 0;
+  };
 
   const longPress = useLongPress<Keepsake>((item) => {
     const current = items.find((entry) => entry.id === item.id);
@@ -574,6 +746,9 @@ function App() {
     stopPlayback();
     setView('library');
     setLocalReadOnly(true);
+    setReorderEditMode(false);
+    setReorderSettings(null);
+    setReorderError('');
     setDetail(null);
     setEditOpen(false);
     setCreateOpen(false);
@@ -588,7 +763,19 @@ function App() {
       window.location.replace(`${window.location.pathname}${window.location.search}`);
       return;
     }
+    const enterReorder = pendingReorderAfterUnlock.current;
+    pendingReorderAfterUnlock.current = false;
     setLocalReadOnly(false);
+    if (enterReorder) beginReorderEditing();
+  };
+  const chooseEditMode = () => {
+    setSettingsOpen(false);
+    if (readOnly) {
+      pendingReorderAfterUnlock.current = true;
+      setUnlockOpen(true);
+      return;
+    }
+    beginReorderEditing();
   };
   const acceptSharedBook = (book: SharedBook) => {
     setSelectedCategory(null);
@@ -597,23 +784,35 @@ function App() {
   };
 
   return (
-    <div className="app-shell">
+    <div
+      className={`app-shell${reorderEditMode ? ' is-reorder-mode' : ''}`}
+      onPointerDownCapture={handleReorderPointerDown}
+      onPointerMoveCapture={handleReorderPointerMove}
+      onPointerUpCapture={handleReorderPointerEnd}
+      onPointerCancelCapture={handleReorderPointerEnd}
+      onClickCapture={handleReorderClickCapture}
+    >
       <header className="topbar" inert={createOpen || !!detail || categoryOpen || shareOpen || settingsOpen || unlockOpen}>
-        <button type="button" className="brand brand-home" onClick={() => setView('start')} disabled={readOnly} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
+        <button type="button" className="brand brand-home" onClick={() => setView('start')} disabled={readOnly || reorderEditMode} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
           <span className="brand-mark"><BookOpen size={20} strokeWidth={1.8} /></span>
           <h1 className="brand-title" style={{ margin: 0 }}>こどもの こえずかん</h1>
         </button>
         <div className="topbar-actions">
-          {view === 'library' && !readOnly && <button type="button" className="header-create" onClick={openCreate} data-testid="button-create-card"><Plus size={18} /><span>キロクする</span></button>}
-          {readOnly
-            ? !shareRoute && <button type="button" className="header-mode-button" onClick={() => setUnlockOpen(true)} data-testid="button-unlock-edit-mode"><LockKeyhole size={15} /><span>編集をひらく</span></button>
-            : <>
-              {view === 'library' && <button type="button" className="header-settings-button" onClick={() => { stopPlayback(); setSettingsOpen(true); }} disabled={settingsLoading || !!settingsIssue} aria-label="ずかんの設定" title="ずかんの設定" data-testid="button-settings"><Settings size={17} /></button>}
-              <button type="button" className="header-mode-button" onClick={enterReadOnly} aria-label="閲覧専用モードにする" data-testid="button-enter-readonly"><Eye size={16} /><span>閲覧モード</span></button>
-              {isFirebaseConfigured && <button type="button" className="header-share-button" onClick={() => { createDraftSession.current++; setShareOpen(true); }} aria-label="ずかんを共有する" data-testid="button-share-encyclopedia"><Share2 size={15} /><span>共有</span></button>}
-            </>}
+          {view === 'library' && !readOnly && !reorderEditMode && <button type="button" className="header-create" onClick={openCreate} data-testid="button-create-card"><Plus size={18} /><span>キロクする</span></button>}
+          {!shareRoute && !reorderEditMode && <button type="button" className="header-settings-button" onClick={() => { stopPlayback(); setSettingsOpen(true); }} disabled={!readOnly && (settingsLoading || !!settingsIssue)} aria-label="設定" title="設定" data-testid="button-settings"><Settings size={17} /></button>}
+          {!readOnly && !reorderEditMode && isFirebaseConfigured && <button type="button" className="header-share-button" onClick={() => { createDraftSession.current++; setShareOpen(true); }} aria-label="ずかんを共有する" data-testid="button-share-encyclopedia"><Share2 size={15} /><span>共有</span></button>}
         </div>
       </header>
+
+      {reorderEditMode && (
+        <aside className="reorder-complete-bar" aria-label="並び替え編集">
+          <p className="reorder-instructions">カテゴリを横に、キロクを同じページの中で動かせます。</p>
+          <p className="reorder-live-status" role="status" aria-live="polite">{reorderError || reorderStatus}</p>
+          <button type="button" className="reorder-complete-button" onClick={() => void finishReorderEditing()} disabled={reorderSaving} data-testid="button-finish-reorder">
+            <Check size={19} />{reorderSaving ? '並び順を保存しています…' : '編集を完了する'}
+          </button>
+        </aside>
+      )}
 
       {shareRoute && (shareMode === 'loading' || shareMode === 'error') ? (
         <main className="share-gate-main">
@@ -628,8 +827,19 @@ function App() {
           <StartScreen onRecord={openCreate} onOpenEncyclopedia={() => { createDraftSession.current++; setView('library'); }} />
         </main>
       ) : (
-      <main className="page-main" inert={createOpen || !!detail || categoryOpen || shareOpen || settingsOpen || unlockOpen}>
-        <CategoryBar categories={shownCategories} selected={selectedCategory} onSelect={(id) => { stopPlayback(); setSelectedCategory(id); }} onNew={() => setCategoryOpen(true)} disabled={busy} readOnly={readOnly} />
+      <main className={`page-main${reorderEditMode ? ' is-reorder-mode' : ''}`} inert={createOpen || !!detail || categoryOpen || shareOpen || settingsOpen || unlockOpen}>
+        <CategoryBar
+          categories={shownCategories}
+          selected={selectedCategory}
+          onSelect={(id) => { stopPlayback(); setSelectedCategory(id); }}
+          onNew={() => setCategoryOpen(true)}
+          disabled={busy || reorderSaving}
+          readOnly={readOnly}
+          reorderMode={reorderEditMode}
+          reorderOverId={reorderOverId}
+          reorderDraggingId={reorderDraggingId}
+          onMoveCategory={moveCategoryByOffset}
+        />
         {!shareRoute && categoryIssue && <div className="notice" role="alert" data-testid="status-categories-load-error"><AlertCircle size={16} />{categoryIssue}
           <button type="button" className="record-button" onClick={() => setConnectionAttempt((value) => value + 1)} disabled={busy}>再接続</button>
         </div>}
@@ -657,15 +867,23 @@ function App() {
             {!readOnly && <button type="button" className="empty-action" onClick={openCreate} data-testid="button-category-empty-create">このページにキロクする</button>}
           </section>
         ) : (
-          <section className="sticker-collage" aria-label="わが家のキロク" data-testid="grid-keepsakes">
+          <section className={`sticker-collage${reorderEditMode ? ' reorder-enabled' : ''}`} aria-label="わが家のキロク" data-testid="grid-keepsakes">
             {visibleItems.map((item) => (
-              <article key={item.id} className={`sticker-item${playing && playingItemId === item.id ? ' is-playing' : ''}`} data-testid={`card-keepsake-${item.id}`}>
+              <article
+                key={item.id}
+                className={`sticker-item${playing && playingItemId === item.id ? ' is-playing' : ''}`}
+                data-reorder-drop-kind={reorderEditMode ? 'card' : undefined}
+                data-reorder-drop-id={reorderEditMode ? item.id : undefined}
+                data-reorder-dragging={reorderDraggingId === item.id ? 'true' : undefined}
+                data-reorder-over={reorderOverId === item.id ? 'true' : undefined}
+                data-testid={`card-keepsake-${item.id}`}
+              >
                 <button
                   type="button"
-                  className="sticker-photo-button"
-                  onClick={() => playKeepsake(item)}
-                  {...longPress(item)}
-                  aria-label={getVoices(item).length ? `${item.itemName}の声をきく` : item.itemName}
+                  className={`sticker-photo-button${reorderEditMode ? ' reorderable' : ''}`}
+                  onClick={() => { if (!reorderEditMode) playKeepsake(item); }}
+                  {...(!reorderEditMode ? longPress(item) : {})}
+                  aria-label={reorderEditMode ? `${item.itemName}のキロク。並び替えはつまみを使います` : getVoices(item).length ? `${item.itemName}の声をきく` : item.itemName}
                   data-testid={`button-play-card-${item.id}`}
                 >
                   {item.photo
@@ -673,7 +891,21 @@ function App() {
                     : <ImageIcon size={44} />}
                   {playing && playingItemId === item.id && <span className="voice-notes" aria-hidden="true"><span>♪</span><span>♫</span><span>♪</span></span>}
                 </button>
-                {readOnly
+                {reorderEditMode && <button
+                  type="button"
+                  className="sticker-reorder-handle"
+                  data-reorder-kind="card"
+                  data-reorder-id={item.id}
+                  aria-label={`${item.itemName}を並べ替え。Altキーと上下矢印でも移動できます`}
+                  onClick={(event) => event.preventDefault()}
+                  onKeyDown={(event) => {
+                    if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
+                    event.preventDefault();
+                    moveCardByOffset(item.id, event.key === 'ArrowDown' ? 1 : -1);
+                  }}
+                  data-testid={`button-reorder-card-${item.id}`}
+                ><GripVertical size={17} aria-hidden="true" /></button>}
+                {readOnly || reorderEditMode
                   ? <span className="sticker-name" data-testid={`text-card-name-${item.id}`}>{item.itemName}</span>
                   : <button type="button" className="sticker-name" onClick={() => openDetail(item)} aria-label={`${item.itemName}の写真を大きく表示`} data-testid={`button-detail-${item.id}`}>{item.itemName}</button>}
                 <span className="sr-only" role="status">{playing && playingItemId === item.id ? `${item.itemName}の声を再生中` : ''}</span>
@@ -723,7 +955,14 @@ function App() {
                   <div className="record-title"><Mic size={16} /> 声をのこす <span className="record-status" role="status" aria-live="polite">{rec.guiding ? 'これはなーに？' : recording ? `録音中 ${formatTime(recordSeconds)}` : voice ? '録音できました' : 'あとからでも大丈夫'}</span></div>
                   {recording && <div className="recording-wave" aria-label="録音中"><i /><i /><i /><i /><i /><i /><i /></div>}
                 </div>
-                <RecordingGuide name={itemName} phase={rec.guiding || rec.starting ? 'guide' : recording ? 'recording' : 'idle'} />
+                <RecordingGuide
+                  name={itemName}
+                  photo={photo || undefined}
+                  phase={rec.guiding || rec.starting ? 'guide' : recording ? 'recording' : 'idle'}
+                  guideDurationMs={rec.guideDurationMs}
+                  guideProgress={rec.guideProgress}
+                  recordingStartSignal={recordingSession.current}
+                />
                 <div className="record-actions">
                   {recording ? (
                     <button type="button" className="record-button danger" onClick={stopRecording} data-testid="button-stop-recording"><span className="recording-dot" /> 録音をとめる</button>
@@ -770,8 +1009,8 @@ function App() {
             </div>
             {error && <p className="form-error" role="alert" data-testid="status-form-error">{error}</p>}
             <div className="dialog-actions">
-              <button type="button" className="cancel-button" disabled={busy} onClick={closeCreate} data-testid="button-cancel-create">あとで</button>
-              <button type="button" className="save-button" onClick={saveCard} disabled={recording || rec.micStatus === 'preparing' || rec.starting || processingVoice || draftLoading || busy || !isFirebaseConfigured || !!storageIssue || loading} data-testid="button-save-card"><Check size={16} /> {busy ? 'Firebaseに保存中…' : 'このカードをしまう'}</button>
+              <button type="button" className="cancel-button" disabled={busy} onClick={closeCreate} data-testid="button-cancel-create">やめる</button>
+              <button type="button" className="save-button" onClick={saveCard} disabled={recording || rec.micStatus === 'preparing' || rec.starting || processingVoice || draftLoading || busy || !isFirebaseConfigured || !!storageIssue || loading} data-testid="button-save-card"><Check size={16} /> {busy ? 'キロクを残しています…' : 'キロクする'}</button>
             </div>
             {!isFirebaseConfigured && <p className="form-error" role="status">保存にはFirebaseの設定が必要です。src/firebaseConfig.ts をご確認ください。</p>}
           </DetailDialogShell>
@@ -845,11 +1084,14 @@ function App() {
         />
       )}
       {shareOpen && !readOnly && <ShareDialog items={items} categories={categories} settings={gallerySettings} onClose={() => setShareOpen(false)} />}
-      {settingsOpen && !readOnly && <SettingsDialog
+      {settingsOpen && !shareRoute && <SettingsDialog
         categories={shownCategories}
         items={shownItems}
         settings={gallerySettings}
+        readOnly={readOnly}
         onClose={() => setSettingsOpen(false)}
+        onChooseViewMode={enterReadOnly}
+        onChooseEditMode={chooseEditMode}
         onSave={async (next) => {
           try {
             await saveGallerySettings(next);
@@ -860,7 +1102,7 @@ function App() {
           }
         }}
       />}
-      {unlockOpen && readOnly && <ModeLockDialog onClose={() => setUnlockOpen(false)} onUnlock={finishUnlock} />}
+      {unlockOpen && readOnly && <ModeLockDialog onClose={() => { setUnlockOpen(false); pendingReorderAfterUnlock.current = false; }} onUnlock={finishUnlock} />}
     </div>
   );
 }

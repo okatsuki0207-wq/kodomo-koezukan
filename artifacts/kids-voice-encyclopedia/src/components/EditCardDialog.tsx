@@ -36,6 +36,7 @@ export default function EditCardDialog({ item, categories, onSave, describeError
   const [slots, setSlots] = useState<Slot[]>(() =>
     getVoices(base).map((v) => ({ key: v.id, id: v.id, url: v.url, path: v.path, fresh: false, replaced: false })));
   const [target, setTarget] = useState<string | null>(null); // 録音/処理中のスロット
+  const [recordingStartSignal, setRecordingStartSignal] = useState(0);
   const [processing, setProcessing] = useState(false);
   const [playingKey, setPlayingKey] = useState<string | null>(null);
   const [trimKey, setTrimKey] = useState<string | null>(null);
@@ -154,6 +155,7 @@ export default function EditCardDialog({ item, categories, onSave, describeError
     setTrimKey(null);
     stopPlayback(); setVoiceError(''); rec.setError('');
     setTarget(key);
+    setRecordingStartSignal((value) => value + 1);
     await rec.start();
   };
   useEffect(() => { if (!rec.recording && !rec.starting && !processing && target && rec.error) setTarget(null); }, [rec.recording, rec.starting, processing, target, rec.error]);
@@ -229,7 +231,14 @@ export default function EditCardDialog({ item, categories, onSave, describeError
           </div>
           <div className="form-block">
             <span className="field-label"><Mic size={14} /> 声（{slots.length}/{MAX_VOICES}）</span>
-            {(rec.starting || rec.recording) && <RecordingGuide name={name} phase={rec.guiding || rec.starting ? 'guide' : rec.recording ? 'recording' : 'idle'} />}
+            {(rec.starting || rec.recording) && <RecordingGuide
+              name={name}
+              photo={photoSource || photo || base.photo}
+              phase={rec.guiding || rec.starting ? 'guide' : rec.recording ? 'recording' : 'idle'}
+              guideDurationMs={rec.guideDurationMs}
+              guideProgress={rec.guideProgress}
+              recordingStartSignal={recordingStartSignal}
+            />}
             {slots.length === 0 && <p className="field-hint">まだ声がありません。マイクで録音して追加できます。</p>}
             <ul className="em-voices">
               {slots.map((slot, index) => {
