@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { encodeWav, findVoiceStart, trimAudioRange, waveformPeaks } from '../src/lib/audioTrim.ts';
-import { randomVoice, VoicePlayback } from '../src/lib/voicePlayback.ts';
+import { VoicePlayback, VoiceShuffleBag } from '../src/lib/voicePlayback.ts';
 import { recordingCue } from '../src/lib/recordingCue.ts';
 
 test('leading silence is removed with 50ms preroll, preserving tail', async () => {
@@ -75,10 +75,37 @@ function fakeAudio() {
     onended: null, onpause: null, onerror: null };
 }
 
-test('one random voice is selected, synchronous cached playback ends without a next clip', async () => {
-  assert.equal(randomVoice(['a', 'b', 'c'], () => 0), 'a');
-  assert.equal(randomVoice(['a', 'b', 'c'], () => 0.99), 'c');
-  assert.equal(randomVoice([], () => 0), undefined);
+test('per-card Fisher-Yates shuffle plays every voice once and avoids a duplicate at the round boundary', () => {
+  const randomValues = [0, 0, 0.99, 0.99, 0];
+  const bag = new VoiceShuffleBag((voice) => voice.id, () => randomValues.shift() ?? 0);
+  const voices = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  const firstRound = voices.map(() => bag.next(voices).id);
+  assert.equal(new Set(firstRound).size, voices.length);
+  const next = bag.next(voices).id;
+  assert.notEqual(next, firstRound.at(-1));
+
+  const secondRound = [next, bag.next(voices).id, bag.next(voices).id];
+  assert.equal(new Set(secondRound).size, voices.length);
+});
+
+test('shuffle bags are isolated by card and adapt when that card voice list changes', () => {
+  const bag = new VoiceShuffleBag((voice) => voice.id, () => 0);
+  const cardA = [{ id: 'a1' }, { id: 'a2' }];
+  const cardB = [{ id: 'b1' }, { id: 'b2' }];
+  const otherCard = new VoiceShuffleBag((voice) => voice.id, () => 0);
+  const aFirst = bag.next(cardA).id;
+  assert.ok(cardA.some((voice) => voice.id === aFirst));
+  assert.equal(otherCard.next(cardB).id, 'b1');
+  const aSecond = bag.next(cardA).id;
+  assert.notEqual(aSecond, aFirst);
+  assert.equal(bag.next([{ id: 'a3' }]).id, 'a3');
+  assert.equal(bag.next([]), undefined);
+});
+
+test('one-voice cards remain replayable and cached playback is synchronous', async () => {
+  const oneVoice = new VoiceShuffleBag((voice) => voice.id, () => 0);
+  assert.equal(oneVoice.next([{ id: 'only' }]).id, 'only');
+  assert.equal(oneVoice.next([{ id: 'only' }]).id, 'only');
   const pool = new Map(); const states = [];
   const p = new VoicePlayback({ onChange: s => states.push(s), onError: () => assert.fail('unexpected error'),
     createAudio: url => { const a = fakeAudio(); pool.set(url, a); return a; } });

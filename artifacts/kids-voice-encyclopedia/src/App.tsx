@@ -31,7 +31,7 @@ import RecordingGuide from './components/RecordingGuide';
 import VoiceTrimEditor from './components/VoiceTrimEditor';
 import { useEditRecording } from './hooks/useEditRecording';
 import { useNewKeepsakeDraft } from './hooks/useNewKeepsakeDraft';
-import { randomVoice, VoicePlayback } from './lib/voicePlayback';
+import { VoicePlayback, VoiceShuffleBag } from './lib/voicePlayback';
 import DetailDialogShell from './components/DetailDialogShell';
 import StartScreen from './components/StartScreen';
 import ShareDialog from './components/ShareDialog';
@@ -42,7 +42,7 @@ import { filterByCategory } from './lib/categories';
 import { deleteKeepsake, editKeepsake, firebaseError, saveKeepsake, subscribeKeepsakes, subscribeLiveShare, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
 import type { SharedBook, ShareId } from './lib/shareRepository';
 import { decodeShareToken } from './lib/shareCrypto';
-import { getVoices } from './lib/voiceAssets';
+import { getVoices, type VoiceAsset } from './lib/voiceAssets';
 import { trimLeadingSilence } from './lib/audioTrim';
 import { preloadRecordingGuide } from './lib/recordingCue';
 import { hasNewKeepsakeDraftContent, type NewKeepsakeDraftInput } from './lib/newKeepsakeDraft';
@@ -113,6 +113,7 @@ function App() {
   const createDraftSession = useRef(0);
   const pendingId = useRef<string | null>(null);
   const mutationLock = useRef(false);
+  const voiceShuffleBags = useRef(new Map<string, VoiceShuffleBag<VoiceAsset>>());
   const photoInput = useRef<HTMLInputElement | null>(null);
   const draftSnapshot: NewKeepsakeDraftInput = {
     itemName,
@@ -182,6 +183,13 @@ function App() {
     for (let i = 0; i < 5; i++) for (const clips of voices) if (clips[i]) urls.push(clips[i].url);
     playback.warm(urls);
   }, [items, selectedCategory, playback, sharedBook]);
+
+  useEffect(() => {
+    const currentIds = new Set(items.map((item) => item.id));
+    for (const id of voiceShuffleBags.current.keys()) {
+      if (!currentIds.has(id)) voiceShuffleBags.current.delete(id);
+    }
+  }, [items]);
 
   useEffect(() => {
     if (shareRoute) {
@@ -335,7 +343,12 @@ function App() {
     }
     setError('');
     if (playback.isActive(item.id)) { stopPlayback(); return; }
-    const selected = randomVoice(voices);
+    let bag = voiceShuffleBags.current.get(item.id);
+    if (!bag) {
+      bag = new VoiceShuffleBag((candidate) => candidate.id);
+      voiceShuffleBags.current.set(item.id, bag);
+    }
+    const selected = bag.next(voices);
     if (selected) playback.play(selected.url, item.id);
   };
 
