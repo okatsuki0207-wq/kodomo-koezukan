@@ -9,8 +9,9 @@ function ownedBuffer(bytes: Uint8Array): ArrayBuffer {
 
 export const SHARE_KDF = 'PBKDF2-SHA256' as const;
 export const SHARE_KDF_ITERATIONS = 600_000;
-export const SHARE_PASSWORD_MIN_LENGTH = 16;
-export const SHARE_PASSWORD_MAX_LENGTH = 128;
+export const SHARE_PASSWORD_LENGTH = 4;
+const LEGACY_SHARE_PASSWORD_MIN_LENGTH = 16;
+const LEGACY_SHARE_PASSWORD_MAX_LENGTH = 128;
 export const SHARE_SALT_BYTES = 16;
 export const SHARE_IV_BYTES = 12;
 // Leave room for base64 expansion and field/document metadata under Firestore's
