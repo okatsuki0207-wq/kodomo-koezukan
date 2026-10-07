@@ -157,12 +157,8 @@ service cloud.firestore {
     match /users/{uid}/settings/{settingId} {
       function owner() { return request.auth != null && request.auth.uid == uid; }
       function validGallerySettings(data) {
-        return data.keys().hasAll(['categoryOrder', 'cardOrderByCategory', 'displayMode', 'shuffleSeed', 'updatedAt'])
-          && data.keys().hasOnly(['categoryOrder', 'cardOrderByCategory', 'displayMode', 'shuffleSeed', 'updatedAt'])
-          && data.categoryOrder is list
-          && data.categoryOrder.size() <= 500
-          && data.cardOrderByCategory is map
-          && data.cardOrderByCategory.keys().size() <= 500
+        return data.keys().hasAll(['displayMode', 'shuffleSeed', 'updatedAt'])
+          && data.keys().hasOnly(['displayMode', 'shuffleSeed', 'updatedAt'])
           && data.displayMode in ['ordered', 'shuffle']
           && data.shuffleSeed is int
           && data.shuffleSeed >= 0
@@ -248,12 +244,8 @@ service cloud.firestore {
       }
       match /settings/{settingId} {
         function validGalleryProjection(data) {
-          return data.keys().hasAll(['categoryOrder', 'cardOrderByCategory', 'displayMode', 'shuffleSeed'])
-            && data.keys().hasOnly(['categoryOrder', 'cardOrderByCategory', 'displayMode', 'shuffleSeed'])
-            && data.categoryOrder is list
-            && data.categoryOrder.size() <= 500
-            && data.cardOrderByCategory is map
-            && data.cardOrderByCategory.keys().size() <= 500
+          return data.keys().hasAll(['displayMode', 'shuffleSeed'])
+            && data.keys().hasOnly(['displayMode', 'shuffleSeed'])
             && data.displayMode in ['ordered', 'shuffle']
             && data.shuffleSeed is int
             && data.shuffleSeed >= 0

@@ -3,60 +3,60 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_GALLERY_SETTINGS,
   normalizeGallerySettings,
-  orderCategories,
-  orderCardsInCategory,
   sortGalleryItems,
   UNCATEGORIZED_CATEGORY_KEY,
 } from '../src/lib/gallerySettings.ts';
 
-const categories = [
-  { id: 'toys', name: 'おもちゃ' },
-  { id: 'animals', name: 'どうぶつ' },
-];
 const items = [
-  { id: 'toy-1', categoryId: 'toys' },
-  { id: 'animal-1', categoryId: 'animals' },
-  { id: 'toy-2', categoryId: 'toys' },
-  { id: 'unclassified', categoryId: null },
+  { id: 'toy-1', categoryId: 'toys', createdAt: 100 },
+  { id: 'animal-1', categoryId: 'animals', createdAt: 200 },
+  { id: 'toy-2', categoryId: 'toys', createdAt: 300 },
+  { id: 'unclassified', categoryId: null, createdAt: 400 },
 ];
 
-test('category order and per-category card order apply without mutating source data', () => {
-  const settings = normalizeGallerySettings({
-    categoryOrder: ['animals', 'toys'],
-    cardOrderByCategory: { animals: ['animal-1'], toys: ['toy-2', 'toy-1'] },
-  });
-  const ordered = sortGalleryItems(items, categories, settings, null);
-  assert.deepEqual(ordered.map((item) => item.id), ['animal-1', 'toy-2', 'toy-1', 'unclassified']);
-  assert.deepEqual(orderCategories(categories, settings).map((category) => category.id), ['animals', 'toys']);
-  assert.deepEqual(orderCardsInCategory(items, 'toys', settings).map((item) => item.id), ['toy-2', 'toy-1']);
+test('default order is newest first across all, categorized, and uncategorized cards', () => {
+  const settings = normalizeGallerySettings(DEFAULT_GALLERY_SETTINGS);
+  assert.deepEqual(sortGalleryItems(items, settings, null).map((item) => item.id), [
+    'unclassified', 'toy-2', 'animal-1', 'toy-1',
+  ]);
+  assert.deepEqual(sortGalleryItems(items, settings, 'toys').map((item) => item.id), ['toy-2', 'toy-1']);
+  assert.deepEqual(sortGalleryItems(items, settings, 'animals').map((item) => item.id), ['animal-1']);
+  assert.deepEqual(sortGalleryItems(items, settings, 'missing-category'), []);
+  assert.deepEqual(sortGalleryItems(items, settings, UNCATEGORIZED_CATEGORY_KEY).map((item) => item.id), ['unclassified']);
   assert.deepEqual(items.map((item) => item.id), ['toy-1', 'animal-1', 'toy-2', 'unclassified']);
 });
 
-test('new cards and categories absent from saved order remain visible at the end', () => {
-  const settings = normalizeGallerySettings({
-    categoryOrder: ['toys'],
-    cardOrderByCategory: {
-      toys: ['toy-2'],
-      [UNCATEGORIZED_CATEGORY_KEY]: [],
-    },
-  });
-  const withNew = [...items, { id: 'toy-new', categoryId: 'toys' }];
-  assert.deepEqual(sortGalleryItems(withNew, [...categories, { id: 'art', name: 'さくひん' }], settings, 'toys')
-    .map((item) => item.id), ['toy-2', 'toy-1', 'toy-new']);
-  assert.deepEqual(orderCategories([...categories, { id: 'art', name: 'さくひん' }], settings)
-    .map((category) => category.id), ['toys', 'animals', 'art']);
+test('legacy manual-order fields are ignored and removed from normalized settings', () => {
+  assert.deepEqual(normalizeGallerySettings({
+    categoryOrder: ['animals'],
+    cardOrderByCategory: { toys: ['toy-1'] },
+    displayMode: 'ordered',
+    shuffleSeed: 3,
+  }), { displayMode: 'ordered', shuffleSeed: 3 });
 });
 
-test('shuffle layout is deterministic for shared viewers, filters by category, and preserves all cards', () => {
+test('shuffle mode keeps the newest card first and shuffles the remainder for each page', () => {
   const settings = {
     ...DEFAULT_GALLERY_SETTINGS,
-    categoryOrder: ['toys', 'animals'],
     displayMode: 'shuffle',
     shuffleSeed: 12345,
   };
-  const first = sortGalleryItems(items, categories, settings, null).map((item) => item.id);
-  const second = sortGalleryItems(items, categories, settings, null).map((item) => item.id);
+  const first = sortGalleryItems(items, settings, null).map((item) => item.id);
+  const second = sortGalleryItems(items, settings, null).map((item) => item.id);
   assert.deepEqual(first, second);
+  assert.equal(first[0], 'unclassified');
   assert.deepEqual(new Set(first), new Set(items.map((item) => item.id)));
-  assert.ok(sortGalleryItems(items, categories, settings, 'toys').every((item) => item.categoryId === 'toys'));
+
+  const toys = sortGalleryItems(items, settings, 'toys').map((item) => item.id);
+  assert.equal(toys[0], 'toy-2');
+  assert.deepEqual(new Set(toys), new Set(['toy-1', 'toy-2']));
+  assert.deepEqual(sortGalleryItems(items, settings, 'animals').map((item) => item.id), ['animal-1']);
+  assert.deepEqual(sortGalleryItems(items, settings, UNCATEGORIZED_CATEGORY_KEY).map((item) => item.id), ['unclassified']);
+});
+
+test('turning shuffle off restores strict newest-first ordering', () => {
+  const settings = normalizeGallerySettings({ displayMode: 'ordered', shuffleSeed: 12345 });
+  assert.deepEqual(sortGalleryItems(items, settings, null).map((item) => item.id), [
+    'unclassified', 'toy-2', 'animal-1', 'toy-1',
+  ]);
 });

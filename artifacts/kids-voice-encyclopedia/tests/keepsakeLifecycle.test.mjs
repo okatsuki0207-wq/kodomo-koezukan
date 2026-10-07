@@ -751,8 +751,6 @@ test('live share IDs expose only their read-only Firestore projection and keep o
   const projectedSettingsRef = doc(alice.db, 'users', 'alice', 'shares', shareId, 'settings', 'gallery');
   const ownerSettingsRef = doc(alice.db, 'users', 'alice', 'settings', 'gallery');
   const ownerSettings = {
-    categoryOrder: ['default-toys'],
-    cardOrderByCategory: { 'default-toys': ['card-1'] },
     displayMode: 'shuffle',
     shuffleSeed: 42,
     updatedAt: serverTimestamp(),
@@ -772,8 +770,6 @@ test('live share IDs expose only their read-only Firestore projection and keep o
   await assertSucceeds(setDoc(cardRef, card));
   await assertSucceeds(setDoc(categoryRef, { name: 'おもちゃ', createdAt: Date.now() }));
   const projectedSettings = {
-    categoryOrder: ['default-toys'],
-    cardOrderByCategory: { 'default-toys': ['card-1'] },
     displayMode: 'ordered',
     shuffleSeed: 9,
   };
@@ -838,8 +834,6 @@ test('live share repository publishes without Storage copies and streams owner c
   assert.equal(first.categories[0].name, 'おもちゃ');
 
   await syncLiveShareProjections([{ ...original, itemName: '更新後のキロク' }], categories, {
-    categoryOrder: ['default-toys'],
-    cardOrderByCategory: { 'default-toys': ['live-card'] },
     displayMode: 'shuffle',
     shuffleSeed: 123,
   });

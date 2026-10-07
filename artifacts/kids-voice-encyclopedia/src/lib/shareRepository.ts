@@ -197,8 +197,6 @@ function projectionOperations(
   operations.push({
     path: `${base}/settings/gallery`,
     data: {
-      categoryOrder: normalizedSettings.categoryOrder,
-      cardOrderByCategory: normalizedSettings.cardOrderByCategory,
       displayMode: normalizedSettings.displayMode,
       shuffleSeed: normalizedSettings.shuffleSeed,
     },

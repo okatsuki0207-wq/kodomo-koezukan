@@ -80,7 +80,7 @@ if (!vm.SourceTextModule) {
         syncLiveShareProjections: async () => {},
       },
       './gallerySettings': {
-        DEFAULT_GALLERY_SETTINGS: { categoryOrder: [], cardOrderByCategory: {}, displayMode: 'ordered', shuffleSeed: 0 },
+        DEFAULT_GALLERY_SETTINGS: { displayMode: 'ordered', shuffleSeed: 0 },
         normalizeGallerySettings: (settings) => settings,
       },
     };

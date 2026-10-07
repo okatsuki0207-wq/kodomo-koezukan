@@ -32,7 +32,7 @@ export default function ModeLockDialog({ onClose, onUnlock }: Props) {
       <button type="button" className="icon-button lock-close" onClick={onClose} aria-label="閉じる"><X size={19} /></button>
       <div className="lock-icon"><LockKeyhole size={25} /></div>
       <h2 id="lock-title">おとなの人へ</h2>
-      <p>編集画面に戻るには、<br /><strong>下のボタンを3秒おしつづけてください。</strong></p>
+      <p>閲覧モードを解除するには、<br /><strong>下のボタンを3秒おしつづけてください。</strong></p>
       <button
         type="button"
         className={`lock-hold-button${holding ? ' is-holding' : ''}`}
