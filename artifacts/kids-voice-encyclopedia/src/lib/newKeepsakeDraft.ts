@@ -10,6 +10,10 @@ export type NewKeepsakeDraft = NewKeepsakeDraftInput & {
   updatedAt: number;
 };
 
+export function hasNewKeepsakeDraftContent(draft: NewKeepsakeDraftInput): boolean {
+  return Boolean(draft.itemName.trim() || draft.photo || draft.pendingPhotoBlob || draft.voiceBlob);
+}
+
 const DATABASE_NAME = 'kids-voice-encyclopedia-local';
 const DATABASE_VERSION = 1;
 const STORE_NAME = 'drafts';

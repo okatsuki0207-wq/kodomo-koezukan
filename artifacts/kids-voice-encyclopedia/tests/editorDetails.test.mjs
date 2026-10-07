@@ -11,6 +11,7 @@ const gesture = await load('longPressGesture');
 const subject = await load('subjectMask');
 const { loadVoiceSource } = await load('voiceSource');
 const { recordingCue } = await load('recordingCue');
+const { primeMicrophonePermission } = await load('microphonePermission');
 
 test('waveform drafts keep Blob bytes usable after their temporary URL is revoked', async () => {
   const blob = new Blob(['synthetic WAV bytes'], { type: 'audio/wav' });
@@ -38,6 +39,7 @@ test('waveform loader refreshes an expired saved URL once, validates bytes, and 
 });
 class GuideAudio {
   onended = null; onerror = null; played = 0; paused = 0;
+  playbackRate = 1; preservesPitch = true;
   play() { this.played++; return Promise.resolve(); }
   pause() { this.paused++; }
   load() {}
@@ -47,6 +49,8 @@ test('guide voice begins from tap and resolves only after ended plus acoustic ta
   const audio = new GuideAudio();
   const cue = recordingCue('/test-guide.mp3', () => audio);
   assert.equal(audio.played, 1);
+  assert.equal(audio.playbackRate, 1.12);
+  assert.equal(audio.preservesPitch, false);
   let finished = false;
   cue.finished.then(() => { finished = true; });
   await new Promise((r) => setTimeout(r, 10));
@@ -56,6 +60,19 @@ test('guide voice begins from tap and resolves only after ended plus acoustic ta
   await cue.finished;
   assert.equal(finished, true);
   assert.equal(audio.onended, null);
+});
+
+test('microphone preflight requests audio permission and releases every temporary track', async () => {
+  const stopped = [];
+  let constraints;
+  await primeMicrophonePermission({
+    getUserMedia: async (value) => {
+      constraints = value;
+      return { getTracks: () => [{ stop: () => stopped.push('track-1') }, { stop: () => stopped.push('track-2') }] };
+    },
+  });
+  assert.deepEqual(constraints, { audio: true });
+  assert.deepEqual(stopped, ['track-1', 'track-2']);
 });
 test('guide cancellation and load failure reject instead of permitting recording', async () => {
   const audio = new GuideAudio();

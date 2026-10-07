@@ -4,9 +4,10 @@ import { RecordingCharacter } from './RecordingGuide';
 type Props = {
   onRecord: () => void;
   onOpenEncyclopedia: () => void;
+  onResumeDraft?: () => void;
 };
 
-export default function StartScreen({ onRecord, onOpenEncyclopedia }: Props) {
+export default function StartScreen({ onRecord, onOpenEncyclopedia, onResumeDraft }: Props) {
   return (
     <section className="start-screen" aria-labelledby="start-title">
       <div className="start-character" aria-hidden="true">
@@ -27,6 +28,12 @@ export default function StartScreen({ onRecord, onOpenEncyclopedia }: Props) {
           <span>ずかんをみる</span>
         </button>
       </div>
+      {onResumeDraft && (
+        <div className="start-resume-draft" role="status" data-testid="status-start-draft">
+          <span>前回の下書きがあります。</span>
+          <button type="button" onClick={onResumeDraft} data-testid="button-resume-draft">つづきからキロクする</button>
+        </div>
+      )}
     </section>
   );
 }

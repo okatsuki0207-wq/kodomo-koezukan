@@ -45,7 +45,7 @@ import { decodeShareToken } from './lib/shareCrypto';
 import { getVoices } from './lib/voiceAssets';
 import { trimLeadingSilence } from './lib/audioTrim';
 import { preloadRecordingGuide } from './lib/recordingCue';
-import type { NewKeepsakeDraftInput } from './lib/newKeepsakeDraft';
+import { hasNewKeepsakeDraftContent, type NewKeepsakeDraftInput } from './lib/newKeepsakeDraft';
 import { isFirebaseConfigured } from './firebaseConfig';
 import './index.css';
 import './components/sharing.css';
@@ -76,8 +76,15 @@ function App() {
   const [detail, setDetail] = useState<Keepsake | null>(null);
   const [itemName, setItemName] = useState('');
   const [photo, setPhoto] = useState('');
+  const [pendingPhotoBlob, setPendingPhotoBlob] = useState<Blob | null>(null);
   const [photoEditorSource, setPhotoEditorSource] = useState('');
   const [voice, setVoice] = useState<string | null>(null);
+  const [voiceBlob, setVoiceBlob] = useState<Blob | null>(null);
+  const [trimOpen, setTrimOpen] = useState(false);
+  const [draftLoading, setDraftLoading] = useState(false);
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftRestored, setDraftRestored] = useState(false);
+  const [draftAvailable, setDraftAvailable] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [playing, setPlaying] = useState(false);
@@ -95,6 +102,7 @@ function App() {
   const [newCatInCreate, setNewCatInCreate] = useState(false);
   const [catBusy, setCatBusy] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const localDraft = useNewKeepsakeDraft();
   const { categories, error: categoryIssue, create: createCategoryEntry, describeError } = useCategories(connectionAttempt, !shareRoute);
   const readOnly = !!shareRoute || localReadOnly;
   const shownItems = sharedBook?.items ?? items;
@@ -102,9 +110,28 @@ function App() {
   const visibleItems = filterByCategory(shownItems, selectedCategory);
   const categoryName = (id: string | null | undefined) => shownCategories.find((c) => c.id === id)?.name;
   const recordingSession = useRef(0);
+  const createDraftSession = useRef(0);
   const pendingId = useRef<string | null>(null);
   const mutationLock = useRef(false);
   const photoInput = useRef<HTMLInputElement | null>(null);
+  const draftSnapshot: NewKeepsakeDraftInput = {
+    itemName,
+    // Blob URLs expire on reload; persist the selected Blob separately.
+    photo: photo && !photo.startsWith('blob:') ? photo : null,
+    pendingPhotoBlob,
+    voiceBlob,
+    categoryId: cardCategory,
+  };
+  const latestDraft = useRef(draftSnapshot);
+  latestDraft.current = draftSnapshot;
+  useEffect(() => {
+    if (shareRoute) return;
+    let active = true;
+    void localDraft.load().then((draft) => {
+      if (active) setDraftAvailable(!!draft && hasNewKeepsakeDraftContent(draft));
+    });
+    return () => { active = false; };
+  }, [localDraft.load, shareRoute]);
   const [playback] = useState(() => new VoicePlayback({
     onChange: (state) => {
       setPlaying(state?.playing ?? false);
@@ -121,6 +148,8 @@ function App() {
         const trimmed = await trimLeadingSilence(blob);
         if (session === recordingSession.current) {
           setVoice(URL.createObjectURL(trimmed));
+          setVoiceBlob(trimmed);
+          setTrimOpen(false);
           setNotice('声を録音しました。このままキロクをしまえます。');
         }
       } catch (caught) {
@@ -183,8 +212,31 @@ function App() {
   }, [photoEditorSource]);
 
   useEffect(() => () => {
+    if (photo.startsWith('blob:')) URL.revokeObjectURL(photo);
+  }, [photo]);
+
+  useEffect(() => () => {
     if (voice?.startsWith('blob:')) URL.revokeObjectURL(voice);
   }, [voice]);
+
+  useEffect(() => {
+    if (!createOpen || !draftReady) return;
+    localDraft.saveSoon(latestDraft.current);
+  }, [createOpen, draftReady, itemName, photo, pendingPhotoBlob, voiceBlob, cardCategory, localDraft.saveSoon]);
+
+  useEffect(() => {
+    if (!createOpen || !draftReady) return;
+    const flush = () => { void localDraft.saveNow(latestDraft.current); };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [createOpen, draftReady, localDraft.saveNow]);
 
   useEffect(() => () => {
     sharedBook?.objectUrls.forEach((url) => URL.revokeObjectURL(url));
@@ -233,27 +285,66 @@ function App() {
 
   const openCreate = () => {
     if (busy) return;
+    preloadRecordingGuide();
+    // The request starts on the create-button gesture and releases the
+    // temporary stream as soon as permission is confirmed.
+    void rec.prepareMicrophone();
     stopPlayback();
     pendingId.current = null;
+    setDraftAvailable(false);
+    const session = ++createDraftSession.current;
     setItemName('');
     setCardCategory(selectedCategory);
     setPhoto('');
+    setPendingPhotoBlob(null);
     setPhotoEditorSource('');
     setVoice(null);
+    setVoiceBlob(null);
+    setTrimOpen(false);
+    setDraftReady(false);
+    setDraftRestored(false);
+    setDraftLoading(true);
     setError('');
     setNotice('');
     rec.setError('');
     setCreateOpen(true);
+    void localDraft.load().then((draft) => {
+      if (session !== createDraftSession.current) return;
+      if (draft) {
+        const pending = draft.pendingPhotoBlob;
+        const storedPhoto = draft.photo && !draft.photo.startsWith('blob:') ? draft.photo : '';
+        const restoredPhoto = pending ? URL.createObjectURL(pending) : storedPhoto;
+        setItemName(draft.itemName);
+        setCardCategory(draft.categoryId);
+        setPhoto(restoredPhoto);
+        setPendingPhotoBlob(pending);
+        setVoiceBlob(draft.voiceBlob);
+        setVoice(draft.voiceBlob ? URL.createObjectURL(draft.voiceBlob) : null);
+        setDraftRestored(hasNewKeepsakeDraftContent(draft));
+      }
+      setDraftReady(true);
+      setDraftLoading(false);
+    });
   };
 
   const closeCreate = () => {
     if (busy) return;
+    createDraftSession.current++;
+    if (draftReady) void localDraft.saveNow(latestDraft.current);
+    setDraftAvailable(hasNewKeepsakeDraftContent(latestDraft.current));
     recordingSession.current++;
     rec.cancel();
     setProcessingVoice(false);
     setVoice(null);
+    setVoiceBlob(null);
+    setTrimOpen(false);
     stopPlayback();
     setCreateOpen(false);
+    setDraftReady(false);
+    setDraftLoading(false);
+    setDraftRestored(false);
+    setPhoto('');
+    setPendingPhotoBlob(null);
     setPhotoEditorSource('');
     setError('');
   };
@@ -269,7 +360,9 @@ function App() {
     }
     try {
       // Keep the original file as a temporary URL, not a large base64 copy.
+      setPendingPhotoBlob(file);
       setPhotoEditorSource(URL.createObjectURL(file));
+      void localDraft.saveNow({ ...latestDraft.current, pendingPhotoBlob: file });
       setError('');
       setNotice('');
     } catch {
@@ -278,9 +371,9 @@ function App() {
   };
 
   const startRecording = () => {
-    if (processingVoice || busy || recording || rec.starting || !photo) return;
+    if (processingVoice || busy || recording || rec.micStatus === 'preparing' || rec.starting || !photo) return;
     recordingSession.current++;
-    stopPlayback(); setError(''); setNotice('');
+    stopPlayback(); setError(''); setNotice(''); setTrimOpen(false);
     void rec.start();
   };
   const stopRecording = rec.stop;
@@ -302,11 +395,22 @@ function App() {
     pendingId.current ??= crypto.randomUUID();
     try {
       await saveKeepsake({ id: pendingId.current, itemName: cleanItemName, photo, voice, createdAt: Date.now(), categoryId: cardCategory });
+      const draftCleared = await localDraft.clear();
+      if (!draftCleared) {
+        setError('キロクは保存されましたが、この端末の下書きを消去できませんでした。保存ボタンをもう一度押して再試行してください。');
+        return;
+      }
       setCreateOpen(false);
       setView('library');
       setItemName('');
       setPhoto('');
+      setPendingPhotoBlob(null);
       setVoice(null);
+      setVoiceBlob(null);
+      setTrimOpen(false);
+      setDraftReady(false);
+      setDraftRestored(false);
+      setDraftAvailable(false);
       setError('');
       pendingId.current = null;
     } catch (caught) { setError(firebaseError(caught)); }
@@ -382,7 +486,7 @@ function App() {
 
       {shareRoute && !sharedBook ? <SharePasswordGate token={shareRoute.token} onUnlocked={acceptSharedBook} /> : view === 'start' && !readOnly ? (
         <main className="start-main" inert={createOpen || !!detail || categoryOpen || shareOpen || unlockOpen}>
-          <StartScreen onRecord={openCreate} onOpenEncyclopedia={() => setView('library')} />
+          <StartScreen onRecord={openCreate} onOpenEncyclopedia={() => setView('library')} onResumeDraft={draftAvailable ? openCreate : undefined} />
         </main>
       ) : (
       <main className="page-main" inert={createOpen || !!detail || categoryOpen || shareOpen || unlockOpen}>
@@ -448,19 +552,23 @@ function App() {
               <div><h2 id="create-title" className="dialog-title">新しいキロクをつくる</h2><p className="dialog-lede">お気に入りの写真と声をいっしょに残します。</p></div>
               <button type="button" className="icon-button" disabled={busy} onClick={closeCreate} aria-label="閉じる" data-testid="button-close-create"><X size={19} /></button>
             </div>
+            {draftRestored && <p className="notice neutral draft-notice" role="status" data-testid="status-draft-restored"><Check size={15} />前回の下書きを復元しました。</p>}
+            {localDraft.status === 'error'
+              ? <p className="notice draft-notice" role="status" data-testid="status-draft-error"><CircleHelp size={15} />{localDraft.error}</p>
+              : <p className="draft-autosave" role="status">{draftLoading ? '下書きを確認しています…' : localDraft.status === 'saving' ? 'この端末に下書きを保存しています…' : '入力内容はこの端末に自動保存されます。'}</p>}
             <div className="form-block">
               <label className="field-label" htmlFor="keepsake-item-name">なまえ</label>
               <p className="field-hint">写真のものの名前を入力してください。</p>
-              <input id="keepsake-item-name" className="title-input" disabled={busy} value={itemName} onChange={(event) => setItemName(event.currentTarget.value)} placeholder="りんご、ライオン、赤バス など" maxLength={48} data-testid="input-item-name" />
+              <input id="keepsake-item-name" className="title-input" disabled={busy || draftLoading} value={itemName} onChange={(event) => setItemName(event.currentTarget.value)} placeholder="りんご、ライオン、赤バス など" maxLength={48} data-testid="input-item-name" />
             </div>
             <div className="form-block">
-              <CategorySelect id="create-category" categories={categories} value={cardCategory} onChange={setCardCategory} disabled={busy} testId="select-card-category" onNew={() => setNewCatInCreate(true)} />
+              <CategorySelect id="create-category" categories={categories} value={cardCategory} onChange={setCardCategory} disabled={busy || draftLoading} testId="select-card-category" onNew={() => setNewCatInCreate(true)} />
             </div>
             <div className="form-block">
               <span className="field-label">写真</span>
-              <input ref={photoInput} className="sr-only" type="file" accept="image/*" disabled={busy || recording || rec.starting || processingVoice} onChange={onPhotoChange} aria-label="写真を選ぶ" data-testid="input-card-photo" />
+              <input ref={photoInput} className="sr-only" type="file" accept="image/*" disabled={busy || draftLoading || recording || rec.starting || processingVoice} onChange={onPhotoChange} aria-label="写真を選ぶ" data-testid="input-card-photo" />
               <div className="photo-composition">
-                <button type="button" className={`photo-picker${photo ? ' has-photo' : ''}`} disabled={busy || recording || rec.starting || processingVoice} onClick={() => photoInput.current?.click()} data-testid="button-select-photo">
+                <button type="button" className={`photo-picker${photo ? ' has-photo' : ''}`} disabled={busy || draftLoading || recording || rec.starting || processingVoice} onClick={() => photoInput.current?.click()} data-testid="button-select-photo">
                   {photo && <img src={photo} alt="選んだ写真" />}
                   {!photo && <span className="picker-content">
                     <Camera size={23} />
@@ -468,7 +576,7 @@ function App() {
                     <span>写真ライブラリから選ぶか、カメラで撮影できます</span>
                   </span>}
                 </button>
-                {photo && <button type="button" className="photo-change" aria-label="写真を変更" disabled={busy || recording || rec.starting || processingVoice} onClick={() => photoInput.current?.click()}>写真を変更</button>}
+                {photo && <button type="button" className="photo-change" aria-label="写真を変更" disabled={busy || draftLoading || recording || rec.starting || processingVoice} onClick={() => photoInput.current?.click()}>写真を変更</button>}
               </div>
             </div>
             <div className="form-block">
@@ -482,17 +590,40 @@ function App() {
                   {recording ? (
                     <button type="button" className="record-button danger" onClick={stopRecording} data-testid="button-stop-recording"><span className="recording-dot" /> 録音をとめる</button>
                   ) : (
-                    <button type="button" className="record-button primary" disabled={processingVoice || busy || rec.starting || !photo} onClick={startRecording} data-testid="button-start-recording"><Mic size={15} /> {rec.starting ? '録音の準備中…' : processingVoice ? '音声を準備しています…' : voice ? 'もう一度録音' : '録音する'}</button>
+                    <button type="button" className="record-button primary" disabled={processingVoice || busy || draftLoading || rec.micStatus === 'preparing' || rec.starting || !photo} onClick={startRecording} data-testid="button-start-recording"><Mic size={15} /> {rec.micStatus === 'preparing' || rec.starting ? '録音の準備中…' : processingVoice ? '音声を準備しています…' : voice ? 'もう一度録音' : '録音する'}</button>
                   )}
                   {rec.starting && <button type="button" className="record-button" onClick={rec.cancel}>やめる</button>}
                   {voice && !recording && !processingVoice && !rec.starting && <>
                     <button type="button" className="record-button" disabled={busy} onClick={() => playback.play(voice, 'voice-preview')} data-testid="button-preview-recording">{playing && playingUrl === voice ? <Pause size={15} /> : <Play size={15} />}{playing && playingUrl === voice ? 'とめる' : '声をきく'}</button>
-                    <button type="button" className="record-button" disabled={busy} onClick={() => { stopPlayback(); setVoice(null); setNotice('録音を消しました。'); }} aria-label="録音を消す" data-testid="button-remove-recording"><RotateCcw size={15} /></button>
+                    <button type="button" className="record-button" disabled={busy} onClick={() => { stopPlayback(); setVoice(null); setVoiceBlob(null); setTrimOpen(false); setNotice('録音を消しました。'); }} aria-label="録音を消す" data-testid="button-remove-recording"><RotateCcw size={15} /></button>
                   </>}
                 </div>
+                {rec.micStatus === 'preparing' && <p className="field-hint mic-ready" role="status">マイクを確認しています。許可を聞かれたら「許可」を選んでください。</p>}
+                {voice && !recording && !processingVoice && !rec.starting && (
+                  <>
+                    <button type="button" className="record-button waveform-toggle" aria-expanded={trimOpen} aria-controls="new-keepsake-waveform" disabled={busy || draftLoading} onClick={() => setTrimOpen((open) => !open)} data-testid="button-open-waveform-trim">
+                      <Scissors size={15} /> 波形を見てカット <ChevronDown size={14} className={trimOpen ? 'waveform-chevron is-open' : 'waveform-chevron'} />
+                    </button>
+                    {trimOpen && <div className="new-waveform-panel" id="new-keepsake-waveform">
+                      <VoiceTrimEditor
+                        source={voiceBlob ?? voice}
+                        disabled={busy}
+                        onBeforePreview={stopPlayback}
+                        onApply={(trimmed) => {
+                          stopPlayback();
+                          setVoice(URL.createObjectURL(trimmed));
+                          setVoiceBlob(trimmed);
+                          setTrimOpen(false);
+                          setNotice('声のカットを反映しました。');
+                        }}
+                      />
+                    </div>}
+                  </>
+                )}
                 <p className="field-hint">※録音した声は、後から図鑑カード長押しで編集できます</p>
               </div>
               {rec.error && <div className="notice" role="status" data-testid="status-microphone">{<CircleHelp size={16} />}{rec.error}</div>}
+              {rec.micStatus === 'ready' && !recording && !rec.starting && !processingVoice && <p className="field-hint mic-ready">マイクの準備ができました。</p>}
               {notice && !rec.error && <div className="notice neutral" role="status"><Check size={15} />{notice}</div>}
               {(!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') && <div className="notice" role="status" data-testid="status-unsupported-browser"><CircleHelp size={16} />このブラウザでは録音できません。録音以外のカード機能はお使いいただけます。</div>}
               {recording && <p className="sr-only" aria-live="polite">録音中です。録音時間 {formatTime(recordSeconds)}</p>}
@@ -502,7 +633,7 @@ function App() {
             {error && <p className="form-error" role="alert" data-testid="status-form-error">{error}</p>}
             <div className="dialog-actions">
               <button type="button" className="cancel-button" disabled={busy} onClick={closeCreate} data-testid="button-cancel-create">あとで</button>
-              <button type="button" className="save-button" onClick={saveCard} disabled={recording || rec.starting || processingVoice || busy || !isFirebaseConfigured || !!storageIssue || loading} data-testid="button-save-card"><Check size={16} /> {busy ? 'Firebaseに保存中…' : 'このカードをしまう'}</button>
+              <button type="button" className="save-button" onClick={saveCard} disabled={recording || rec.micStatus === 'preparing' || rec.starting || processingVoice || draftLoading || busy || !isFirebaseConfigured || !!storageIssue || loading} data-testid="button-save-card"><Check size={16} /> {busy ? 'Firebaseに保存中…' : 'このカードをしまう'}</button>
             </div>
             {!isFirebaseConfigured && <p className="form-error" role="status">保存にはFirebaseの設定が必要です。src/firebaseConfig.ts をご確認ください。</p>}
           </DetailDialogShell>
@@ -512,9 +643,10 @@ function App() {
       {photoEditorSource && !readOnly && (
         <PhotoEditor
           source={photoEditorSource}
-          onCancel={() => setPhotoEditorSource('')}
+          onCancel={() => { setPendingPhotoBlob(null); setPhotoEditorSource(''); }}
           onApply={(processedPhoto) => {
             setPhoto(processedPhoto);
+            setPendingPhotoBlob(null);
             setPhotoEditorSource('');
             setError('');
             setNotice('ととのえた写真をこのキロクに使います。');
