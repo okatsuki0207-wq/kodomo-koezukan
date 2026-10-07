@@ -236,9 +236,6 @@ button:disabled {cursor:not-allowed;opacity:.55;}
 .start-title { margin:0; font-size:clamp(25px, 6vw, 34px); line-height:1.45; font-weight:900; letter-spacing:.07em; color:#63513f; }
 .start-message { margin:10px 0 23px; color:#847969; font-size:14px; line-height:1.9; }
 .start-actions { width:min(100%, 330px); display:grid; gap:12px; }
-.start-resume-draft { width:min(100%, 330px); margin-top:18px; padding:12px 15px; display:flex; align-items:center; justify-content:space-between; gap:12px; border:1px solid #e5d5c6; border-radius:13px; background:#fffaf4; color:#7b6a59; font-size:11px; text-align:left; }
-.start-resume-draft button { flex:none; border:0; border-radius:999px; padding:8px 11px; background:#e9efe5; color:#5c7456; font-size:11px; font-weight:700; }
-.start-resume-draft button:hover { background:#dde8d7; }
 .start-record-button, .start-library-button { min-height:54px; display:flex; align-items:center; justify-content:center; gap:9px; border-radius:999px; font-size:15px; font-weight:700; letter-spacing:.04em; transition:transform .16s ease, background .16s ease; }
 .start-record-button:hover, .start-library-button:hover { transform:translateY(-1px); }
 .start-record-button { border:0; background:#bd7057; color:#fff8ed; box-shadow:0 3px 0 #9c5947; }

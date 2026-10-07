@@ -5,6 +5,8 @@ import { stripTypeScriptTypes } from 'node:module';
 
 const source = await readFile(new URL('../src/lib/newKeepsakeDraft.ts', import.meta.url), 'utf8');
 const draftModule = await import(`data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString('base64')}`);
+const appSource = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
+const startScreenSource = await readFile(new URL('../src/components/StartScreen.tsx', import.meta.url), 'utf8');
 
 class FakeIndexedDB {
   values = new Map();
@@ -71,10 +73,22 @@ test('new-record drafts retain text, category, selected image Blob, and voice Bl
   assert.equal(await store.read(), null);
 });
 
-test('resume prompt is shown only when a draft has something to continue', () => {
+test('draft content is detected for silent startup recovery', () => {
   const empty = { itemName: '  ', photo: null, pendingPhotoBlob: null, voiceBlob: null, categoryId: 'toys' };
   assert.equal(draftModule.hasNewKeepsakeDraftContent(empty), false);
   assert.equal(draftModule.hasNewKeepsakeDraftContent({ ...empty, itemName: 'くるま' }), true);
   assert.equal(draftModule.hasNewKeepsakeDraftContent({ ...empty, pendingPhotoBlob: new Blob(['image']) }), true);
   assert.equal(draftModule.hasNewKeepsakeDraftContent({ ...empty, voiceBlob: new Blob(['voice']) }), true);
+});
+
+test('startup silently opens the populated form without a restore notice or manual restore button', () => {
+  assert.match(appSource, /localDraft\.load\(\)\.then\(\(draft\) => \{[\s\S]*?hasNewKeepsakeDraftContent\(draft\)[\s\S]*?setCreateOpen\(true\)/u);
+  assert.doesNotMatch(appSource, /draftRestored|draftAvailable|status-draft-restored|button-resume-draft|onResumeDraft/u);
+  assert.doesNotMatch(startScreenSource, /onResumeDraft|button-resume-draft|status-start-draft/u);
+});
+
+test('successful cloud save clears the local draft afterward', () => {
+  const cloudSave = appSource.indexOf('await saveKeepsake({');
+  const clearDraft = appSource.indexOf('await localDraft.clear()', cloudSave);
+  assert.ok(cloudSave >= 0 && clearDraft > cloudSave);
 });

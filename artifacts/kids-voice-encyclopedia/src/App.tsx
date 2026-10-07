@@ -83,8 +83,6 @@ function App() {
   const [trimOpen, setTrimOpen] = useState(false);
   const [draftLoading, setDraftLoading] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
-  const [draftRestored, setDraftRestored] = useState(false);
-  const [draftAvailable, setDraftAvailable] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [playing, setPlaying] = useState(false);
@@ -127,8 +125,21 @@ function App() {
   useEffect(() => {
     if (shareRoute) return;
     let active = true;
+    const session = ++createDraftSession.current;
     void localDraft.load().then((draft) => {
-      if (active) setDraftAvailable(!!draft && hasNewKeepsakeDraftContent(draft));
+      if (!active || session !== createDraftSession.current || !draft || !hasNewKeepsakeDraftContent(draft)) return;
+      const pending = draft.pendingPhotoBlob;
+      const storedPhoto = draft.photo && !draft.photo.startsWith('blob:') ? draft.photo : '';
+      preloadRecordingGuide();
+      setItemName(draft.itemName);
+      setCardCategory(draft.categoryId);
+      setPhoto(pending ? URL.createObjectURL(pending) : storedPhoto);
+      setPendingPhotoBlob(pending);
+      setVoiceBlob(draft.voiceBlob);
+      setVoice(draft.voiceBlob ? URL.createObjectURL(draft.voiceBlob) : null);
+      setDraftLoading(false);
+      setDraftReady(true);
+      setCreateOpen(true);
     });
     return () => { active = false; };
   }, [localDraft.load, shareRoute]);
@@ -291,7 +302,6 @@ function App() {
     void rec.prepareMicrophone();
     stopPlayback();
     pendingId.current = null;
-    setDraftAvailable(false);
     const session = ++createDraftSession.current;
     setItemName('');
     setCardCategory(selectedCategory);
@@ -302,7 +312,6 @@ function App() {
     setVoiceBlob(null);
     setTrimOpen(false);
     setDraftReady(false);
-    setDraftRestored(false);
     setDraftLoading(true);
     setError('');
     setNotice('');
@@ -320,7 +329,6 @@ function App() {
         setPendingPhotoBlob(pending);
         setVoiceBlob(draft.voiceBlob);
         setVoice(draft.voiceBlob ? URL.createObjectURL(draft.voiceBlob) : null);
-        setDraftRestored(hasNewKeepsakeDraftContent(draft));
       }
       setDraftReady(true);
       setDraftLoading(false);
@@ -331,7 +339,6 @@ function App() {
     if (busy) return;
     createDraftSession.current++;
     if (draftReady) void localDraft.saveNow(latestDraft.current);
-    setDraftAvailable(hasNewKeepsakeDraftContent(latestDraft.current));
     recordingSession.current++;
     rec.cancel();
     setProcessingVoice(false);
@@ -342,7 +349,6 @@ function App() {
     setCreateOpen(false);
     setDraftReady(false);
     setDraftLoading(false);
-    setDraftRestored(false);
     setPhoto('');
     setPendingPhotoBlob(null);
     setPhotoEditorSource('');
@@ -409,8 +415,6 @@ function App() {
       setVoiceBlob(null);
       setTrimOpen(false);
       setDraftReady(false);
-      setDraftRestored(false);
-      setDraftAvailable(false);
       setError('');
       pendingId.current = null;
     } catch (caught) { setError(firebaseError(caught)); }
@@ -441,6 +445,7 @@ function App() {
 
   const formatTime = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   const enterReadOnly = () => {
+    createDraftSession.current++;
     stopPlayback();
     setView('library');
     setLocalReadOnly(true);
@@ -479,14 +484,14 @@ function App() {
             ? <button type="button" className="header-mode-button" onClick={() => setUnlockOpen(true)} data-testid="button-unlock-edit-mode"><LockKeyhole size={15} /><span>編集をひらく</span></button>
             : <>
               <button type="button" className="header-mode-button" onClick={enterReadOnly} aria-label="閲覧専用モードにする" data-testid="button-enter-readonly"><Eye size={16} /><span>閲覧モード</span></button>
-              {isFirebaseConfigured && <button type="button" className="header-share-button" onClick={() => setShareOpen(true)} aria-label="ずかんを共有する" data-testid="button-share-encyclopedia"><Share2 size={15} /><span>共有</span></button>}
+              {isFirebaseConfigured && <button type="button" className="header-share-button" onClick={() => { createDraftSession.current++; setShareOpen(true); }} aria-label="ずかんを共有する" data-testid="button-share-encyclopedia"><Share2 size={15} /><span>共有</span></button>}
             </>}
         </div>
       </header>
 
       {shareRoute && !sharedBook ? <SharePasswordGate token={shareRoute.token} onUnlocked={acceptSharedBook} /> : view === 'start' && !readOnly ? (
         <main className="start-main" inert={createOpen || !!detail || categoryOpen || shareOpen || unlockOpen}>
-          <StartScreen onRecord={openCreate} onOpenEncyclopedia={() => setView('library')} onResumeDraft={draftAvailable ? openCreate : undefined} />
+          <StartScreen onRecord={openCreate} onOpenEncyclopedia={() => { createDraftSession.current++; setView('library'); }} />
         </main>
       ) : (
       <main className="page-main" inert={createOpen || !!detail || categoryOpen || shareOpen || unlockOpen}>
@@ -552,7 +557,6 @@ function App() {
               <div><h2 id="create-title" className="dialog-title">新しいキロクをつくる</h2><p className="dialog-lede">お気に入りの写真と声をいっしょに残します。</p></div>
               <button type="button" className="icon-button" disabled={busy} onClick={closeCreate} aria-label="閉じる" data-testid="button-close-create"><X size={19} /></button>
             </div>
-            {draftRestored && <p className="notice neutral draft-notice" role="status" data-testid="status-draft-restored"><Check size={15} />前回の下書きを復元しました。</p>}
             {localDraft.status === 'error'
               ? <p className="notice draft-notice" role="status" data-testid="status-draft-error"><CircleHelp size={15} />{localDraft.error}</p>
               : <p className="draft-autosave" role="status">{draftLoading ? '下書きを確認しています…' : localDraft.status === 'saving' ? 'この端末に下書きを保存しています…' : '入力内容はこの端末に自動保存されます。'}</p>}
