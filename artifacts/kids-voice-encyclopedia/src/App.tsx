@@ -39,7 +39,7 @@ import SharePasswordGate from './components/SharePasswordGate';
 import ModeLockDialog from './components/ModeLockDialog';
 import { useCategories } from './hooks/useCategories';
 import { filterByCategory } from './lib/categories';
-import { deleteKeepsake, editKeepsake, firebaseError, saveKeepsake, subscribeKeepsakes, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
+import { deleteKeepsake, editKeepsake, firebaseError, saveKeepsake, subscribeKeepsakes, subscribeLiveShare, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
 import type { SharedBook, ShareId } from './lib/shareRepository';
 import { decodeShareToken } from './lib/shareCrypto';
 import { getVoices } from './lib/voiceAssets';
@@ -68,6 +68,8 @@ function App() {
   const [items, setItems] = useState<Keepsake[]>([]);
   const [shareRoute] = useState(readShareRoute);
   const [sharedBook, setSharedBook] = useState<SharedBook | null>(null);
+  const [shareMode, setShareMode] = useState<'loading' | 'live' | 'legacy' | 'error'>('loading');
+  const [shareAccessError, setShareAccessError] = useState('');
   const [localReadOnly, setLocalReadOnly] = useState(false);
   const [unlockOpen, setUnlockOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -212,6 +214,49 @@ function App() {
     }, fail).then((stop) => { if (cancelled) stop(); else unsubscribe = stop; }).catch(fail);
     return () => { cancelled = true; window.clearTimeout(timer); unsubscribe?.(); };
   }, [connectionAttempt, shareRoute]);
+
+  useEffect(() => {
+    if (!shareRoute) return;
+    let cancelled = false;
+    let unsubscribe: (() => void) | null = null;
+    setShareMode('loading');
+    setShareAccessError('');
+    if (!shareRoute.token) {
+      setShareAccessError('共有リンクが正しくありません。リンクを送ってくれた人に確認してください。');
+      setShareMode('error');
+      return;
+    }
+    void subscribeLiveShare(
+      shareRoute.token,
+      (book) => {
+        if (!cancelled) {
+          setSharedBook(book);
+          setShareMode('live');
+          setSelectedCategory(null);
+        }
+      },
+      (caught) => {
+        if (!cancelled) {
+          setShareAccessError(firebaseError(caught));
+          setShareMode('error');
+        }
+      },
+    ).then((stop) => {
+      if (cancelled) stop?.();
+      else if (stop) {
+        unsubscribe = stop;
+        setShareMode('live');
+      } else setShareMode('legacy');
+    }).catch((caught) => {
+      if (cancelled) return;
+      setShareAccessError(caught instanceof Error ? caught.message : '共有リンクを開けませんでした。');
+      setShareMode('error');
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [shareRoute]);
 
   useEffect(() => () => {
     recordingSession.current++;
@@ -490,7 +535,7 @@ function App() {
         <div className="topbar-actions">
           {view === 'library' && !readOnly && <button type="button" className="header-create" onClick={openCreate} data-testid="button-create-card"><Plus size={18} /><span>キロクする</span></button>}
           {readOnly
-            ? <button type="button" className="header-mode-button" onClick={() => setUnlockOpen(true)} data-testid="button-unlock-edit-mode"><LockKeyhole size={15} /><span>編集をひらく</span></button>
+            ? !shareRoute && <button type="button" className="header-mode-button" onClick={() => setUnlockOpen(true)} data-testid="button-unlock-edit-mode"><LockKeyhole size={15} /><span>編集をひらく</span></button>
             : <>
               <button type="button" className="header-mode-button" onClick={enterReadOnly} aria-label="閲覧専用モードにする" data-testid="button-enter-readonly"><Eye size={16} /><span>閲覧モード</span></button>
               {isFirebaseConfigured && <button type="button" className="header-share-button" onClick={() => { createDraftSession.current++; setShareOpen(true); }} aria-label="ずかんを共有する" data-testid="button-share-encyclopedia"><Share2 size={15} /><span>共有</span></button>}
@@ -498,7 +543,15 @@ function App() {
         </div>
       </header>
 
-      {shareRoute && !sharedBook ? <SharePasswordGate token={shareRoute.token} onUnlocked={acceptSharedBook} /> : view === 'start' && !readOnly ? (
+      {shareRoute && (shareMode === 'loading' || shareMode === 'error') ? (
+        <main className="share-gate-main">
+          <section className="share-gate-card" aria-live="polite">
+            {shareMode === 'loading'
+              ? <p className="share-gate-copy" role="status">共有されたずかんを読み込んでいます…</p>
+              : <p className="share-error" role="alert">{shareAccessError}</p>}
+          </section>
+        </main>
+      ) : shareRoute && shareMode === 'legacy' && !sharedBook ? <SharePasswordGate token={shareRoute.token} onUnlocked={acceptSharedBook} /> : view === 'start' && !readOnly ? (
         <main className="start-main" inert={createOpen || !!detail || categoryOpen || shareOpen || unlockOpen}>
           <StartScreen onRecord={openCreate} onOpenEncyclopedia={() => { createDraftSession.current++; setView('library'); }} />
         </main>

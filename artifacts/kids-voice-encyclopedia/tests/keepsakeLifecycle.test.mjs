@@ -7,6 +7,7 @@ import { ref, uploadBytes, getDownloadURL, getMetadata, getBytes, deleteObject, 
 import { createKeepsakeRepository } from '../src/lib/keepsakeRepository.ts';
 import { createUnusedMediaService, MEDIA_RETENTION_MS } from '../src/lib/unusedMedia.ts';
 import { createKeepsakeEditor } from '../src/lib/keepsakeEditor.ts';
+import { configureShareRepository, createLiveShare, syncLiveShareProjections, subscribeLiveShare } from '../src/lib/shareRepository.ts';
 
 const projectId = 'demo-keepsakes-test';
 const storageOrigin = 'http://127.0.0.1:9197';
@@ -740,4 +741,82 @@ test('password-share rules expose only active encrypted share reads; owners alon
   await assertSucceeds(deleteObject(ownerAsset));
   await assert.rejects(getBytes(publicAsset), (error) => error.code === 'storage/object-not-found');
   await assertSucceeds(deleteDoc(shareDoc));
+});
+
+test('live share IDs expose only their read-only Firestore projection and keep owner media private', async () => {
+  const shareId = 'a'.repeat(64);
+  const shareRef = doc(alice.db, 'users', 'alice', 'shares', shareId);
+  const cardRef = doc(alice.db, 'users', 'alice', 'shares', shareId, 'cards', 'card-1');
+  const categoryRef = doc(alice.db, 'users', 'alice', 'shares', shareId, 'categories', 'default-toys');
+  const photoPath = 'users/alice/keepsakes/card-1/test-attempt/photo';
+  const card = {
+    itemName: 'テスト', photo: 'https://firebasestorage.googleapis.com/example',
+    photoPath, voice: null, voicePath: null, voices: [],
+    categoryId: 'default-toys', createdAt: Date.now(),
+  };
+  await assertSucceeds(setDoc(shareRef, { active: true, version: 2, mode: 'live', createdAt: serverTimestamp() }));
+  await assertSucceeds(setDoc(cardRef, card));
+  await assertSucceeds(setDoc(categoryRef, { name: 'おもちゃ', createdAt: Date.now() }));
+
+  await assertSucceeds(getDocFromServer(doc(anonymous.db, 'users', 'alice', 'shares', shareId)));
+  await assertSucceeds(getDocFromServer(doc(anonymous.db, 'users', 'alice', 'shares', shareId, 'cards', 'card-1')));
+  await assertSucceeds(getDocs(collection(bob.db, 'users', 'alice', 'shares', shareId, 'cards')));
+  await assertSucceeds(getDocs(collection(anonymous.db, 'users', 'alice', 'shares', shareId, 'categories')));
+  await assertFails(getDocFromServer(doc(bob.db, 'users', 'alice', 'keepsakes', 'card-1')));
+  await assertFails(getDocs(collection(anonymous.db, 'users', 'alice', 'keepsakes')));
+  await assertFails(getDocs(collection(bob.db, 'users', 'alice', 'shares', 'b'.repeat(64), 'cards')));
+  await assertFails(setDoc(doc(bob.db, 'users', 'alice', 'shares', shareId, 'cards', 'intruder'), card));
+
+  const privateMedia = ref(alice.storage, photoPath);
+  await assertSucceeds(uploadBytes(privateMedia, photoBytes, { contentType: 'image/png' }));
+  await assertFails(getBytes(ref(anonymous.storage, photoPath)));
+  await assertSucceeds(updateDoc(shareRef, { active: false }));
+  await assertFails(getDocs(collection(anonymous.db, 'users', 'alice', 'shares', shareId, 'cards')));
+  await assertSucceeds(getDocs(collection(alice.db, 'users', 'alice', 'shares', shareId, 'cards')));
+  await assertSucceeds(deleteDoc(cardRef));
+  await assertSucceeds(deleteDoc(categoryRef));
+  await assertSucceeds(deleteDoc(shareRef));
+});
+
+test('live share repository publishes without Storage copies and streams owner changes to a viewer', async () => {
+  configureShareRepository(alice.db, alice.storage, async () => 'alice');
+  const original = {
+    id: 'live-card',
+    itemName: '最初のキロク',
+    photo: 'https://firebasestorage.googleapis.com/v0/b/demo/o/photo?alt=media&token=demo',
+    photoPath: 'users/alice/keepsakes/live-card/photo',
+    voice: 'https://firebasestorage.googleapis.com/v0/b/demo/o/voice?alt=media&token=demo',
+    voicePath: 'users/alice/keepsakes/live-card/voice',
+    createdAt: 500,
+    categoryId: 'default-toys',
+  };
+  const categories = [{ id: 'default-toys', name: 'おもちゃ', createdAt: 100 }];
+  const share = await createLiveShare([original], categories);
+  let firstResolve;
+  let updateResolve;
+  let firstSeen = false;
+  const firstBook = new Promise((resolve) => { firstResolve = resolve; });
+  const updatedBook = new Promise((resolve) => { updateResolve = resolve; });
+  const stop = await subscribeLiveShare(share, (book) => {
+    if (!firstSeen && book.items.length === 1 && book.categories.length === 1) {
+      firstSeen = true;
+      firstResolve(book);
+    }
+    if (book.items.some((item) => item.itemName === '更新後のキロク')) updateResolve(book);
+  }, (error) => { throw error; });
+  assert.ok(stop);
+  const first = await Promise.race([
+    firstBook,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('initial live snapshot timed out')), 4000)),
+  ]);
+  assert.equal(first.items[0].itemName, '最初のキロク');
+  assert.equal(first.categories[0].name, 'おもちゃ');
+
+  await syncLiveShareProjections([{ ...original, itemName: '更新後のキロク' }], categories);
+  const updated = await Promise.race([
+    updatedBook,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('updated live snapshot timed out')), 4000)),
+  ]);
+  assert.equal(updated.items[0].itemName, '更新後のキロク');
+  stop();
 });

@@ -168,18 +168,63 @@ service cloud.firestore {
           && data.manifest is string && data.manifest.size() <= 960000
           && data.createdAt == request.time;
       }
-      // A share ID is a random 256-bit capability. Only get is public; the
-      // owner is the only party allowed to enumerate, create, stop or delete it.
+      function validLiveShare(data) {
+        return data.keys().hasAll(['active', 'version', 'mode', 'createdAt'])
+          && data.keys().hasOnly(['active', 'version', 'mode', 'createdAt'])
+          && data.active == true && data.version == 2 && data.mode == 'live'
+          && data.createdAt == request.time;
+      }
+      // A random 256-bit share ID is the access capability during the private
+      // prototype. Owners alone can enumerate, create, stop or delete shares.
       allow get: if owner() || resource.data.active == true;
       allow list: if owner();
       allow create: if owner()
         && shareId.matches('[a-f0-9]{64}')
-        && validEncryptedShare(request.resource.data);
+        && (validEncryptedShare(request.resource.data) || validLiveShare(request.resource.data));
       allow update: if owner()
         && resource.data.active == true
         && request.resource.data.active == false
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active']);
       allow delete: if owner() && resource.data.active == false;
+
+      function activeLiveShare() {
+        let share = /databases/$(database)/documents/users/$(uid)/shares/$(shareId);
+        return shareId.matches('[a-f0-9]{64}')
+          && exists(share)
+          && get(share).data.active == true
+          && get(share).data.version == 2
+          && get(share).data.mode == 'live';
+      }
+      match /cards/{cardId} {
+        function validProjection(data) {
+          return data.keys().hasAll(['itemName', 'photo', 'photoPath', 'voice', 'voicePath', 'voices', 'categoryId', 'createdAt'])
+            && data.keys().hasOnly(['itemName', 'photo', 'photoPath', 'voice', 'voicePath', 'voices', 'categoryId', 'createdAt'])
+            && data.itemName is string && data.itemName.size() > 0 && data.itemName.size() <= 48
+            && data.photo is string && data.photo.size() <= 2048
+            && (data.photoPath == null || (data.photoPath is string
+              && data.photoPath.matches('users/' + uid + '/keepsakes/' + cardId + '/.*')))
+            && (data.voice == null || (data.voice is string && data.voice.size() <= 2048))
+            && (data.voicePath == null || (data.voicePath is string
+              && data.voicePath.matches('users/' + uid + '/keepsakes/' + cardId + '/.*')))
+            && data.voices is list && data.voices.size() <= 5
+            && (data.categoryId == null || data.categoryId is string)
+            && data.createdAt is number;
+        }
+        allow read: if owner() || activeLiveShare();
+        allow create, update: if owner() && validProjection(request.resource.data);
+        allow delete: if owner();
+      }
+      match /categories/{categoryId} {
+        allow read: if owner() || activeLiveShare();
+        allow create, update: if owner()
+          && request.resource.data.keys().hasAll(['name', 'createdAt'])
+          && request.resource.data.keys().hasOnly(['name', 'createdAt'])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 24
+          && request.resource.data.createdAt is number;
+        allow delete: if owner();
+      }
     }
   }
 }

@@ -2,8 +2,8 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Check, Copy, Eye, Link2, LockKeyhole, Share2, Trash2, X } from 'lucide-react';
 import type { Category } from '../lib/categories';
 import type { Keepsake } from '../lib/keepsakeRepository';
-import { createPasswordShare, firebaseError, listPasswordShares, revokePasswordShare } from '../lib/keepsakeStore';
-import { createShareUrl, sanitizeSharePin, validateSharePassword } from '../lib/shareCrypto';
+import { createLiveShare, firebaseError, listPasswordShares, revokePasswordShare } from '../lib/keepsakeStore';
+import { createShareUrl } from '../lib/shareCrypto';
 import type { ShareSummary } from '../lib/shareRepository';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 
@@ -30,8 +30,6 @@ export default function ShareDialog({ items, categories, onClose }: Props) {
   const dialog = useRef<HTMLDivElement>(null);
   const [shares, setShares] = useState<ShareSummary[]>([]);
   const [link, setLink] = useState<LinkState | null>(null);
-  const [password, setPassword] = useState('');
-  const [confirmation, setConfirmation] = useState('');
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -57,18 +55,13 @@ export default function ShareDialog({ items, categories, onClose }: Props) {
     event.preventDefault();
     if (busy) return;
     setError(''); setNotice('');
-    const problem = validateSharePassword(password);
-    if (problem) { setError(problem); return; }
-    if (password !== confirmation) { setError('確認用パスワードが一致しません。'); return; }
     setBusy(true);
     try {
-      const created = await createPasswordShare(items, categories, password);
+      const created = await createLiveShare(items, categories);
       const url = createShareUrl(created.ownerUid, created.shareId, window.location.href);
       setLink({ ...created, url });
-      setPassword('');
-      setConfirmation('');
       await refresh();
-      setNotice('共有リンクを作りました。パスワードは保存していないため、リンクとは別にご家族へ伝えてください。');
+      setNotice('共有リンクを作りました。リンクを知っている人は、別の端末からも最新のずかんを見られます。');
     } catch (caught) {
       setError(userError(caught, '共有リンクを作れませんでした。'));
     } finally { setBusy(false); }
@@ -104,7 +97,7 @@ export default function ShareDialog({ items, categories, onClose }: Props) {
       setRevokeTarget(null);
       if (link?.shareId === shareId) setLink(null);
       await refresh();
-      setNotice('共有を停止し、暗号化したコピーを削除しました。すでに保存された内容は回収できません。');
+      setNotice('この共有リンクを停止しました。相手が保存した内容や控えた写真・声のURLは回収できません。');
     } catch (caught) {
       setError(userError(caught, '共有を停止できませんでした。'));
       await refresh().catch(() => {});
@@ -116,23 +109,18 @@ export default function ShareDialog({ items, categories, onClose }: Props) {
       <div ref={dialog} className="share-dialog" role="dialog" aria-modal="true" aria-labelledby="share-title" tabIndex={-1}>
         <div className="share-dialog-head">
           <div className="share-icon"><Share2 size={21} /></div>
-          <div className="share-title-wrap"><h2 id="share-title">ずかんを共有する</h2><p>パスワードを知っている人だけが開けます</p></div>
+          <div className="share-title-wrap"><h2 id="share-title">ずかんを共有する</h2><p>リンクから最新のずかんを見られます</p></div>
           <button type="button" className="icon-button" disabled={busy} onClick={onClose} aria-label="閉じる"><X size={19} /></button>
         </div>
 
         <div className="share-safety-note">
           <LockKeyhole size={18} />
-          <p>写真と声はブラウザで暗号化して保存します。数字4桁のパスワードはアプリに送らず、保存もしません。リンクとパスワードは別々の方法で伝えてください。4桁は試験運用向けです。一般公開前に長いパスワードへ戻してください。</p>
+          <p>試作中の共有です。リンクを知っている人は、パスワードなしで写真と声を見聞きできます。写真・録音ファイルは複製せず元のファイルを参照し、表示内容は最新状態に同期します。相手が控えた写真・声のURLや保存したデータは、共有を止めても回収できません。</p>
         </div>
 
         {!link && <form className="share-form" onSubmit={(event) => void create(event)}>
-          <label htmlFor="share-password">共有用パスワード（数字4桁）</label>
-          <input id="share-password" className="title-input share-password-input share-pin-input" type="password" inputMode="numeric" pattern="[0-9]{4}" autoComplete="off" minLength={4} maxLength={4} value={password} onChange={(event) => setPassword(sanitizeSharePin(event.currentTarget.value))} placeholder="例：0427" disabled={busy} />
-          <label htmlFor="share-password-confirm">もう一度入力してください</label>
-          <input id="share-password-confirm" className="title-input share-password-input share-pin-input" type="password" inputMode="numeric" pattern="[0-9]{4}" autoComplete="off" minLength={4} maxLength={4} value={confirmation} onChange={(event) => setConfirmation(sanitizeSharePin(event.currentTarget.value))} placeholder="同じ数字4桁" disabled={busy} />
-          <p className="share-hint">数字4桁のパスワードを入力してください。共有を開く人にはリンクと別の方法で伝えてください。忘れた場合、復元できません。</p>
           <p className="share-count"><Eye size={15} /> 共有するキロク {items.length}件・声を含む写真と録音</p>
-          <button type="submit" className="share-primary" disabled={busy || password.length !== 4 || confirmation.length !== 4}>{busy ? '暗号化して準備しています…' : 'パスワード付きリンクを作る'}</button>
+          <button type="submit" className="share-primary" disabled={busy}>{busy ? '共有リンクを準備しています…' : '共有リンクを作る'}</button>
         </form>}
 
         {link && <section className="share-created" aria-live="polite">
@@ -145,7 +133,7 @@ export default function ShareDialog({ items, categories, onClose }: Props) {
               {copiedId === link.shareId ? 'コピー済み' : 'コピー'}
             </button>
           </div>
-          <p className="share-hint">リンクとパスワードは別々に伝えてください。パスワードはこの画面を閉じると表示できません。</p>
+          <p className="share-hint">リンクを知っている人は閲覧できます。家族など、見せたい相手だけに伝えてください。</p>
           <button type="button" className="share-text-button" onClick={() => setLink(null)}>別の共有リンクを作る</button>
         </section>}
 
@@ -166,13 +154,13 @@ export default function ShareDialog({ items, categories, onClose }: Props) {
                 </button>
                 {share.active
                   ? <button type="button" className="share-icon-action danger" disabled={busy} onClick={() => setRevokeTarget(share.shareId)} aria-label="共有を停止"><Trash2 size={17} /></button>
-                  : <button type="button" className="share-icon-action danger" disabled={busy} onClick={() => void revoke(share.shareId)} aria-label="暗号化コピーの削除を続ける"><Trash2 size={17} /></button>}
+                  : <button type="button" className="share-icon-action danger" disabled={busy} onClick={() => void revoke(share.shareId)} aria-label="共有データの削除を続ける"><Trash2 size={17} /></button>}
               </div>;
             })}
         </section>
 
         {revokeTarget && <div className="share-revoke-confirm" role="alert">
-          <p>このリンクでは開けなくなります。暗号化コピーを削除しますか？ダウンロード済みの内容は回収できません。</p>
+          <p>このリンクからは開けなくなります。すでに保存された写真・声や、相手が控えた個別URLは回収できません。</p>
           <div><button type="button" className="share-danger" disabled={busy} onClick={() => void revoke(revokeTarget)}>{busy ? '停止しています…' : '共有を停止する'}</button><button type="button" className="share-secondary" disabled={busy} onClick={() => setRevokeTarget(null)}>もどる</button></div>
         </div>}
         {error && <p className="share-error" role="alert">{error}</p>}

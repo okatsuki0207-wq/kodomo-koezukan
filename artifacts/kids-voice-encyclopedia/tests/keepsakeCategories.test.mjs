@@ -72,10 +72,12 @@ if (!vm.SourceTextModule) {
       './keepsakeEditor': { createKeepsakeEditor: () => ({ editKeepsake: () => { throw new Error('Not a metadata-only operation'); } }) },
       './shareRepository': {
         configureShareRepository: () => {},
-        createPasswordShare: async () => {},
+        createLiveShare: async () => {},
         listPasswordShares: async () => [],
         openPasswordShare: async () => {},
         revokePasswordShare: async () => {},
+        subscribeLiveShare: async () => () => {},
+        syncLiveShareProjections: async () => {},
       },
     };
     const categories = new vm.SourceTextModule(

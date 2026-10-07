@@ -4,10 +4,10 @@ import { collection, doc, getFirestore, onSnapshot, orderBy, query, runTransacti
 import { getDownloadURL, getStorage, ref } from 'firebase/storage';
 import { firebaseConfig, isFirebaseConfigured } from '../firebaseConfig';
 import { storageFailureMessage } from './storageDiagnostics';
-import { createKeepsakeRepository, FirebaseTimeoutError } from './keepsakeRepository';
+import { createKeepsakeRepository, FirebaseTimeoutError, type Keepsake } from './keepsakeRepository';
 import { createKeepsakeEditor } from './keepsakeEditor';
 import { createUnusedMediaService } from './unusedMedia';
-import { configureShareRepository } from './shareRepository';
+import { configureShareRepository, syncLiveShareProjections } from './shareRepository';
 export type { Keepsake } from './keepsakeRepository';
 import { categoryIdForName, DEFAULT_CATEGORIES, keepsakeMetadata, validateCategoryId, validateCategoryName, type Category } from './categories';
 
@@ -44,9 +44,43 @@ async function userId(): Promise<string> {
 if (db && storage) configureShareRepository(db, storage, userId);
 
 const repository = createKeepsakeRepository(db!, storage!, userId);
-export const { saveKeepsake, deleteKeepsake, subscribeKeepsakes } = repository;
+export const { saveKeepsake, deleteKeepsake } = repository;
 export const { editKeepsake } = createKeepsakeEditor(db!, storage!, userId);
-export { createPasswordShare, listPasswordShares, openPasswordShare, revokePasswordShare } from './shareRepository';
+export { createLiveShare, listPasswordShares, openPasswordShare, revokePasswordShare, subscribeLiveShare } from './shareRepository';
+
+let latestItems: Keepsake[] | null = null;
+let latestCategories: Category[] | null = null;
+let shareSyncTimer: number | undefined;
+let shareSyncQueue: Promise<void> = Promise.resolve();
+let lastSuccessfulShareSync: string | null = null;
+function scheduleLiveShareSync() {
+  if (!latestItems || !latestCategories || !db || !storage || shareSyncTimer !== undefined) return;
+  shareSyncTimer = window.setTimeout(() => {
+    shareSyncTimer = undefined;
+    const items = latestItems;
+    const categories = latestCategories;
+    if (!items || !categories) return;
+    const signature = JSON.stringify([items, categories]);
+    shareSyncQueue = shareSyncQueue
+      .then(async () => {
+        if (signature === lastSuccessfulShareSync) return;
+        await syncLiveShareProjections(items, categories);
+        lastSuccessfulShareSync = signature;
+      })
+      .catch(() => { /* Keep owner editing available if a share projection sync is temporarily unavailable. */ });
+  }, 200);
+}
+
+export async function subscribeKeepsakes(
+  onChange: (items: Keepsake[]) => void,
+  onError: (error: unknown) => void,
+) {
+  return repository.subscribeKeepsakes((items) => {
+    latestItems = items;
+    scheduleLiveShareSync();
+    onChange(items);
+  }, onError);
+}
 /** Read-only link refresh for saved voices; never access another user's paths. */
 export async function refreshVoiceDownloadUrl(path: string): Promise<string> {
   const uid = await userId();
@@ -76,13 +110,16 @@ export async function subscribeCategories(
 ): Promise<() => void> {
   const uid = await userId();
   return onSnapshot(query(collection(db!, 'users', uid, 'categories'), orderBy('createdAt', 'asc')), (snapshot) => {
-    onChange([
+    const next = [
       ...DEFAULT_CATEGORIES,
       ...snapshot.docs.map((record) => ({
         id: record.id, name: String(record.data().name),
         createdAt: record.data().createdAt?.toMillis?.() ?? 0,
       })),
-    ]);
+    ];
+    latestCategories = next;
+    scheduleLiveShareSync();
+    onChange(next);
   }, onError);
 }
 

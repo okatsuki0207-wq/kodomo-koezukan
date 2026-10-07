@@ -1,20 +1,19 @@
 import {
   collection, deleteDoc, doc, getDocFromServer, getDocsFromServer,
-  orderBy, query, runTransaction, serverTimestamp, updateDoc,
-  type Firestore,
+  onSnapshot, orderBy, query, runTransaction, serverTimestamp, updateDoc,
+  writeBatch, type Firestore,
 } from 'firebase/firestore';
 import {
-  deleteObject, getBytes, getMetadata, listAll, ref, uploadBytes,
+  deleteObject, getBytes, listAll, ref,
   type FirebaseStorage, type StorageReference,
 } from 'firebase/storage';
-import type { Category } from './categories';
-import type { Keepsake } from './keepsakeRepository';
-import { getVoices } from './voiceAssets';
+import type { Category } from './categories.ts';
+import type { Keepsake } from './keepsakeRepository.ts';
+import { getVoices } from './voiceAssets.ts';
 import {
   createShareId, decryptShareBytes, decryptShareManifest, deriveShareKey,
-  encryptShareBytes, encryptShareManifest, fromBase64, randomBytes, SHARE_KDF,
-  SHARE_KDF_ITERATIONS, toBase64, validateSharePassword, validateSharePasswordForUnlock,
-} from './shareCrypto';
+  fromBase64, SHARE_KDF, SHARE_KDF_ITERATIONS, validateSharePasswordForUnlock,
+} from './shareCrypto.ts';
 
 export const MAX_SHARE_MEDIA_BYTES = 200 * 1024 * 1024;
 const MAX_SHARE_CARDS = 250;
@@ -28,6 +27,7 @@ export type ShareSummary = {
   shareId: string;
   active: boolean;
   createdAt: number;
+  mode: 'live' | 'encrypted';
 };
 type AssetDescriptor = { id: string; path: string; iv: string; mimeType: string; size: number };
 type EncryptedManifest = {
@@ -45,6 +45,7 @@ type EncryptedManifest = {
 type ShareDocument = {
   active: boolean;
   version: number;
+  mode?: string;
   kdf: string;
   iterations: number;
   salt: string;
@@ -142,119 +143,182 @@ function shareAssetRef(storage: FirebaseStorage, path: string): StorageReference
   return ref(storage, path);
 }
 
-export async function createPasswordShare(
+type ProjectionOperation = { path: string; data?: Record<string, unknown> };
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const object = value as Record<string, unknown>;
+    return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${stableJson(object[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'undefined';
+}
+
+function projectionOperations(
+  db: Firestore,
+  uid: string,
+  shareId: string,
   items: readonly Keepsake[],
   categories: readonly Category[],
-  password: string,
-): Promise<ShareId> {
-  const passwordIssue = validateSharePassword(password);
-  if (passwordIssue) throw new Error(passwordIssue);
-  if (items.length > MAX_SHARE_CARDS) throw new Error(`一度に共有できるキロクは${MAX_SHARE_CARDS}件までです。カテゴリを分けてから共有してください。`);
-  if (categories.length > 100) throw new Error('共有できるカテゴリは100件までです。使っていないカテゴリを整理してからお試しください。');
+  storedCards: readonly string[],
+  storedCategories: readonly string[],
+): ProjectionOperation[] {
+  const base = `users/${uid}/shares/${shareId}`;
+  const operations: ProjectionOperation[] = [];
+  const cardIds = new Set(items.map((item) => item.id));
+  for (const item of items) {
+    operations.push({
+      path: `${base}/cards/${item.id}`,
+      data: {
+        itemName: item.itemName,
+        photo: item.photo,
+        photoPath: item.photoPath ?? null,
+        voice: item.voice ?? null,
+        voicePath: item.voicePath ?? null,
+        voices: getVoices(item).map((voice) => ({ id: voice.id, url: voice.url, path: voice.path ?? null })),
+        categoryId: item.categoryId ?? null,
+        createdAt: item.createdAt,
+      },
+    });
+  }
+  for (const id of storedCards) if (!cardIds.has(id)) operations.push({ path: `${base}/cards/${id}` });
 
-  const { db, storage, userId } = services();
+  const categoryIds = new Set(categories.map((category) => category.id));
+  for (const category of categories) {
+    operations.push({
+      path: `${base}/categories/${category.id}`,
+      data: { name: category.name, createdAt: category.createdAt },
+    });
+  }
+  for (const id of storedCategories) if (!categoryIds.has(id)) operations.push({ path: `${base}/categories/${id}` });
+  return operations;
+}
+
+async function writeProjection(
+  db: Firestore,
+  uid: string,
+  shareId: string,
+  items: readonly Keepsake[],
+  categories: readonly Category[],
+): Promise<void> {
+  const base = `users/${uid}/shares/${shareId}`;
+  const [storedCards, storedCategories] = await Promise.all([
+    getDocsFromServer(collection(db, base, 'cards')),
+    getDocsFromServer(collection(db, base, 'categories')),
+  ]);
+  const existingValues = new Map([
+    ...storedCards.docs.map((record) => [record.ref.path, stableJson(record.data())] as const),
+    ...storedCategories.docs.map((record) => [record.ref.path, stableJson(record.data())] as const),
+  ]);
+  const operations = projectionOperations(
+    db, uid, shareId, items, categories,
+    storedCards.docs.map((record) => record.id),
+    storedCategories.docs.map((record) => record.id),
+  ).filter((operation) => !operation.data || existingValues.get(operation.path) !== stableJson(operation.data));
+  for (let offset = 0; offset < operations.length; offset += 400) {
+    const batch = writeBatch(db);
+    for (const operation of operations.slice(offset, offset + 400)) {
+      const target = doc(db, operation.path);
+      if (operation.data) batch.set(target, operation.data);
+      else batch.delete(target);
+    }
+    await batch.commit();
+  }
+}
+
+export async function createLiveShare(
+  items: readonly Keepsake[],
+  categories: readonly Category[],
+): Promise<ShareId> {
+  const { db, userId } = services();
   const ownerUid = await userId();
   const shareId = createShareId();
   const shareRef = doc(db, 'users', ownerUid, 'shares', shareId);
-  const salt = randomBytes(16);
-  const key = await deriveShareKey(password, salt);
-  const prefix = `users/${ownerUid}/shares/${shareId}/assets`;
-  const uploaded: StorageReference[] = [];
-  let totalBytes = 0;
-  const putEncryptedAsset = async (source: string, sourcePath?: string | null): Promise<AssetDescriptor> => {
-    if (!source) throw new Error('写真または録音を読み込めません。共有は作成されませんでした。');
-    const original = ref(storage, sourcePath || source);
-    if (original.bucket !== storage.app.options.storageBucket || !original.fullPath.startsWith(`users/${ownerUid}/keepsakes/`)) {
-      throw new Error('所有者の図鑑に保存されている写真・声以外は共有できません。');
-    }
-    const metadata = await getMetadata(original);
-    const clear = new Uint8Array(await getBytes(original, MAX_SHARE_FILE_BYTES));
-    if (!clear.byteLength || clear.byteLength > MAX_SHARE_FILE_BYTES) {
-      throw new Error('写真または録音のサイズが共有上限を超えています。');
-    }
-    totalBytes += clear.byteLength;
-    if (totalBytes > MAX_SHARE_MEDIA_BYTES) {
-      throw new Error('共有するメディアの合計が200MBを超えました。キロクを減らしてから共有してください。');
-    }
-    const id = createShareId().slice(0, 32);
-    const aad = `kids-voice-zukan:share:${shareId}:asset:${id}`;
-    const { iv, ciphertext } = await encryptShareBytes(key, clear, aad);
-    const size = clear.byteLength;
-    clear.fill(0);
-    const path = `${prefix}/${id}`;
-    const target = ref(storage, path);
-    uploaded.push(target);
-    await uploadBytes(target, ciphertext, { contentType: 'application/octet-stream' });
-    if (uploaded.length > MAX_SHARED_FILES) {
-      throw new Error('共有するファイルの数が上限を超えています。');
-    }
-    return { id, path, iv: toBase64(iv), mimeType: metadata.contentType || 'application/octet-stream', size };
-  };
-
-  try {
-    const cards: EncryptedManifest['cards'] = [];
-    for (const item of items) {
-      const photo = await putEncryptedAsset(item.photo, item.photoPath);
-      const voices = [];
-      for (const voice of getVoices(item)) {
-        voices.push(await putEncryptedAsset(voice.url, voice.path));
-      }
-      cards.push({
-        id: item.id,
-        itemName: item.itemName,
-        categoryId: item.categoryId ?? null,
-        createdAt: item.createdAt,
-        photo,
-        voices,
-      });
-    }
-    const encryptedManifest = await encryptShareManifest(key, {
-      version: SHARE_FORMAT_VERSION,
-      categories: [...categories],
-      cards,
-    } satisfies EncryptedManifest);
-    await runTransaction(db, async (transaction) => {
-      const existing = await transaction.get(shareRef);
-      if (existing.exists()) throw new Error('共有リンクIDが重複しました。もう一度お試しください。');
-      transaction.set(shareRef, {
-        active: true,
-        version: SHARE_FORMAT_VERSION,
-        kdf: SHARE_KDF,
-        iterations: SHARE_KDF_ITERATIONS,
-        salt: toBase64(salt),
-        manifestIv: encryptedManifest.iv,
-        manifest: encryptedManifest.ciphertext,
-        createdAt: serverTimestamp(),
-      });
+  await runTransaction(db, async (transaction) => {
+    const existing = await transaction.get(shareRef);
+    if (existing.exists()) throw new Error('共有リンクIDが重複しました。もう一度お試しください。');
+    transaction.set(shareRef, {
+      active: true,
+      version: 2,
+      mode: 'live',
+      createdAt: serverTimestamp(),
     });
+  });
+  try {
+    await writeProjection(db, ownerUid, shareId, items, categories);
     return { ownerUid, shareId };
   } catch (error) {
-    // A lost Firestore acknowledgement must not remove files from a share that
-    // actually committed. Verify from the server before cleaning up.
-    let confirmedAbsent = false;
-    try {
-      const receipt = await getDocFromServer(shareRef);
-      if (receipt.exists()) {
-        if (receipt.data().active === true) return { ownerUid, shareId };
-        throw new Error('共有データの状態が変わりました。暗号化ファイルは安全のため残しました。共有一覧を更新して確認してください。');
-      }
-      confirmedAbsent = true;
-    } catch {
-      throw new Error('共有の保存結果を確認できません。ファイルは安全のため残しました。共有一覧を更新して状態を確認してください。');
-    }
-    if (confirmedAbsent) {
-      const cleanup = await Promise.allSettled(uploaded.map(async (file) => {
-        try { await deleteObject(file); }
-        catch (caught) {
-          if ((caught as { code?: string })?.code !== 'storage/object-not-found') throw caught;
-        }
-      }));
-      if (cleanup.some((result) => result.status === 'rejected')) {
-        throw new Error('共有は作成されませんでしたが、一部の暗号化ファイルを削除できませんでした。共有一覧を更新して確認してください。');
-      }
-    }
+    // Never leave an intentionally incomplete public link active.
+    await updateDoc(shareRef, { active: false }).catch(() => {});
     throw error;
   }
+}
+
+export async function syncLiveShareProjections(
+  items: readonly Keepsake[],
+  categories: readonly Category[],
+): Promise<void> {
+  const { db, userId } = services();
+  const uid = await userId();
+  const shares = await getDocsFromServer(collectionPath(uid));
+  for (const share of shares.docs) {
+    const data = share.data();
+    if (data.active === true && data.version === 2 && data.mode === 'live') {
+      await writeProjection(db, uid, share.id, items, categories);
+    }
+  }
+}
+
+export async function subscribeLiveShare(
+  token: ShareId,
+  onChange: (book: SharedBook) => void,
+  onError: (error: unknown) => void,
+): Promise<(() => void) | null> {
+  if (!/^[A-Za-z0-9:_-]{1,128}$/.test(token.ownerUid) || !/^[a-f0-9]{64}$/.test(token.shareId)) {
+    throw new Error('共有リンクが正しくありません。');
+  }
+  const { db } = services();
+  const shareRef = doc(db, 'users', token.ownerUid, 'shares', token.shareId);
+  const share = await getDocFromServer(shareRef);
+  if (!share.exists() || share.data().active !== true) throw new Error('この共有リンクは停止されたか、確認できません。');
+  if (share.data().version !== 2 || share.data().mode !== 'live') return null;
+
+  let items: Keepsake[] | null = null;
+  let categories: Category[] | null = null;
+  const emit = () => {
+    if (items && categories) onChange({ items, categories, objectUrls: [] });
+  };
+  const cardsStop = onSnapshot(
+    query(collection(db, 'users', token.ownerUid, 'shares', token.shareId, 'cards'), orderBy('createdAt', 'desc')),
+    (snapshot) => {
+      items = snapshot.docs.map((record) => ({
+        id: record.id,
+        itemName: String(record.data().itemName ?? ''),
+        photo: String(record.data().photo ?? ''),
+        photoPath: typeof record.data().photoPath === 'string' ? record.data().photoPath : undefined,
+        voice: typeof record.data().voice === 'string' ? record.data().voice : null,
+        voicePath: typeof record.data().voicePath === 'string' ? record.data().voicePath : null,
+        voices: Array.isArray(record.data().voices) ? record.data().voices : [],
+        categoryId: typeof record.data().categoryId === 'string' ? record.data().categoryId : null,
+        createdAt: record.data().createdAt?.toMillis?.() ?? Number(record.data().createdAt ?? 0),
+      }));
+      emit();
+    },
+    onError,
+  );
+  const categoriesStop = onSnapshot(
+    query(collection(db, 'users', token.ownerUid, 'shares', token.shareId, 'categories'), orderBy('createdAt', 'asc')),
+    (snapshot) => {
+      categories = snapshot.docs.map((record) => ({
+        id: record.id,
+        name: String(record.data().name ?? ''),
+        createdAt: record.data().createdAt?.toMillis?.() ?? Number(record.data().createdAt ?? 0),
+      }));
+      emit();
+    },
+    onError,
+  );
+  return () => { cardsStop(); categoriesStop(); };
 }
 
 export async function listPasswordShares(): Promise<ShareSummary[]> {
@@ -263,11 +327,13 @@ export async function listPasswordShares(): Promise<ShareSummary[]> {
   const snapshot = await getDocsFromServer(query(collectionPath(uid), orderBy('createdAt', 'desc')));
   return snapshot.docs.map((record) => {
     const created = record.data().createdAt;
+    const live = record.data().version === 2 && record.data().mode === 'live';
     return {
       ownerUid: uid,
       shareId: record.id,
       active: record.data().active === true,
       createdAt: typeof created?.toMillis === 'function' ? created.toMillis() : 0,
+      mode: live ? 'live' : 'encrypted',
     };
   });
 }
@@ -285,6 +351,7 @@ export async function revokePasswordShare(shareId: string): Promise<void> {
   const shareRef = doc(db, 'users', uid, 'shares', shareId);
   const snapshot = await getDocFromServer(shareRef);
   if (!snapshot.exists()) return;
+  const live = snapshot.data().version === 2 && snapshot.data().mode === 'live';
   if (snapshot.data().active === true) {
     try {
       await updateDoc(shareRef, { active: false });
@@ -295,16 +362,32 @@ export async function revokePasswordShare(shareId: string): Promise<void> {
       }
     }
   }
-  const files = await listShareFiles(ref(storage, `users/${uid}/shares/${shareId}`));
-  const results = await Promise.allSettled(files.map((file) => deleteObject(file)));
-  if (results.some((result) => result.status === 'rejected')) {
-    throw new Error('共有リンクは停止しましたが、一部の暗号化ファイルを削除できませんでした。もう一度「共有を停止」を押すと続きから削除します。');
+  if (live) {
+    const [cards, categories] = await Promise.all([
+      getDocsFromServer(collection(db, 'users', uid, 'shares', shareId, 'cards')),
+      getDocsFromServer(collection(db, 'users', uid, 'shares', shareId, 'categories')),
+    ]);
+    const paths = [
+      ...cards.docs.map((record) => record.ref),
+      ...categories.docs.map((record) => record.ref),
+    ];
+    for (let offset = 0; offset < paths.length; offset += 400) {
+      const batch = writeBatch(db);
+      for (const target of paths.slice(offset, offset + 400)) batch.delete(target);
+      await batch.commit();
+    }
+  } else {
+    const files = await listShareFiles(ref(storage, `users/${uid}/shares/${shareId}`));
+    const results = await Promise.allSettled(files.map((file) => deleteObject(file)));
+    if (results.some((result) => result.status === 'rejected')) {
+      throw new Error('共有リンクは停止しましたが、一部の旧形式ファイルを削除できませんでした。もう一度「共有を停止」を押すと続きから削除します。');
+    }
   }
   try {
     await deleteDoc(shareRef);
   } catch {
     const remaining = await getDocFromServer(shareRef).catch(() => null);
-    if (remaining?.exists()) throw new Error('共有は停止して暗号化コピーを削除しましたが、一覧の整理結果を確認できません。共有一覧を更新してください。');
+    if (remaining?.exists()) throw new Error('共有は停止しましたが、一覧の整理結果を確認できません。共有一覧を更新してください。');
   }
 }
 
