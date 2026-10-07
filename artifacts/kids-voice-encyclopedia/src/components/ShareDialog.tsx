@@ -3,7 +3,7 @@ import { Check, Copy, Eye, Link2, LockKeyhole, Share2, Trash2, X } from 'lucide-
 import type { Category } from '../lib/categories';
 import type { Keepsake } from '../lib/keepsakeRepository';
 import { createPasswordShare, firebaseError, listPasswordShares, revokePasswordShare } from '../lib/keepsakeStore';
-import { createShareUrl, validateSharePassword } from '../lib/shareCrypto';
+import { createShareUrl, sanitizeSharePin, validateSharePassword } from '../lib/shareCrypto';
 import type { ShareSummary } from '../lib/shareRepository';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 
@@ -122,17 +122,17 @@ export default function ShareDialog({ items, categories, onClose }: Props) {
 
         <div className="share-safety-note">
           <LockKeyhole size={18} />
-          <p>写真と声はブラウザで暗号化して保存します。パスワードはアプリに送らず、保存もしません。リンクとパスワードは別々の方法で伝えてください。</p>
+          <p>写真と声はブラウザで暗号化して保存します。数字4桁のパスワードはアプリに送らず、保存もしません。リンクとパスワードは別々の方法で伝えてください。4桁は試験運用向けです。一般公開前に長いパスワードへ戻してください。</p>
         </div>
 
         {!link && <form className="share-form" onSubmit={(event) => void create(event)}>
-          <label htmlFor="share-password">共有用パスワード</label>
-          <input id="share-password" className="title-input share-password-input" type="password" autoComplete="new-password" minLength={16} maxLength={128} value={password} onChange={(event) => setPassword(event.currentTarget.value)} placeholder="推測されにくい16文字以上のことば" disabled={busy} />
-          <label htmlFor="share-password-confirm">もう一度入力</label>
-          <input id="share-password-confirm" className="title-input share-password-input" type="password" autoComplete="new-password" minLength={16} maxLength={128} value={confirmation} onChange={(event) => setConfirmation(event.currentTarget.value)} placeholder="同じパスワードを入力" disabled={busy} />
-          <p className="share-hint">共有を開く人にも同じパスワードを別途伝えてください。忘れた場合、復元できません。</p>
+          <label htmlFor="share-password">共有用パスワード（数字4桁）</label>
+          <input id="share-password" className="title-input share-password-input share-pin-input" type="password" inputMode="numeric" pattern="[0-9]{4}" autoComplete="off" minLength={4} maxLength={4} value={password} onChange={(event) => setPassword(sanitizeSharePin(event.currentTarget.value))} placeholder="例：0427" disabled={busy} />
+          <label htmlFor="share-password-confirm">もう一度入力してください</label>
+          <input id="share-password-confirm" className="title-input share-password-input share-pin-input" type="password" inputMode="numeric" pattern="[0-9]{4}" autoComplete="off" minLength={4} maxLength={4} value={confirmation} onChange={(event) => setConfirmation(sanitizeSharePin(event.currentTarget.value))} placeholder="同じ数字4桁" disabled={busy} />
+          <p className="share-hint">数字4桁のパスワードを入力してください。共有を開く人にはリンクと別の方法で伝えてください。忘れた場合、復元できません。</p>
           <p className="share-count"><Eye size={15} /> 共有するキロク {items.length}件・声を含む写真と録音</p>
-          <button type="submit" className="share-primary" disabled={busy}>{busy ? '暗号化して準備しています…' : 'パスワード付きリンクを作る'}</button>
+          <button type="submit" className="share-primary" disabled={busy || password.length !== 4 || confirmation.length !== 4}>{busy ? '暗号化して準備しています…' : 'パスワード付きリンクを作る'}</button>
         </form>}
 
         {link && <section className="share-created" aria-live="polite">

@@ -13,7 +13,7 @@ import { getVoices } from './voiceAssets';
 import {
   createShareId, decryptShareBytes, decryptShareManifest, deriveShareKey,
   encryptShareBytes, encryptShareManifest, fromBase64, randomBytes, SHARE_KDF,
-  SHARE_KDF_ITERATIONS, SHARE_PASSWORD_MIN_LENGTH, toBase64, validateSharePassword,
+  SHARE_KDF_ITERATIONS, toBase64, validateSharePassword, validateSharePasswordForUnlock,
 } from './shareCrypto';
 
 export const MAX_SHARE_MEDIA_BYTES = 200 * 1024 * 1024;
@@ -314,7 +314,7 @@ export async function openPasswordShare(
   token: ShareId,
   password: string,
 ): Promise<SharedBook> {
-  const passwordIssue = validateSharePassword(password);
+  const passwordIssue = validateSharePasswordForUnlock(password);
   if (passwordIssue) throw new Error(passwordIssue);
   if (!/^[A-Za-z0-9:_-]{1,128}$/.test(token.ownerUid) || !/^[a-f0-9]{64}$/.test(token.shareId)) {
     throw new Error('共有リンクが正しくありません。');
@@ -393,4 +393,4 @@ export async function openPasswordShare(
   }
 }
 
-export const sharePasswordRequirements = `共有用パスワードは${SHARE_PASSWORD_MIN_LENGTH}〜${SHARE_PASSWORD_MIN_LENGTH + 116}文字です。推測されにくい言葉を組み合わせてください。`;
+export const sharePasswordRequirements = '新しい共有用パスワードは数字4桁です。以前の共有リンクには、作成時の長いパスワードを引き続き使用できます。';

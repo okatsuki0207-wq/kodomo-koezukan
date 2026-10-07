@@ -18,6 +18,9 @@
 .share-form { display:grid; gap:9px; margin-top:20px; }
 .share-form>label,.share-created>label { color:#5e554c; font-size:13px; font-weight:750; }
 .share-password-input { min-height:48px; border-radius:14px; font-size:16px; }
+.share-pin-input { text-align:center; letter-spacing:.45em; font-variant-numeric:tabular-nums; }
+.share-gate-password-row .share-pin-input { padding-left:.45em; }
+.share-legacy-toggle { display:block; margin:10px auto 0; text-align:center; }
 .share-hint { margin:0; color:#82786d; font-size:12px; line-height:1.6; }
 .share-count { display:flex; align-items:center; gap:7px; margin:8px 0 0; color:#6a625a; font-size:13px; }
 .share-primary,.share-secondary,.share-danger { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:46px; border:0; border-radius:14px; padding:0 16px; font:inherit; font-weight:750; cursor:pointer; }

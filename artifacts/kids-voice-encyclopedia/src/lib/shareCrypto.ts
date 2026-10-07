@@ -10,8 +10,8 @@ function ownedBuffer(bytes: Uint8Array): ArrayBuffer {
 export const SHARE_KDF = 'PBKDF2-SHA256' as const;
 export const SHARE_KDF_ITERATIONS = 600_000;
 export const SHARE_PASSWORD_LENGTH = 4;
-const LEGACY_SHARE_PASSWORD_MIN_LENGTH = 16;
-const LEGACY_SHARE_PASSWORD_MAX_LENGTH = 128;
+export const SHARE_PASSWORD_MIN_LENGTH = 16;
+export const SHARE_PASSWORD_MAX_LENGTH = 128;
 export const SHARE_SALT_BYTES = 16;
 export const SHARE_IV_BYTES = 12;
 // Leave room for base64 expansion and field/document metadata under Firestore's
@@ -46,7 +46,7 @@ export function fromBase64(encoded: string): Uint8Array {
   return bytes;
 }
 
-export function validateSharePassword(password: string): string | null {
+function validateLegacySharePassword(password: string): string | null {
   const normalized = password.normalize('NFC');
   const length = [...normalized].length;
   if (length < SHARE_PASSWORD_MIN_LENGTH) return `パスワードは${SHARE_PASSWORD_MIN_LENGTH}文字以上にしてください。`;
@@ -55,8 +55,22 @@ export function validateSharePassword(password: string): string | null {
   return null;
 }
 
+export function validateSharePassword(password: string): string | null {
+  return /^[0-9]{4}$/u.test(password) ? null : '数字4桁のパスワードを入力してください。';
+}
+
+/** Keep previously issued links readable; new links still require a 4-digit PIN. */
+export function validateSharePasswordForUnlock(password: string): string | null {
+  if (/^[0-9]{4}$/u.test(password)) return null;
+  return validateLegacySharePassword(password);
+}
+
+export function sanitizeSharePin(value: string): string {
+  return value.replace(/[^0-9]/gu, '').slice(0, SHARE_PASSWORD_LENGTH);
+}
+
 export async function deriveShareKey(password: string, salt: Uint8Array): Promise<CryptoKey> {
-  const problem = validateSharePassword(password);
+  const problem = validateSharePasswordForUnlock(password);
   if (problem) throw new Error(problem);
   if (salt.byteLength !== SHARE_SALT_BYTES) throw new Error('共有データの形式を確認できません。');
 

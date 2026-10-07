@@ -10,16 +10,24 @@ import {
   encryptShareBytes,
   encryptShareManifest,
   randomBytes,
+  sanitizeSharePin,
   validateSharePassword,
+  validateSharePasswordForUnlock,
 } from '../src/lib/shareCrypto.ts';
 
-const password = 'かぞくのたいせつなことば2026';
+const password = '0427';
 
-test('share passwords are bounded and normalized before key derivation', () => {
-  assert.equal(validateSharePassword('短い'), 'パスワードは16文字以上にしてください。');
-  assert.match(validateSharePassword(`${password} `) ?? '', /空白/u);
+test('new share passwords require exactly four ASCII digits and old links remain unlockable', () => {
   assert.equal(validateSharePassword(password), null);
-  assert.match(validateSharePassword('あ'.repeat(129)) ?? '', /128文字以内/u);
+  assert.match(validateSharePassword('123') ?? '', /数字4桁/u);
+  assert.match(validateSharePassword('12345') ?? '', /数字4桁/u);
+  assert.match(validateSharePassword('12a4') ?? '', /数字4桁/u);
+  assert.equal(sanitizeSharePin('0a 4-2x7'), '0427');
+  const oldPassword = 'かぞくのたいせつなことば2026';
+  assert.match(validateSharePassword(oldPassword) ?? '', /数字4桁/u);
+  assert.equal(validateSharePasswordForUnlock(oldPassword), null);
+  assert.match(validateSharePasswordForUnlock('短い') ?? '', /16文字以上/u);
+  assert.equal(validateSharePassword(password), null);
 });
 
 test('share manifest decrypts only with the right password and detects tampering', async () => {
@@ -33,9 +41,18 @@ test('share manifest decrypts only with the right password and detects tampering
   const encrypted = await encryptShareManifest(key, manifest);
   assert.deepEqual(await decryptShareManifest(key, encrypted), manifest);
 
-  const wrongKey = await deriveShareKey('別の長い確認用ことば1234567890', salt);
+  const wrongKey = await deriveShareKey('1234', salt);
   await assert.rejects(decryptShareManifest(wrongKey, encrypted));
   await assert.rejects(decryptShareManifest(key, { ...encrypted, ciphertext: `${encrypted.ciphertext.slice(0, -2)}AA` }));
+});
+
+test('legacy long-password shares still derive a key for existing links', async () => {
+  const oldPassword = 'かぞくのたいせつなことば2026';
+  const salt = randomBytes(16);
+  const key = await deriveShareKey(oldPassword, salt);
+  const manifest = { version: 1, categories: [], cards: [] };
+  const encrypted = await encryptShareManifest(key, manifest);
+  assert.deepEqual(await decryptShareManifest(key, encrypted), manifest);
 });
 
 test('encrypted media is bound to its share and asset identity', async () => {
