@@ -3,7 +3,7 @@ import './voice-editing.css';
 
 type Props = { photo: string; phase: 'idle' | 'guide' | 'recording'; name?: string };
 
-function Character() {
+export function RecordingCharacter() {
   return (
     <svg className="rg-char" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
       <circle cx="26" cy="28" r="14" fill="#e5be7a" />
@@ -21,17 +21,15 @@ function Character() {
   );
 }
 
-export default function RecordingGuide({ photo, phase, name }: Props) {
+export default function RecordingGuide({ phase, name }: Omit<Props, 'photo'>) {
+  if (phase === 'idle') return null;
   return (
     <div className="rg" data-testid="recording-guide" data-phase={phase}>
       <div className="rg-stage">
-        <img className="rg-photo" src={photo} alt={name ? `${name}の絵` : '選んだ絵'} />
-        {phase === 'guide' && (
-          <div className="rg-guide">
-            <Character />
-            <div className="rg-bubble" data-testid="text-guide-bubble">これはなーに？</div>
-          </div>
-        )}
+        <RecordingCharacter />
+        <div className="rg-bubble" data-testid="text-guide-bubble">
+          {phase === 'guide' ? 'これはなーに？' : 'きいているよ'}
+        </div>
       </div>
       {name && <p className="rg-name">{name}</p>}
       {phase === 'guide' && <p className="rg-cue" role="status">くまさんがお話し中。終わったら話してね</p>}

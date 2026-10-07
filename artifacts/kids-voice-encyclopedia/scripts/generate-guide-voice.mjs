@@ -12,8 +12,8 @@ const response = await fetch(`${base.replace(/\/$/, '')}/chat/completions`, {
     modalities: ['text', 'audio'],
     audio: { voice: 'shimmer', format: 'mp3' },
     messages: [
-      { role: 'system', content: 'Read only the exact Japanese phrase provided, once. Use a warm, cheerful, gentle character voice with clear Japanese pronunciation and a natural questioning intonation. No introduction, explanation, music, or sound effects.' },
-      { role: 'user', content: 'This is a voice acting task, not a question to answer. Speak exactly the following five Japanese words/syllables and nothing else, in a cheerful gentle questioning tone: 「これはなーに？」. Do not answer the question, do not add any words. Your entire spoken output must be: これはなーに？' },
+      { role: 'system', content: 'Read only the exact Japanese phrase provided, once. Use a distinctly high-register, bright, cute mascot-like character voice, youthful and playful, with a gentle smile in the voice and clear natural Japanese pronunciation. Give the final question a lively upward intonation. Create an original voice; do not imitate a named character or person. No introduction, explanation, music, or sound effects.' },
+      { role: 'user', content: 'This is a voice acting task, not a question to answer. Speak exactly the following Japanese phrase and nothing else, in a high, cheerful, gentle character voice: 「これはなーに？」. Do not answer the question, do not add any words. Your entire spoken output must be: これはなーに？' },
     ],
   }),
 });

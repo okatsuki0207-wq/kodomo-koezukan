@@ -13,7 +13,9 @@ export function useDialogFocus(ref: RefObject<HTMLElement | null>, returnSelecto
     const topmost = () => [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].at(-1) === dialog;
     const controls = () => [...dialog.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]')]
       .filter((element) => element.getClientRects().length > 0);
-    (dialog.querySelector<HTMLElement>('input, select') ?? dialog.querySelector<HTMLElement>('button'))?.focus();
+    // Keep the dialog accessible without opening a mobile keyboard on mount.
+    // Users focus a field by explicitly tapping it or tabbing to it.
+    dialog.focus({ preventScroll: true });
     const trap = (event: KeyboardEvent) => {
       if (!topmost()) return;
       if (event.key === 'Escape' && escape.current) {

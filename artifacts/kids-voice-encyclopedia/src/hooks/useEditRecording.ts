@@ -69,7 +69,7 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
   const start = useCallback(async () => {
     if (recorder.current || startingRef.current) return;
     setError('');
-    if (!canRecord()) { setError('このブラウザでは録音できません。音声ファイルをえらんで追加できます。'); return; }
+    if (!canRecord()) { setError('このブラウザではマイク録音をご利用いただけません。'); return; }
     const mine = ++session.current;
     startingRef.current = true;
     setStarting(true);

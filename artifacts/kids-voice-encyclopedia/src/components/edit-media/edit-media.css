@@ -1,7 +1,7 @@
 .edit-dialog { max-height: calc(100dvh - 32px); overflow-y: auto; }
 .em-photo { position: relative; display: block; width: 100%; height: 150px; border: 0; border-radius: 13px; overflow: hidden; background: #f4eddf; cursor: pointer; padding: 0; }
 .em-photo img { width: 100%; height: 100%; object-fit: contain; display: block; }
-.em-photo-label { position: absolute; left: 10px; bottom: 10px; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; background: rgba(255,250,240,.94); color: #6f6355; font-size: 12px; font-weight: 700; }
+.em-photo-label { position: absolute; right: 9px; bottom: 9px; display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; background: rgba(255,255,255,.95); color: #5f5b53; font-size: 11px; font-weight: 700; box-shadow: 0 1px 4px rgba(31,41,55,.12); }
 .em-photo:disabled { opacity: .55; cursor: not-allowed; }
 .em-inline { margin-top: 8px; height: 34px; }
 .em-voices { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 8px; }

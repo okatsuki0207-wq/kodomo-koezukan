@@ -26,6 +26,7 @@ import RecordingGuide from './components/RecordingGuide';
 import { useEditRecording } from './hooks/useEditRecording';
 import { randomVoice, VoicePlayback } from './lib/voicePlayback';
 import DetailDialogShell from './components/DetailDialogShell';
+import StartScreen from './components/StartScreen';
 import { useCategories } from './hooks/useCategories';
 import { filterByCategory } from './lib/categories';
 import { deleteKeepsake, editKeepsake, firebaseError, saveKeepsake, subscribeKeepsakes, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
@@ -44,6 +45,7 @@ function formatDate(timestamp: number) {
 
 function App() {
   const [items, setItems] = useState<Keepsake[]>([]);
+  const [view, setView] = useState<'start' | 'library'>('start');
   const [createOpen, setCreateOpen] = useState(false);
   const [detail, setDetail] = useState<Keepsake | null>(null);
   const [itemName, setItemName] = useState('');
@@ -90,7 +92,7 @@ function App() {
         const trimmed = await trimLeadingSilence(blob);
         if (session === recordingSession.current) {
           setVoice(URL.createObjectURL(trimmed));
-          setNotice('声を録音しました。このままカードを保存できます。');
+          setNotice('声を録音しました。このままキロクをしまえます。');
         }
       } catch (caught) {
         if (session === recordingSession.current) setError(caught instanceof Error ? caught.message : '録音を処理できませんでした。');
@@ -247,7 +249,7 @@ function App() {
     if (mutationLock.current || recording || processingVoice || rec.starting) return;
     const cleanItemName = itemName.trim();
     if (!cleanItemName) {
-      setError('図鑑に登録するモノの名前を入力してください。');
+      setError('キロクの名前を入力してください。');
       return;
     }
     if (!photo) {
@@ -261,6 +263,7 @@ function App() {
     try {
       await saveKeepsake({ id: pendingId.current, itemName: cleanItemName, photo, voice, createdAt: Date.now(), categoryId: cardCategory });
       setCreateOpen(false);
+      setView('library');
       setItemName('');
       setPhoto('');
       setVoice(null);
@@ -297,13 +300,18 @@ function App() {
   return (
     <div className="app-shell">
       <header className="topbar" inert={createOpen || !!detail || categoryOpen}>
-        <a className="brand" href="/" aria-label="こどもの こえずかん ホーム">
+        <button type="button" className="brand brand-home" onClick={() => setView('start')} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
           <span className="brand-mark"><BookOpen size={20} strokeWidth={1.8} /></span>
           <h1 className="brand-title" style={{ margin: 0 }}>こどもの こえずかん</h1>
-        </a>
-        <button type="button" className="header-create" onClick={openCreate} data-testid="button-create-card"><Plus size={18} /><span>つくる</span></button>
+        </button>
+        {view === 'library' && <button type="button" className="header-create" onClick={openCreate} data-testid="button-create-card"><Plus size={18} /><span>キロクする</span></button>}
       </header>
 
+      {view === 'start' ? (
+        <main className="start-main" inert={createOpen || !!detail || categoryOpen}>
+          <StartScreen onRecord={openCreate} onOpenEncyclopedia={() => setView('library')} />
+        </main>
+      ) : (
       <main className="page-main" inert={createOpen || !!detail || categoryOpen}>
         <CategoryBar categories={categories} selected={selectedCategory} onSelect={(id) => { stopPlayback(); setSelectedCategory(id); }} onNew={() => setCategoryOpen(true)} disabled={busy} />
         {categoryIssue && <div className="notice" role="alert" data-testid="status-categories-load-error"><AlertCircle size={16} />{categoryIssue}
@@ -319,18 +327,18 @@ function App() {
           <section className="empty-state" data-testid="empty-keepsakes">
             <div className="empty-illustration"><BookOpen size={46} strokeWidth={1.35} /></div>
             <h2 className="empty-title">まだ、まっさらなページ</h2>
-            <p className="empty-copy">いちばん最初の一枚をつくってみよう。<br />登録するモノの写真と声を残せます。</p>
-            <button type="button" className="empty-action" onClick={openCreate} data-testid="button-empty-create">はじめのカードをつくる</button>
+            <p className="empty-copy">いちばん最初のキロクを残してみよう。<br />写真といっしょに、声も大切にしまえます。</p>
+            <button type="button" className="empty-action" onClick={openCreate} data-testid="button-empty-create">はじめのキロクを残す</button>
           </section>
         ) : visibleItems.length === 0 ? (
           <section className="empty-state category-empty" data-testid="empty-category">
             <div className="empty-illustration"><BookOpen size={46} strokeWidth={1.35} /></div>
             <h2 className="empty-title">{categoryName(selectedCategory) ?? 'このカテゴリ'}は、まだ空っぽ</h2>
-            <p className="empty-copy">このカテゴリのカードはまだありません。<br />新しいカードをつくるか、ほかのカードのカテゴリを直せます。</p>
-            <button type="button" className="empty-action" onClick={openCreate} data-testid="button-category-empty-create">このカテゴリにカードをつくる</button>
+            <p className="empty-copy">このページはまだ空っぽ。<br />新しいキロクを残すか、ほかのキロクのページを変えられます。</p>
+            <button type="button" className="empty-action" onClick={openCreate} data-testid="button-category-empty-create">このページにキロクする</button>
           </section>
         ) : (
-          <section className="sticker-collage" aria-label="保存した図鑑のシール" data-testid="grid-keepsakes">
+          <section className="sticker-collage" aria-label="わが家のキロク" data-testid="grid-keepsakes">
             {visibleItems.map((item) => (
               <article key={item.id} className={`sticker-item${playing && playingItemId === item.id ? ' is-playing' : ''}`} data-testid={`card-keepsake-${item.id}`}>
                 <button
@@ -358,17 +366,18 @@ function App() {
         </div>
         <footer className="footer-note"><Sparkles size={14} /> 写真と声はFirebaseに保存します。同じブラウザの匿名アカウントで閲覧できます。</footer>
       </main>
+      )}
 
       {createOpen && !photoEditorSource && (
         <div className="overlay" role="presentation" inert={newCatInCreate} onMouseDown={(event) => { if (event.target === event.currentTarget) closeCreate(); }}>
-          <DetailDialogShell className="dialog" label="新しいカードをつくる" returnSelector='[data-testid="button-create-card"]' onClose={closeCreate}>
+          <DetailDialogShell className="dialog" label="新しいキロクをつくる" returnSelector='[data-testid="button-create-card"]' onClose={closeCreate}>
             <div className="dialog-head">
-              <div><h2 id="create-title" className="dialog-title">新しいカードをつくる</h2><p className="dialog-lede">図鑑に登録するモノの写真と声を残します。</p></div>
+              <div><h2 id="create-title" className="dialog-title">新しいキロクをつくる</h2><p className="dialog-lede">お気に入りの写真と声をいっしょに残します。</p></div>
               <button type="button" className="icon-button" disabled={busy} onClick={closeCreate} aria-label="閉じる" data-testid="button-close-create"><X size={19} /></button>
             </div>
             <div className="form-block">
-              <label className="field-label" htmlFor="keepsake-item-name">モノの名前</label>
-              <p className="field-hint">図鑑に登録するものの名前を入力してください。</p>
+              <label className="field-label" htmlFor="keepsake-item-name">なまえ</label>
+              <p className="field-hint">写真のものの名前を入力してください。</p>
               <input id="keepsake-item-name" className="title-input" disabled={busy} value={itemName} onChange={(event) => setItemName(event.currentTarget.value)} placeholder="りんご、ライオン、赤バス など" maxLength={48} data-testid="input-item-name" />
             </div>
             <div className="form-block">
@@ -377,15 +386,17 @@ function App() {
             <div className="form-block">
               <span className="field-label">写真</span>
               <input ref={photoInput} className="sr-only" type="file" accept="image/*" disabled={busy || recording || rec.starting || processingVoice} onChange={onPhotoChange} aria-label="写真を選ぶ" data-testid="input-card-photo" />
-              <button type="button" className={`photo-picker${photo ? ' has-photo' : ''}`} disabled={busy || recording || rec.starting || processingVoice} onClick={() => photoInput.current?.click()} data-testid="button-select-photo">
-                {photo && <img src={photo} alt="選んだ写真" />}
-                {!photo && <span className="picker-content">
-                  <Camera size={23} />
-                  <strong>写真をえらぶ・撮る</strong>
-                  <span>写真ライブラリから選ぶか、カメラで撮影できます</span>
-                </span>}
-              </button>
-              {photo && <button type="button" className="record-button" disabled={busy || recording || rec.starting || processingVoice} onClick={() => photoInput.current?.click()}>写真をえらびなおす</button>}
+              <div className="photo-composition">
+                <button type="button" className={`photo-picker${photo ? ' has-photo' : ''}`} disabled={busy || recording || rec.starting || processingVoice} onClick={() => photoInput.current?.click()} data-testid="button-select-photo">
+                  {photo && <img src={photo} alt="選んだ写真" />}
+                  {!photo && <span className="picker-content">
+                    <Camera size={23} />
+                    <strong>写真をえらぶ・撮る</strong>
+                    <span>写真ライブラリから選ぶか、カメラで撮影できます</span>
+                  </span>}
+                </button>
+                {photo && <button type="button" className="photo-change" aria-label="写真を変更" disabled={busy || recording || rec.starting || processingVoice} onClick={() => photoInput.current?.click()}>写真を変更</button>}
+              </div>
             </div>
             <div className="form-block">
               <div className="record-panel">
@@ -393,7 +404,7 @@ function App() {
                   <div className="record-title"><Mic size={16} /> 声をのこす <span className="record-status" role="status" aria-live="polite">{rec.guiding ? 'これはなーに？' : recording ? `録音中 ${formatTime(recordSeconds)}` : voice ? '録音できました' : 'あとからでも大丈夫'}</span></div>
                   {recording && <div className="recording-wave" aria-label="録音中"><i /><i /><i /><i /><i /><i /><i /></div>}
                 </div>
-                {photo && <RecordingGuide photo={photo} name={itemName} phase={rec.guiding ? 'guide' : recording ? 'recording' : 'idle'} />}
+                <RecordingGuide name={itemName} phase={rec.guiding ? 'guide' : recording ? 'recording' : 'idle'} />
                 <div className="record-actions">
                   {recording ? (
                     <button type="button" className="record-button danger" onClick={stopRecording} data-testid="button-stop-recording"><span className="recording-dot" /> 録音をとめる</button>
@@ -433,26 +444,26 @@ function App() {
             setPhoto(processedPhoto);
             setPhotoEditorSource('');
             setError('');
-            setNotice('加工した写真をカードに設定しました。');
+            setNotice('ととのえた写真をこのキロクに使います。');
           }}
         />
       )}
 
       {detail && !editOpen && (
         <div className="overlay" role="presentation" onMouseDown={(event) => { if (!busy && event.target === event.currentTarget) closeDetail(); }}>
-          <DetailDialogShell label={`${detail.itemName}のカード`} returnSelector={`[data-testid="button-detail-${detail.id}"]`} onClose={closeDetail}>
+          <DetailDialogShell label={`${detail.itemName}のキロク`} returnSelector={`[data-testid="button-detail-${detail.id}"]`} onClose={closeDetail}>
             <button type="button" className="icon-button" disabled={busy} style={{ position: 'absolute', zIndex: 2, right: 25, top: 25 }} onClick={closeDetail} aria-label="閉じる" data-testid="button-close-detail"><X size={19} /></button>
             {detail.photo ? <img className="detail-image" src={detail.photo} alt={`${detail.itemName}の写真`} /> : <div className="detail-image-placeholder"><ImageIcon size={54} /></div>}
             <div className="detail-meta">
-              <div><h2 className="detail-name">{detail.itemName}</h2><p className="detail-date" data-testid="text-detail-created-at">登録日時：{formatStamp(detail.createdAt)}</p><p className="detail-date" data-testid="text-detail-category">カテゴリ: {categoryName(detail.categoryId) ?? (detail.categoryId ? '読み込み中のカテゴリ' : '未分類')}</p><div className="detail-category"><CategorySelect id="detail-category" categories={categories} value={detail.categoryId ?? null} onChange={(id) => void changeDetailCategory(id)} disabled={busy || catBusy} testId="select-detail-category" /></div>{getVoices(detail).length === 0 && <p className="detail-date">このカードには、まだ声がありません</p>}</div>
+              <div><h2 className="detail-name">{detail.itemName}</h2><p className="detail-date" data-testid="text-detail-created-at">キロクした日時：{formatStamp(detail.createdAt)}</p><p className="detail-date" data-testid="text-detail-category">カテゴリ: {categoryName(detail.categoryId) ?? (detail.categoryId ? '読み込み中のカテゴリ' : '未分類')}</p><div className="detail-category"><CategorySelect id="detail-category" categories={categories} value={detail.categoryId ?? null} onChange={(id) => void changeDetailCategory(id)} disabled={busy || catBusy} testId="select-detail-category" /></div>{getVoices(detail).length === 0 && <p className="detail-date">このキロクには、まだ声がありません</p>}</div>
               <div className="detail-actions">
                 {getVoices(detail).map((v, i, all) => { const on = playing && playingItemId === detail.id && playingUrl === v.url; return (
                   <button key={v.id} type="button" className="record-button primary" onClick={() => playDetailVoice(v.url)} data-testid={i === 0 ? 'button-play-detail-voice' : `button-play-detail-voice-${i}`}>{on ? <Pause size={16} /> : <Play size={16} />}{on ? 'とめる' : all.length > 1 ? `声${i + 1}をきく` : '声をきく'}</button>); })}
                 <button type="button" className="record-button" disabled={busy} onClick={() => { stopPlayback(); setEditOpen(true); }} data-testid="button-edit-card"><Pencil size={15} /> へんしゅう</button>
-                <button type="button" className="plain-action" disabled={busy} onClick={() => setConfirmDelete((value) => !value)} aria-label="このカードを削除" data-testid="button-delete-card"><Trash2 size={17} /></button>
+                <button type="button" className="plain-action" disabled={busy} onClick={() => setConfirmDelete((value) => !value)} aria-label="このキロクを削除" data-testid="button-delete-card"><Trash2 size={17} /></button>
               </div>
             </div>
-            {confirmDelete && <div className="delete-confirm" role="alert"><AlertCircle size={16} />Firebaseから写真・音声・このカードを削除しますか？<button type="button" disabled={busy} onClick={deleteCard} data-testid="button-confirm-delete">{busy ? '削除中…' : '削除する'}</button><button type="button" disabled={busy} onClick={() => setConfirmDelete(false)} data-testid="button-cancel-delete">やめる</button></div>}
+            {confirmDelete && <div className="delete-confirm" role="alert"><AlertCircle size={16} />写真・声・このキロクを完全に削除しますか？<button type="button" disabled={busy} onClick={deleteCard} data-testid="button-confirm-delete">{busy ? '削除中…' : '削除する'}</button><button type="button" disabled={busy} onClick={() => setConfirmDelete(false)}>やめる</button></div>}
             {error && <p className="form-error" role="alert">{error}</p>}
           </DetailDialogShell>
         </div>

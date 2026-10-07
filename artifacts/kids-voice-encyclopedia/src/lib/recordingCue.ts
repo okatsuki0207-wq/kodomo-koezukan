@@ -1,11 +1,24 @@
 /** Fixed local guide voice. Microphone recording waits for ended + an acoustic
  * tail. Never silently skip a failed guide or start recording after cancellation. */
+const GUIDE_URL = `${import.meta.env?.BASE_URL ?? '/'}assets/audio/voice_what_is_this.mp3`;
+
+// Start fetching the tiny, fixed voice as soon as this module loads. Playback
+// still calls play() directly inside the recording button's tap handler.
+const preloadedGuideAudio = typeof Audio === 'undefined' ? null : new Audio(GUIDE_URL);
+if (preloadedGuideAudio) {
+  preloadedGuideAudio.preload = 'auto';
+  preloadedGuideAudio.load();
+}
+
 export function recordingCue(
-  url = `${import.meta.env.BASE_URL}assets/audio/voice_what_is_this.mp3`,
-  createAudio: (url: string) => HTMLAudioElement = (src) => new Audio(src),
+  url = GUIDE_URL,
+  createAudio?: (url: string) => HTMLAudioElement,
 ) {
-  const audio = createAudio(url);
+  const usingPreloaded = !createAudio && url === GUIDE_URL && preloadedGuideAudio !== null;
+  const audio = createAudio ? createAudio(url) : usingPreloaded ? preloadedGuideAudio : new Audio(url);
   audio.preload = 'auto';
+  // Rewind a previously used shared element without discarding its cached data.
+  if (usingPreloaded) audio.currentTime = 0;
   let resolve: () => void = () => {};
   let reject: (error: Error) => void = () => {};
   let tail: ReturnType<typeof setTimeout> | undefined;
@@ -18,7 +31,11 @@ export function recordingCue(
     clearTimeout(tail); clearTimeout(watchdog);
     audio.onended = null; audio.onerror = null;
     audio.pause();
-    audio.removeAttribute('src'); audio.load();
+    if (usingPreloaded) {
+      audio.currentTime = 0;
+    } else {
+      audio.removeAttribute('src'); audio.load();
+    }
     if (error) reject(error); else resolve();
   };
   audio.onended = () => { if (!done) tail = setTimeout(() => finish(), 180); };
