@@ -125,6 +125,30 @@ test('one-voice cards remain replayable and cached playback is synchronous', asy
   p.dispose();
 });
 
+test('tapping the active card restarts its current clip from the beginning without clearing playback state', async () => {
+  const states = [];
+  let audio;
+  const p = new VoicePlayback({
+    onChange: state => states.push(state),
+    onError: () => assert.fail('unexpected error'),
+    createAudio: () => { audio = fakeAudio(); return audio; },
+  });
+  p.play('voice-url', 'card');
+  await Promise.resolve();
+  assert.equal(audio.playCalls, 1);
+  assert.equal(states.at(-1).playing, true);
+
+  audio.currentTime = 4.2;
+  assert.equal(p.restart('card'), true);
+  assert.equal(audio.currentTime, 0);
+  assert.equal(audio.playCalls, 2);
+  assert.equal(states.at(-1).playing, true);
+  await Promise.resolve();
+  assert.equal(states.at(-1).playing, true);
+  assert.equal(p.restart('another-card'), false);
+  p.dispose();
+});
+
 test('switching, same-card stop and stale play completion cannot activate another card', async () => {
   const states = [], audios = [], resolves = [];
   const p = new VoicePlayback({ onChange: s => states.push(s), onError: () => assert.fail('unexpected error'),

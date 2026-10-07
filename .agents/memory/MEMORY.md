@@ -7,4 +7,5 @@
 - [Cloud save safety](cloud-save-safety.md) — isolate retries and preserve media after ambiguous commits; test only synthetic data in loopback emulators.
 - [SDK unit verification](sdk-unit-verification.md) — enable Node VM modules; source-only fallbacks can hide stale Firebase fixtures and give false-green results.
 - [Firestore rule budgets](firestore-rule-budgets.md) — verify the maximum combined media edit; small edits can pass while larger atomic commits exceed the expression budget.
+- [Firestore rule publication](firestore-rule-publication.md) — emulator tests do not update hosted Firebase; publish changed rules in Console before new paths work.
 - [Child-friendly interactions](child-interactions.md) — defer waveform editing; small sliding touches play even during scrolling, with pastel notes instead of a playback frame.

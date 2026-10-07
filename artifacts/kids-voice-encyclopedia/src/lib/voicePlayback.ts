@@ -78,6 +78,7 @@ export class VoiceShuffleBag<T> {
 export class VoicePlayback {
   private cache = new Map<string, HTMLAudioElement>();
   private active: HTMLAudioElement | null = null;
+  private activeUrl: string | null = null;
   private id: string | null = null;
   private token = 0;
   private options: Options;
@@ -103,10 +104,28 @@ export class VoicePlayback {
   }
 
   isActive(id: string) { return this.id === id; }
+  restart(id: string) {
+    const audio = this.active;
+    const url = this.activeUrl;
+    if (!audio || !url || this.id !== id) return false;
+    const token = ++this.token;
+    const live = () => this.token === token && this.active === audio;
+    const fail = () => { if (live()) { this.stop(); this.options.onError(); } };
+    audio.onended = () => { if (live() && audio.ended) this.stop(); };
+    audio.onpause = () => { if (live() && audio.paused && !audio.ended) this.stop(); };
+    audio.onerror = fail;
+    try { audio.currentTime = 0; } catch { /* metadata may still be loading */ }
+    try {
+      audio.play().then(() => {
+        if (live()) this.options.onChange({ id, url, playing: true });
+      }).catch(fail);
+    } catch { fail(); }
+    return true;
+  }
   stop() {
     this.token++;
     const audio = this.active;
-    this.active = null; this.id = null;
+    this.active = null; this.activeUrl = null; this.id = null;
     if (audio) {
       audio.onended = audio.onerror = audio.onpause = null;
       audio.pause();
@@ -118,7 +137,7 @@ export class VoicePlayback {
     if (this.id === id && this.active) { this.stop(); return; }
     this.stop();
     const audio = this.get(url), token = ++this.token;
-    this.active = audio; this.id = id;
+    this.active = audio; this.activeUrl = url; this.id = id;
     try { audio.currentTime = 0; } catch { /* still loading metadata */ }
     const live = () => this.token === token && this.active === audio;
     const fail = () => { if (live()) { this.stop(); this.options.onError(); } };

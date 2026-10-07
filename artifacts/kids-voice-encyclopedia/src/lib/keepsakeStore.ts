@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { indexedDBLocalPersistence, initializeAuth, signInAnonymously } from 'firebase/auth';
-import { collection, doc, getFirestore, onSnapshot, orderBy, query, runTransaction, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { collection, doc, getFirestore, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { getDownloadURL, getStorage, ref } from 'firebase/storage';
 import { firebaseConfig, isFirebaseConfigured } from '../firebaseConfig';
 import { storageFailureMessage } from './storageDiagnostics';
@@ -10,6 +10,7 @@ import { createUnusedMediaService } from './unusedMedia';
 import { configureShareRepository, syncLiveShareProjections } from './shareRepository';
 export type { Keepsake } from './keepsakeRepository';
 import { categoryIdForName, DEFAULT_CATEGORIES, keepsakeMetadata, validateCategoryId, validateCategoryName, type Category } from './categories';
+import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, type GallerySettings } from './gallerySettings';
 
 const app = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
 const auth = app ? initializeAuth(app, { persistence: indexedDBLocalPersistence }) : null;
@@ -50,21 +51,23 @@ export { createLiveShare, listPasswordShares, openPasswordShare, revokePasswordS
 
 let latestItems: Keepsake[] | null = null;
 let latestCategories: Category[] | null = null;
+let latestGallerySettings: GallerySettings | null = null;
 let shareSyncTimer: number | undefined;
 let shareSyncQueue: Promise<void> = Promise.resolve();
 let lastSuccessfulShareSync: string | null = null;
 function scheduleLiveShareSync() {
-  if (!latestItems || !latestCategories || !db || !storage || shareSyncTimer !== undefined) return;
+  if (!latestItems || !latestCategories || !latestGallerySettings || !db || !storage || shareSyncTimer !== undefined) return;
   shareSyncTimer = window.setTimeout(() => {
     shareSyncTimer = undefined;
     const items = latestItems;
     const categories = latestCategories;
-    if (!items || !categories) return;
-    const signature = JSON.stringify([items, categories]);
+    const settings = latestGallerySettings;
+    if (!items || !categories || !settings) return;
+    const signature = JSON.stringify([items, categories, settings]);
     shareSyncQueue = shareSyncQueue
       .then(async () => {
         if (signature === lastSuccessfulShareSync) return;
-        await syncLiveShareProjections(items, categories);
+        await syncLiveShareProjections(items, categories, settings);
         lastSuccessfulShareSync = signature;
       })
       .catch(() => { /* Keep owner editing available if a share projection sync is temporarily unavailable. */ });
@@ -121,6 +124,30 @@ export async function subscribeCategories(
     scheduleLiveShareSync();
     onChange(next);
   }, onError);
+}
+
+export async function subscribeGallerySettings(
+  onChange: (settings: GallerySettings) => void,
+  onError: (error: unknown) => void,
+): Promise<() => void> {
+  const uid = await userId();
+  return onSnapshot(doc(db!, 'users', uid, 'settings', 'gallery'), (snapshot) => {
+    const settings = normalizeGallerySettings(snapshot.exists() ? snapshot.data() : DEFAULT_GALLERY_SETTINGS);
+    latestGallerySettings = settings;
+    scheduleLiveShareSync();
+    onChange(settings);
+  }, onError);
+}
+
+export async function saveGallerySettings(value: GallerySettings): Promise<void> {
+  const uid = await userId();
+  const settings = normalizeGallerySettings(value);
+  await deadline(setDoc(doc(db!, 'users', uid, 'settings', 'gallery'), {
+    ...settings,
+    updatedAt: serverTimestamp(),
+  }));
+  latestGallerySettings = settings;
+  scheduleLiveShareSync();
 }
 
 export async function createCategory(name: string): Promise<Category> {

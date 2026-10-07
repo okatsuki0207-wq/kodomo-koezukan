@@ -748,6 +748,20 @@ test('live share IDs expose only their read-only Firestore projection and keep o
   const shareRef = doc(alice.db, 'users', 'alice', 'shares', shareId);
   const cardRef = doc(alice.db, 'users', 'alice', 'shares', shareId, 'cards', 'card-1');
   const categoryRef = doc(alice.db, 'users', 'alice', 'shares', shareId, 'categories', 'default-toys');
+  const projectedSettingsRef = doc(alice.db, 'users', 'alice', 'shares', shareId, 'settings', 'gallery');
+  const ownerSettingsRef = doc(alice.db, 'users', 'alice', 'settings', 'gallery');
+  const ownerSettings = {
+    categoryOrder: ['default-toys'],
+    cardOrderByCategory: { 'default-toys': ['card-1'] },
+    displayMode: 'shuffle',
+    shuffleSeed: 42,
+    updatedAt: serverTimestamp(),
+  };
+  await assertSucceeds(setDoc(ownerSettingsRef, ownerSettings));
+  await assertSucceeds(getDocFromServer(ownerSettingsRef));
+  await assertFails(getDocFromServer(doc(bob.db, 'users', 'alice', 'settings', 'gallery')));
+  await assertFails(setDoc(doc(bob.db, 'users', 'alice', 'settings', 'gallery'), ownerSettings));
+
   const photoPath = 'users/alice/keepsakes/card-1/test-attempt/photo';
   const card = {
     itemName: 'テスト', photo: 'https://firebasestorage.googleapis.com/example',
@@ -757,9 +771,18 @@ test('live share IDs expose only their read-only Firestore projection and keep o
   await assertSucceeds(setDoc(shareRef, { active: true, version: 2, mode: 'live', createdAt: serverTimestamp() }));
   await assertSucceeds(setDoc(cardRef, card));
   await assertSucceeds(setDoc(categoryRef, { name: 'おもちゃ', createdAt: Date.now() }));
+  const projectedSettings = {
+    categoryOrder: ['default-toys'],
+    cardOrderByCategory: { 'default-toys': ['card-1'] },
+    displayMode: 'ordered',
+    shuffleSeed: 9,
+  };
+  await assertSucceeds(setDoc(projectedSettingsRef, projectedSettings));
 
   await assertSucceeds(getDocFromServer(doc(anonymous.db, 'users', 'alice', 'shares', shareId)));
   await assertSucceeds(getDocFromServer(doc(anonymous.db, 'users', 'alice', 'shares', shareId, 'cards', 'card-1')));
+  await assertSucceeds(getDocFromServer(doc(bob.db, 'users', 'alice', 'shares', shareId, 'settings', 'gallery')));
+  await assertFails(setDoc(doc(bob.db, 'users', 'alice', 'shares', shareId, 'settings', 'gallery'), projectedSettings));
   await assertSucceeds(getDocs(collection(bob.db, 'users', 'alice', 'shares', shareId, 'cards')));
   await assertSucceeds(getDocs(collection(anonymous.db, 'users', 'alice', 'shares', shareId, 'categories')));
   await assertFails(getDocFromServer(doc(bob.db, 'users', 'alice', 'keepsakes', 'card-1')));
@@ -772,9 +795,11 @@ test('live share IDs expose only their read-only Firestore projection and keep o
   await assertFails(getBytes(ref(anonymous.storage, photoPath)));
   await assertSucceeds(updateDoc(shareRef, { active: false }));
   await assertFails(getDocs(collection(anonymous.db, 'users', 'alice', 'shares', shareId, 'cards')));
+  await assertFails(getDocFromServer(doc(bob.db, 'users', 'alice', 'shares', shareId, 'settings', 'gallery')));
   await assertSucceeds(getDocs(collection(alice.db, 'users', 'alice', 'shares', shareId, 'cards')));
   await assertSucceeds(deleteDoc(cardRef));
   await assertSucceeds(deleteDoc(categoryRef));
+  await assertSucceeds(deleteDoc(projectedSettingsRef));
   await assertSucceeds(deleteDoc(shareRef));
 });
 
@@ -802,7 +827,7 @@ test('live share repository publishes without Storage copies and streams owner c
       firstSeen = true;
       firstResolve(book);
     }
-    if (book.items.some((item) => item.itemName === '更新後のキロク')) updateResolve(book);
+    if (book.items.some((item) => item.itemName === '更新後のキロク') && book.settings.displayMode === 'shuffle') updateResolve(book);
   }, (error) => { throw error; });
   assert.ok(stop);
   const first = await Promise.race([
@@ -812,11 +837,18 @@ test('live share repository publishes without Storage copies and streams owner c
   assert.equal(first.items[0].itemName, '最初のキロク');
   assert.equal(first.categories[0].name, 'おもちゃ');
 
-  await syncLiveShareProjections([{ ...original, itemName: '更新後のキロク' }], categories);
+  await syncLiveShareProjections([{ ...original, itemName: '更新後のキロク' }], categories, {
+    categoryOrder: ['default-toys'],
+    cardOrderByCategory: { 'default-toys': ['live-card'] },
+    displayMode: 'shuffle',
+    shuffleSeed: 123,
+  });
   const updated = await Promise.race([
     updatedBook,
     new Promise((_, reject) => setTimeout(() => reject(new Error('updated live snapshot timed out')), 4000)),
   ]);
   assert.equal(updated.items[0].itemName, '更新後のキロク');
+  assert.equal(updated.settings.displayMode, 'shuffle');
+  assert.equal(updated.settings.shuffleSeed, 123);
   stop();
 });

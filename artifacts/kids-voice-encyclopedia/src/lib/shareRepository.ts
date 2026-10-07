@@ -10,6 +10,7 @@ import {
 import type { Category } from './categories.ts';
 import type { Keepsake } from './keepsakeRepository.ts';
 import { getVoices } from './voiceAssets.ts';
+import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, type GallerySettings } from './gallerySettings.ts';
 import {
   createShareId, decryptShareBytes, decryptShareManifest, deriveShareKey,
   fromBase64, SHARE_KDF, SHARE_KDF_ITERATIONS, validateSharePasswordForUnlock,
@@ -160,6 +161,7 @@ function projectionOperations(
   shareId: string,
   items: readonly Keepsake[],
   categories: readonly Category[],
+  settings: GallerySettings,
   storedCards: readonly string[],
   storedCategories: readonly string[],
 ): ProjectionOperation[] {
@@ -191,6 +193,16 @@ function projectionOperations(
     });
   }
   for (const id of storedCategories) if (!categoryIds.has(id)) operations.push({ path: `${base}/categories/${id}` });
+  const normalizedSettings = normalizeGallerySettings(settings);
+  operations.push({
+    path: `${base}/settings/gallery`,
+    data: {
+      categoryOrder: normalizedSettings.categoryOrder,
+      cardOrderByCategory: normalizedSettings.cardOrderByCategory,
+      displayMode: normalizedSettings.displayMode,
+      shuffleSeed: normalizedSettings.shuffleSeed,
+    },
+  });
   return operations;
 }
 
@@ -200,18 +212,21 @@ async function writeProjection(
   shareId: string,
   items: readonly Keepsake[],
   categories: readonly Category[],
+  settings: GallerySettings = DEFAULT_GALLERY_SETTINGS,
 ): Promise<void> {
   const base = `users/${uid}/shares/${shareId}`;
-  const [storedCards, storedCategories] = await Promise.all([
+  const [storedCards, storedCategories, storedSettings] = await Promise.all([
     getDocsFromServer(collection(db, base, 'cards')),
     getDocsFromServer(collection(db, base, 'categories')),
+    getDocFromServer(doc(db, base, 'settings', 'gallery')),
   ]);
   const existingValues = new Map([
     ...storedCards.docs.map((record) => [record.ref.path, stableJson(record.data())] as const),
     ...storedCategories.docs.map((record) => [record.ref.path, stableJson(record.data())] as const),
   ]);
+  if (storedSettings.exists()) existingValues.set(storedSettings.ref.path, stableJson(storedSettings.data()));
   const operations = projectionOperations(
-    db, uid, shareId, items, categories,
+    db, uid, shareId, items, categories, settings,
     storedCards.docs.map((record) => record.id),
     storedCategories.docs.map((record) => record.id),
   ).filter((operation) => !operation.data || existingValues.get(operation.path) !== stableJson(operation.data));
@@ -229,6 +244,7 @@ async function writeProjection(
 export async function createLiveShare(
   items: readonly Keepsake[],
   categories: readonly Category[],
+  settings: GallerySettings = DEFAULT_GALLERY_SETTINGS,
 ): Promise<ShareId> {
   const { db, userId } = services();
   const ownerUid = await userId();
@@ -245,7 +261,7 @@ export async function createLiveShare(
     });
   });
   try {
-    await writeProjection(db, ownerUid, shareId, items, categories);
+    await writeProjection(db, ownerUid, shareId, items, categories, settings);
     return { ownerUid, shareId };
   } catch (error) {
     // Never leave an intentionally incomplete public link active.
@@ -257,6 +273,7 @@ export async function createLiveShare(
 export async function syncLiveShareProjections(
   items: readonly Keepsake[],
   categories: readonly Category[],
+  settings: GallerySettings = DEFAULT_GALLERY_SETTINGS,
 ): Promise<void> {
   const { db, userId } = services();
   const uid = await userId();
@@ -264,7 +281,7 @@ export async function syncLiveShareProjections(
   for (const share of shares.docs) {
     const data = share.data();
     if (data.active === true && data.version === 2 && data.mode === 'live') {
-      await writeProjection(db, uid, share.id, items, categories);
+      await writeProjection(db, uid, share.id, items, categories, settings);
     }
   }
 }
@@ -285,8 +302,9 @@ export async function subscribeLiveShare(
 
   let items: Keepsake[] | null = null;
   let categories: Category[] | null = null;
+  let settings: GallerySettings = normalizeGallerySettings(DEFAULT_GALLERY_SETTINGS);
   const emit = () => {
-    if (items && categories) onChange({ items, categories, objectUrls: [] });
+    if (items && categories) onChange({ items, categories, settings, objectUrls: [] });
   };
   const cardsStop = onSnapshot(
     query(collection(db, 'users', token.ownerUid, 'shares', token.shareId, 'cards'), orderBy('createdAt', 'desc')),
@@ -318,7 +336,15 @@ export async function subscribeLiveShare(
     },
     onError,
   );
-  return () => { cardsStop(); categoriesStop(); };
+  const settingsStop = onSnapshot(
+    doc(db, 'users', token.ownerUid, 'shares', token.shareId, 'settings', 'gallery'),
+    (snapshot) => {
+      settings = snapshot.exists() ? normalizeGallerySettings(snapshot.data()) : normalizeGallerySettings(DEFAULT_GALLERY_SETTINGS);
+      emit();
+    },
+    onError,
+  );
+  return () => { cardsStop(); categoriesStop(); settingsStop(); };
 }
 
 export async function listPasswordShares(): Promise<ShareSummary[]> {
@@ -363,13 +389,15 @@ export async function revokePasswordShare(shareId: string): Promise<void> {
     }
   }
   if (live) {
-    const [cards, categories] = await Promise.all([
+    const [cards, categories, settings] = await Promise.all([
       getDocsFromServer(collection(db, 'users', uid, 'shares', shareId, 'cards')),
       getDocsFromServer(collection(db, 'users', uid, 'shares', shareId, 'categories')),
+      getDocFromServer(doc(db, 'users', uid, 'shares', shareId, 'settings', 'gallery')),
     ]);
     const paths = [
       ...cards.docs.map((record) => record.ref),
       ...categories.docs.map((record) => record.ref),
+      ...(settings.exists() ? [settings.ref] : []),
     ];
     for (let offset = 0; offset < paths.length; offset += 400) {
       const batch = writeBatch(db);
@@ -391,7 +419,7 @@ export async function revokePasswordShare(shareId: string): Promise<void> {
   }
 }
 
-export type SharedBook = { items: Keepsake[]; categories: Category[]; objectUrls: string[] };
+export type SharedBook = { items: Keepsake[]; categories: Category[]; settings: GallerySettings; objectUrls: string[] };
 
 export async function openPasswordShare(
   token: ShareId,
@@ -469,7 +497,7 @@ export async function openPasswordShare(
         voices,
       };
     });
-    return { items, categories: manifest.categories, objectUrls };
+    return { items, categories: manifest.categories, settings: normalizeGallerySettings(DEFAULT_GALLERY_SETTINGS), objectUrls };
   } catch {
     objectUrls.forEach((url) => URL.revokeObjectURL(url));
     throw new Error('共有データの読み込みに失敗しました。通信を確認し、パスワードを入れ直してください。');

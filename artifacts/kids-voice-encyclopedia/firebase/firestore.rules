@@ -154,6 +154,27 @@ service cloud.firestore {
         && request.resource.data.name.size() <= 24
         && request.resource.data.createdAt is timestamp;
     }
+    match /users/{uid}/settings/{settingId} {
+      function owner() { return request.auth != null && request.auth.uid == uid; }
+      function validGallerySettings(data) {
+        return data.keys().hasAll(['categoryOrder', 'cardOrderByCategory', 'displayMode', 'shuffleSeed', 'updatedAt'])
+          && data.keys().hasOnly(['categoryOrder', 'cardOrderByCategory', 'displayMode', 'shuffleSeed', 'updatedAt'])
+          && data.categoryOrder is list
+          && data.categoryOrder.size() <= 500
+          && data.cardOrderByCategory is map
+          && data.cardOrderByCategory.keys().size() <= 500
+          && data.displayMode in ['ordered', 'shuffle']
+          && data.shuffleSeed is int
+          && data.shuffleSeed >= 0
+          && data.shuffleSeed <= 4294967295
+          && data.updatedAt == request.time;
+      }
+      allow read: if owner();
+      allow create, update: if owner()
+        && settingId == 'gallery'
+        && validGallerySettings(request.resource.data);
+      allow delete: if false;
+    }
     match /users/{uid}/shares/{shareId} {
       function owner() { return request.auth != null && request.auth.uid == uid; }
       function validEncryptedShare(data) {
@@ -223,6 +244,25 @@ service cloud.firestore {
           && request.resource.data.name.size() > 0
           && request.resource.data.name.size() <= 24
           && request.resource.data.createdAt is number;
+        allow delete: if owner();
+      }
+      match /settings/{settingId} {
+        function validGalleryProjection(data) {
+          return data.keys().hasAll(['categoryOrder', 'cardOrderByCategory', 'displayMode', 'shuffleSeed'])
+            && data.keys().hasOnly(['categoryOrder', 'cardOrderByCategory', 'displayMode', 'shuffleSeed'])
+            && data.categoryOrder is list
+            && data.categoryOrder.size() <= 500
+            && data.cardOrderByCategory is map
+            && data.cardOrderByCategory.keys().size() <= 500
+            && data.displayMode in ['ordered', 'shuffle']
+            && data.shuffleSeed is int
+            && data.shuffleSeed >= 0
+            && data.shuffleSeed <= 4294967295;
+        }
+        allow read: if owner() || activeLiveShare();
+        allow create, update: if owner()
+          && settingId == 'gallery'
+          && validGalleryProjection(request.resource.data);
         allow delete: if owner();
       }
     }

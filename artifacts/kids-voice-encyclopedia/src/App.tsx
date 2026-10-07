@@ -16,6 +16,7 @@ import {
   Plus,
   RotateCcw,
   Scissors,
+  Settings,
   Share2,
   Sparkles,
   Trash2,
@@ -35,11 +36,13 @@ import { VoicePlayback, VoiceShuffleBag } from './lib/voicePlayback';
 import DetailDialogShell from './components/DetailDialogShell';
 import StartScreen from './components/StartScreen';
 import ShareDialog from './components/ShareDialog';
+import SettingsDialog from './components/SettingsDialog';
 import SharePasswordGate from './components/SharePasswordGate';
 import ModeLockDialog from './components/ModeLockDialog';
 import { useCategories } from './hooks/useCategories';
 import { filterByCategory } from './lib/categories';
-import { deleteKeepsake, editKeepsake, firebaseError, saveKeepsake, subscribeKeepsakes, subscribeLiveShare, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
+import { DEFAULT_GALLERY_SETTINGS, orderCategories, sortGalleryItems, type GallerySettings } from './lib/gallerySettings';
+import { deleteKeepsake, editKeepsake, firebaseError, saveGallerySettings, saveKeepsake, subscribeGallerySettings, subscribeKeepsakes, subscribeLiveShare, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
 import type { SharedBook, ShareId } from './lib/shareRepository';
 import { decodeShareToken } from './lib/shareCrypto';
 import { getVoices, type VoiceAsset } from './lib/voiceAssets';
@@ -73,6 +76,14 @@ function App() {
   const [localReadOnly, setLocalReadOnly] = useState(false);
   const [unlockOpen, setUnlockOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [gallerySettings, setGallerySettings] = useState<GallerySettings>(() => ({
+    ...DEFAULT_GALLERY_SETTINGS,
+    categoryOrder: [...DEFAULT_GALLERY_SETTINGS.categoryOrder],
+    cardOrderByCategory: {},
+  }));
+  const [settingsIssue, setSettingsIssue] = useState('');
+  const [settingsLoading, setSettingsLoading] = useState(true);
   const [view, setView] = useState<'start' | 'library'>(shareRoute ? 'library' : 'start');
   const [createOpen, setCreateOpen] = useState(false);
   const [detail, setDetail] = useState<Keepsake | null>(null);
@@ -104,13 +115,45 @@ function App() {
   const [editOpen, setEditOpen] = useState(false);
   const localDraft = useNewKeepsakeDraft();
   const { categories, error: categoryIssue, create: createCategoryEntry, describeError } = useCategories(connectionAttempt, !shareRoute);
+  useEffect(() => {
+    if (shareRoute) {
+      setSettingsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+    setSettingsLoading(true);
+    setSettingsIssue('');
+    const fail = (caught: unknown) => {
+      if (cancelled) return;
+      const code = caught && typeof caught === 'object' && 'code' in caught
+        ? (caught as { code?: string }).code
+        : undefined;
+      setSettingsIssue(code === 'permission-denied'
+        ? 'Firestore の設定読み取りが拒否されました。firebase/firestore.rules の更新をFirebase Consoleで公開し、「再接続」を押してください。'
+        : firebaseError(caught));
+      setSettingsLoading(false);
+    };
+    subscribeGallerySettings((next) => {
+      if (cancelled) return;
+      setGallerySettings(next);
+      setSettingsIssue('');
+      setSettingsLoading(false);
+    }, fail).then((stop) => {
+      if (cancelled) stop();
+      else unsubscribe = stop;
+    }).catch(fail);
+    return () => { cancelled = true; unsubscribe?.(); };
+  }, [connectionAttempt, shareRoute]);
   const readOnly = !!shareRoute || localReadOnly;
   const shownItems = sharedBook?.items ?? items;
-  const shownCategories = sharedBook?.categories ?? categories;
-  const visibleItems = filterByCategory(shownItems, selectedCategory);
+  const activeGallerySettings = sharedBook?.settings ?? gallerySettings;
+  const shownCategories = orderCategories(sharedBook?.categories ?? categories, activeGallerySettings);
+  const visibleItems = sortGalleryItems(filterByCategory(shownItems, selectedCategory), shownCategories, activeGallerySettings, selectedCategory);
   const categoryName = (id: string | null | undefined) => shownCategories.find((c) => c.id === id)?.name;
   const recordingSession = useRef(0);
   const createDraftSession = useRef(0);
+  const draftCancelled = useRef(false);
   const pendingId = useRef<string | null>(null);
   const mutationLock = useRef(false);
   const voiceShuffleBags = useRef(new Map<string, VoiceShuffleBag<VoiceAsset>>());
@@ -300,7 +343,7 @@ function App() {
 
   useEffect(() => {
     if (!createOpen || !draftReady) return;
-    const flush = () => { void localDraft.saveNow(latestDraft.current); };
+    const flush = () => { if (!draftCancelled.current) void localDraft.saveNow(latestDraft.current); };
     const onVisibilityChange = () => {
       if (document.visibilityState === 'hidden') flush();
     };
@@ -352,7 +395,7 @@ function App() {
       return;
     }
     setError('');
-    if (playback.isActive(item.id)) { stopPlayback(); return; }
+    if (playback.isActive(item.id)) { playback.restart(item.id); return; }
     let bag = voiceShuffleBags.current.get(item.id);
     if (!bag) {
       bag = new VoiceShuffleBag((candidate) => candidate.id);
@@ -364,6 +407,7 @@ function App() {
 
   const openCreate = () => {
     if (busy) return;
+    draftCancelled.current = false;
     preloadRecordingGuide();
     // The request starts on the create-button gesture and releases the
     // temporary stream as soon as permission is confirmed.
@@ -406,7 +450,10 @@ function App() {
   const closeCreate = () => {
     if (busy) return;
     createDraftSession.current++;
-    if (draftReady) void localDraft.saveNow(latestDraft.current);
+    draftCancelled.current = true;
+    // Closing is an explicit cancel. pagehide/visibilitychange still flushes
+    // the draft for unexpected exits, but a deliberate close discards it.
+    void localDraft.clear();
     recordingSession.current++;
     rec.cancel();
     setProcessingVoice(false);
@@ -478,6 +525,7 @@ function App() {
         createdAt: Date.now(),
         categoryId: cardCategory,
       });
+      draftCancelled.current = true;
       const draftCleared = await localDraft.clear();
       if (!draftCleared) {
         setError('キロクは保存されましたが、この端末の下書きを消去できませんでした。保存ボタンをもう一度押して再試行してください。');
@@ -550,7 +598,7 @@ function App() {
 
   return (
     <div className="app-shell">
-      <header className="topbar" inert={createOpen || !!detail || categoryOpen || shareOpen || unlockOpen}>
+      <header className="topbar" inert={createOpen || !!detail || categoryOpen || shareOpen || settingsOpen || unlockOpen}>
         <button type="button" className="brand brand-home" onClick={() => setView('start')} disabled={readOnly} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
           <span className="brand-mark"><BookOpen size={20} strokeWidth={1.8} /></span>
           <h1 className="brand-title" style={{ margin: 0 }}>こどもの こえずかん</h1>
@@ -560,6 +608,7 @@ function App() {
           {readOnly
             ? !shareRoute && <button type="button" className="header-mode-button" onClick={() => setUnlockOpen(true)} data-testid="button-unlock-edit-mode"><LockKeyhole size={15} /><span>編集をひらく</span></button>
             : <>
+              {view === 'library' && <button type="button" className="header-settings-button" onClick={() => { stopPlayback(); setSettingsOpen(true); }} disabled={settingsLoading || !!settingsIssue} aria-label="ずかんの設定" title="ずかんの設定" data-testid="button-settings"><Settings size={17} /></button>}
               <button type="button" className="header-mode-button" onClick={enterReadOnly} aria-label="閲覧専用モードにする" data-testid="button-enter-readonly"><Eye size={16} /><span>閲覧モード</span></button>
               {isFirebaseConfigured && <button type="button" className="header-share-button" onClick={() => { createDraftSession.current++; setShareOpen(true); }} aria-label="ずかんを共有する" data-testid="button-share-encyclopedia"><Share2 size={15} /><span>共有</span></button>}
             </>}
@@ -575,17 +624,20 @@ function App() {
           </section>
         </main>
       ) : shareRoute && shareMode === 'legacy' && !sharedBook ? <SharePasswordGate token={shareRoute.token} onUnlocked={acceptSharedBook} /> : view === 'start' && !readOnly ? (
-        <main className="start-main" inert={createOpen || !!detail || categoryOpen || shareOpen || unlockOpen}>
+        <main className="start-main" inert={createOpen || !!detail || categoryOpen || shareOpen || settingsOpen || unlockOpen}>
           <StartScreen onRecord={openCreate} onOpenEncyclopedia={() => { createDraftSession.current++; setView('library'); }} />
         </main>
       ) : (
-      <main className="page-main" inert={createOpen || !!detail || categoryOpen || shareOpen || unlockOpen}>
+      <main className="page-main" inert={createOpen || !!detail || categoryOpen || shareOpen || settingsOpen || unlockOpen}>
         <CategoryBar categories={shownCategories} selected={selectedCategory} onSelect={(id) => { stopPlayback(); setSelectedCategory(id); }} onNew={() => setCategoryOpen(true)} disabled={busy} readOnly={readOnly} />
         {!shareRoute && categoryIssue && <div className="notice" role="alert" data-testid="status-categories-load-error"><AlertCircle size={16} />{categoryIssue}
           <button type="button" className="record-button" onClick={() => setConnectionAttempt((value) => value + 1)} disabled={busy}>再接続</button>
         </div>}
         {!shareRoute && storageIssue && <div className="notice" role="alert" data-testid="status-storage-error"><AlertCircle size={16} />{storageIssue}
           {isFirebaseConfigured && <button type="button" className="record-button" onClick={() => setConnectionAttempt((value) => value + 1)} disabled={busy}>再接続</button>}
+        </div>}
+        {!shareRoute && settingsIssue && <div className="notice" role="alert" data-testid="status-gallery-settings-error"><AlertCircle size={16} /><span className="notice-message">並び替え設定を読み込めませんでした。{settingsIssue}</span>
+          <button type="button" className="record-button" onClick={() => setConnectionAttempt((value) => value + 1)} disabled={busy || settingsLoading}>再接続</button>
         </div>}
         {error && !createOpen && !detail && <p className="form-error" role="alert">{error}</p>}
 
@@ -792,7 +844,22 @@ function App() {
           }}
         />
       )}
-      {shareOpen && !readOnly && <ShareDialog items={items} categories={categories} onClose={() => setShareOpen(false)} />}
+      {shareOpen && !readOnly && <ShareDialog items={items} categories={categories} settings={gallerySettings} onClose={() => setShareOpen(false)} />}
+      {settingsOpen && !readOnly && <SettingsDialog
+        categories={shownCategories}
+        items={shownItems}
+        settings={gallerySettings}
+        onClose={() => setSettingsOpen(false)}
+        onSave={async (next) => {
+          try {
+            await saveGallerySettings(next);
+            setGallerySettings(next);
+            setSettingsIssue('');
+          } catch (caught) {
+            throw new Error(firebaseError(caught));
+          }
+        }}
+      />}
       {unlockOpen && readOnly && <ModeLockDialog onClose={() => setUnlockOpen(false)} onUnlock={finishUnlock} />}
     </div>
   );

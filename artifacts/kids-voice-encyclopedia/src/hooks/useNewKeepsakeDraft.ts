@@ -21,6 +21,7 @@ export function useNewKeepsakeDraft() {
 
   const load = useCallback(async () => {
     try {
+      await queue.current.catch(() => undefined);
       const draft = await store.read();
       setStatus(draft ? 'saved' : 'idle');
       setError('');

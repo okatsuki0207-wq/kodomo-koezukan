@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Check, Copy, Eye, Link2, LockKeyhole, Share2, Trash2, X } from 'lucide-react';
 import type { Category } from '../lib/categories';
+import type { GallerySettings } from '../lib/gallerySettings';
 import type { Keepsake } from '../lib/keepsakeRepository';
 import { createLiveShare, firebaseError, listPasswordShares, revokePasswordShare } from '../lib/keepsakeStore';
 import { createShareUrl } from '../lib/shareCrypto';
@@ -10,6 +11,7 @@ import { useDialogFocus } from '../hooks/useDialogFocus';
 type Props = {
   items: readonly Keepsake[];
   categories: readonly Category[];
+  settings: GallerySettings;
   onClose: () => void;
 };
 
@@ -26,7 +28,7 @@ function userError(caught: unknown, fallback: string) {
   return /^[ぁ-んァ-ヶ一-龠]/u.test(message) ? message : fallback;
 }
 
-export default function ShareDialog({ items, categories, onClose }: Props) {
+export default function ShareDialog({ items, categories, settings, onClose }: Props) {
   const dialog = useRef<HTMLDivElement>(null);
   const [shares, setShares] = useState<ShareSummary[]>([]);
   const [link, setLink] = useState<LinkState | null>(null);
@@ -57,7 +59,7 @@ export default function ShareDialog({ items, categories, onClose }: Props) {
     setError(''); setNotice('');
     setBusy(true);
     try {
-      const created = await createLiveShare(items, categories);
+      const created = await createLiveShare(items, categories, settings);
       const url = createShareUrl(created.ownerUid, created.shareId, window.location.href);
       setLink({ ...created, url });
       await refresh();

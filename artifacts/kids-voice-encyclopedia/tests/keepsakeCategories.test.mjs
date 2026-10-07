@@ -79,6 +79,10 @@ if (!vm.SourceTextModule) {
         subscribeLiveShare: async () => () => {},
         syncLiveShareProjections: async () => {},
       },
+      './gallerySettings': {
+        DEFAULT_GALLERY_SETTINGS: { categoryOrder: [], cardOrderByCategory: {}, displayMode: 'ordered', shuffleSeed: 0 },
+        normalizeGallerySettings: (settings) => settings,
+      },
     };
     const categories = new vm.SourceTextModule(
       stripTypeScriptTypes(await readFile(new URL('../src/lib/categories.ts', import.meta.url), 'utf8')),

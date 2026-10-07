@@ -96,3 +96,13 @@ test('successful cloud save clears the local draft afterward', () => {
   const clearDraft = appSource.indexOf('await localDraft.clear()', cloudSave);
   assert.ok(cloudSave >= 0 && clearDraft > cloudSave);
 });
+
+test('explicitly closing the create form discards the draft and suppresses a delayed pagehide flush', () => {
+  const closeStart = appSource.indexOf('const closeCreate = () =>');
+  const closeEnd = appSource.indexOf('const onPhotoChange =', closeStart);
+  const closeCreate = appSource.slice(closeStart, closeEnd);
+  assert.match(closeCreate, /draftCancelled\.current = true/u);
+  assert.match(closeCreate, /void localDraft\.clear\(\)/u);
+  assert.doesNotMatch(closeCreate, /localDraft\.saveNow/u);
+  assert.match(appSource, /const flush = \(\) => \{ if \(!draftCancelled\.current\) void localDraft\.saveNow/u);
+});
