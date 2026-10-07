@@ -5,16 +5,27 @@ const GUIDE_URL = `${import.meta.env?.BASE_URL ?? '/'}assets/audio/voice_what_is
 // Start fetching the tiny, fixed voice as soon as this module loads. Playback
 // still calls play() directly inside the recording button's tap handler.
 const preloadedGuideAudio = typeof Audio === 'undefined' ? null : new Audio(GUIDE_URL);
-if (preloadedGuideAudio) {
-  preloadedGuideAudio.preload = 'auto';
-  preloadedGuideAudio.load();
+function ensureGuideLoaded(audio: HTMLAudioElement) {
+  audio.preload = 'auto';
+  // load() restarts an in-flight request in some browsers. Only start/retry it
+  // when there is no active request or the previous request failed.
+  if (audio.networkState === 0 || audio.networkState === 3 || audio.error) {
+    try { audio.load(); } catch { /* playback will report a useful error */ }
+  }
 }
+function rewindWhenReady(audio: HTMLAudioElement) {
+  // Safari can throw InvalidStateError when currentTime is assigned before
+  // preload has established a media timeline. A fresh audio element already
+  // starts at zero, so defer rewinding until metadata exists.
+  if (audio.readyState < 1) return;
+  try { audio.currentTime = 0; } catch { /* play() can still start/restart the clip */ }
+}
+if (preloadedGuideAudio) ensureGuideLoaded(preloadedGuideAudio);
 
 /** Warm the fixed guide again as soon as the creation form is opened. */
 export function preloadRecordingGuide() {
   if (!preloadedGuideAudio) return;
-  preloadedGuideAudio.preload = 'auto';
-  preloadedGuideAudio.load();
+  ensureGuideLoaded(preloadedGuideAudio);
 }
 
 export function recordingCue(
@@ -23,13 +34,15 @@ export function recordingCue(
 ) {
   const usingPreloaded = !createAudio && url === GUIDE_URL && preloadedGuideAudio !== null;
   const audio = createAudio ? createAudio(url) : usingPreloaded ? preloadedGuideAudio : new Audio(url);
-  audio.preload = 'auto';
+  try { audio.preload = 'auto'; } catch { /* playback remains the source of truth */ }
   // A small rate increase makes the guide brighter without replacing its voice.
   // Disable pitch preservation where supported so the voice actually sounds higher.
-  audio.playbackRate = 1.12;
-  audio.preservesPitch = false;
-  const prefixed = audio as HTMLAudioElement & { webkitPreservesPitch?: boolean };
-  if ('webkitPreservesPitch' in prefixed) prefixed.webkitPreservesPitch = false;
+  try { audio.playbackRate = 1.12; } catch { /* use the browser's default rate */ }
+  try {
+    audio.preservesPitch = false;
+    const prefixed = audio as HTMLAudioElement & { webkitPreservesPitch?: boolean };
+    if ('webkitPreservesPitch' in prefixed) prefixed.webkitPreservesPitch = false;
+  } catch { /* pitch adjustment is optional */ }
   const getDurationMs = () => Number.isFinite(audio.duration) && audio.duration > 0
     ? Math.round((audio.duration / audio.playbackRate) * 1000)
     : 5000;
@@ -37,7 +50,7 @@ export function recordingCue(
     ? Math.min(1, Math.max(0, audio.currentTime / audio.duration))
     : 0;
   // Rewind a previously used shared element without discarding its cached data.
-  if (usingPreloaded) audio.currentTime = 0;
+  if (usingPreloaded) rewindWhenReady(audio);
   let resolve: () => void = () => {};
   let reject: (error: Error) => void = () => {};
   let watchdog: ReturnType<typeof setTimeout> | undefined;
@@ -50,7 +63,7 @@ export function recordingCue(
     audio.onended = null; audio.onerror = null;
     audio.pause();
     if (usingPreloaded) {
-      audio.currentTime = 0;
+      rewindWhenReady(audio);
     } else {
       audio.removeAttribute('src'); audio.load();
     }

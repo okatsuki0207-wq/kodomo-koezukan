@@ -83,6 +83,59 @@ test('guide cancellation and load failure reject instead of permitting recording
   const error = assert.rejects(failed.finished, /ガイドボイス/);
   failedAudio.onerror(); await error;
 });
+test('preloaded guide is not reloaded while in flight and rewind waits for media metadata', async () => {
+  const originalAudio = globalThis.Audio;
+  class PendingAudio {
+    static instances = [];
+    readyState = 0;
+    networkState = 2;
+    error = null;
+    onended = null;
+    onerror = null;
+    loadCalls = 0;
+    playCalls = 0;
+    paused = 0;
+    _currentTime = 0;
+    preload = '';
+    playbackRate = 1;
+    preservesPitch = true;
+    get currentTime() { return this._currentTime; }
+    set currentTime(value) {
+      if (this.readyState < 1) throw new DOMException('No media timeline yet', 'InvalidStateError');
+      this._currentTime = value;
+    }
+    constructor(src) { this.src = src; PendingAudio.instances.push(this); }
+    load() { this.loadCalls++; }
+    play() { this.playCalls++; return Promise.resolve(); }
+    pause() { this.paused++; }
+    removeAttribute() {}
+  }
+  globalThis.Audio = PendingAudio;
+  try {
+    const source = await readFile(new URL('../src/lib/recordingCue.ts', import.meta.url), 'utf8');
+    const isolated = await import(`data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString('base64')}#preload-rewind`);
+    const audio = PendingAudio.instances[0];
+    // A new Audio(url) is already fetching; opening the form must not cancel and
+    // restart that request by calling load() again.
+    isolated.preloadRecordingGuide();
+    assert.equal(audio.loadCalls, 0);
+
+    audio.networkState = 3;
+    isolated.preloadRecordingGuide();
+    assert.equal(audio.loadCalls, 1);
+    audio.networkState = 2;
+
+    const cue = isolated.recordingCue();
+    assert.equal(audio.playCalls, 1);
+    assert.equal(audio._currentTime, 0);
+    audio.onended();
+    await cue.finished;
+    assert.equal(audio.paused, 1);
+  } finally {
+    if (originalAudio === undefined) delete globalThis.Audio;
+    else globalThis.Audio = originalAudio;
+  }
+});
 
 test('long press tolerates small finger jitter but cancels drags and scroll-sized movement', () => {
   assert.equal(gesture.LONG_PRESS_MS, 550);
