@@ -400,7 +400,16 @@ function App() {
     setError('');
     pendingId.current ??= crypto.randomUUID();
     try {
-      await saveKeepsake({ id: pendingId.current, itemName: cleanItemName, photo, voice, createdAt: Date.now(), categoryId: cardCategory });
+      await saveKeepsake({
+        id: pendingId.current,
+        itemName: cleanItemName,
+        photo,
+        voice,
+        photoBlob: pendingPhotoBlob ?? undefined,
+        voiceBlob: voiceBlob ?? undefined,
+        createdAt: Date.now(),
+        categoryId: cardCategory,
+      });
       const draftCleared = await localDraft.clear();
       if (!draftCleared) {
         setError('キロクは保存されましたが、この端末の下書きを消去できませんでした。保存ボタンをもう一度押して再試行してください。');
@@ -557,9 +566,6 @@ function App() {
               <div><h2 id="create-title" className="dialog-title">新しいキロクをつくる</h2><p className="dialog-lede">お気に入りの写真と声をいっしょに残します。</p></div>
               <button type="button" className="icon-button" disabled={busy} onClick={closeCreate} aria-label="閉じる" data-testid="button-close-create"><X size={19} /></button>
             </div>
-            {localDraft.status === 'error'
-              ? <p className="notice draft-notice" role="status" data-testid="status-draft-error"><CircleHelp size={15} />{localDraft.error}</p>
-              : <p className="draft-autosave" role="status">{draftLoading ? '下書きを確認しています…' : localDraft.status === 'saving' ? 'この端末に下書きを保存しています…' : '入力内容はこの端末に自動保存されます。'}</p>}
             <div className="form-block">
               <label className="field-label" htmlFor="keepsake-item-name">なまえ</label>
               <p className="field-hint">写真のものの名前を入力してください。</p>
@@ -589,7 +595,7 @@ function App() {
                   <div className="record-title"><Mic size={16} /> 声をのこす <span className="record-status" role="status" aria-live="polite">{rec.guiding ? 'これはなーに？' : recording ? `録音中 ${formatTime(recordSeconds)}` : voice ? '録音できました' : 'あとからでも大丈夫'}</span></div>
                   {recording && <div className="recording-wave" aria-label="録音中"><i /><i /><i /><i /><i /><i /><i /></div>}
                 </div>
-                <RecordingGuide name={itemName} phase={rec.guiding ? 'guide' : recording ? 'recording' : 'idle'} />
+                <RecordingGuide name={itemName} phase={rec.guiding || rec.starting ? 'guide' : recording ? 'recording' : 'idle'} />
                 <div className="record-actions">
                   {recording ? (
                     <button type="button" className="record-button danger" onClick={stopRecording} data-testid="button-stop-recording"><span className="recording-dot" /> 録音をとめる</button>

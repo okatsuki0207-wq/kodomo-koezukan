@@ -229,7 +229,7 @@ export default function EditCardDialog({ item, categories, onSave, describeError
           </div>
           <div className="form-block">
             <span className="field-label"><Mic size={14} /> 声（{slots.length}/{MAX_VOICES}）</span>
-            {(rec.starting || rec.recording) && <RecordingGuide name={name} phase={rec.guiding ? 'guide' : rec.recording ? 'recording' : 'idle'} />}
+            {(rec.starting || rec.recording) && <RecordingGuide name={name} phase={rec.guiding || rec.starting ? 'guide' : rec.recording ? 'recording' : 'idle'} />}
             {slots.length === 0 && <p className="field-hint">まだ声がありません。マイクで録音して追加できます。</p>}
             <ul className="em-voices">
               {slots.map((slot, index) => {

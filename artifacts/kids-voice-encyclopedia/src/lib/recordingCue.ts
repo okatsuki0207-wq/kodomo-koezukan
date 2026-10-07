@@ -1,5 +1,5 @@
-/** Fixed local guide voice. Microphone recording waits for ended + an acoustic
- * tail. Never silently skip a failed guide or start recording after cancellation. */
+/** Fixed local guide voice. Recording starts as soon as playback ends.
+ * Never silently skip a failed guide or start recording after cancellation. */
 const GUIDE_URL = `${import.meta.env?.BASE_URL ?? '/'}assets/audio/voice_what_is_this.mp3`;
 
 // Start fetching the tiny, fixed voice as soon as this module loads. Playback
@@ -34,14 +34,13 @@ export function recordingCue(
   if (usingPreloaded) audio.currentTime = 0;
   let resolve: () => void = () => {};
   let reject: (error: Error) => void = () => {};
-  let tail: ReturnType<typeof setTimeout> | undefined;
   let watchdog: ReturnType<typeof setTimeout> | undefined;
   let done = false;
   const finished = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
   const finish = (error?: Error) => {
     if (done) return;
     done = true;
-    clearTimeout(tail); clearTimeout(watchdog);
+    clearTimeout(watchdog);
     audio.onended = null; audio.onerror = null;
     audio.pause();
     if (usingPreloaded) {
@@ -51,7 +50,7 @@ export function recordingCue(
     }
     if (error) reject(error); else resolve();
   };
-  audio.onended = () => { if (!done) tail = setTimeout(() => finish(), 180); };
+  audio.onended = () => finish();
   audio.onerror = () => finish(new Error('ガイドボイスを読み込めませんでした。通信を確認して、もう一度録音ボタンを押してください。'));
   watchdog = setTimeout(() => finish(new Error('ガイドボイスの再生が完了しませんでした。もう一度録音ボタンを押してください。')), 20_000);
   // play() must run synchronously inside the user's tap, before permissions.

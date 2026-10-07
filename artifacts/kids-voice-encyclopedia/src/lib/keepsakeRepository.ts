@@ -9,6 +9,9 @@ export type Keepsake = {
   itemName: string;
   photo: string;
   voice: string | null;
+  /** Optional in-memory bytes avoid re-fetching restored IndexedDB Blob URLs. */
+  photoBlob?: Blob;
+  voiceBlob?: Blob;
   createdAt: number;
   photoPath?: string;
   voicePath?: string | null;
@@ -60,10 +63,15 @@ export function createKeepsakeRepository(
     }), timeoutMs);
     let commitStarted = false;
     try {
-      const put = async (source: string, kind: 'photo' | 'voice') => {
-        const response = await fetch(source);
-        if (!response.ok) throw new Error('画像または音声を読み込めませんでした。');
-        const blob = await response.blob();
+      const put = async (source: string | Blob, kind: 'photo' | 'voice') => {
+        let blob: Blob;
+        if (typeof source === 'string') {
+          const response = await fetch(source);
+          if (!response.ok) throw new Error('画像または音声を読み込めませんでした。');
+          blob = await response.blob();
+        } else {
+          blob = source;
+        }
         if (!blob.type.startsWith(kind === 'photo' ? 'image/' : 'audio/')) throw new Error('ファイル形式が正しくありません。');
         if (!blob.size) throw new Error('ファイルが空です。写真または音声を選び直してください。');
         if (blob.size >= 20 * 1024 * 1024) throw new Error('ファイルは20MB未満にしてください。');
@@ -76,8 +84,10 @@ export function createKeepsakeRepository(
         try { return { url: await io.getDownloadURL(file), path }; }
         catch (error) { throw await io.diagnoseStorageError(error, file.bucket); }
       };
-      const photo = await put(item.photo, 'photo');
-      const voice = item.voice ? await put(item.voice, 'voice') : null;
+      const photo = await put(item.photoBlob ?? item.photo, 'photo');
+      const voice = item.voiceBlob || item.voice
+        ? await put(item.voiceBlob ?? item.voice!, 'voice')
+        : null;
       commitStarted = true;
       const committed = await deadline(io.runTransaction(db, async (transaction) => {
         const existing = await transaction.get(record);

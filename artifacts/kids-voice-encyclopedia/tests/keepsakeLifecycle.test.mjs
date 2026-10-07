@@ -220,6 +220,19 @@ async function reload(repo) {
   return items;
 }
 
+test('restored photo and voice Blobs upload without fetching temporary object URLs', async () => {
+  await repository().saveKeepsake({
+    ...item('restored-blob'),
+    photo: 'blob:expired-photo-url',
+    voice: 'blob:expired-voice-url',
+    photoBlob: new Blob([photoBytes], { type: 'image/png' }),
+    voiceBlob: new Blob([voiceBytes], { type: 'audio/wav' }),
+  });
+  const value = await stored('restored-blob');
+  assert.deepEqual(Buffer.from(await getBytes(ref(alice.storage, value.photoPath))), photoBytes);
+  assert.deepEqual(Buffer.from(await getBytes(ref(alice.storage, value.voicePath))), voiceBytes);
+});
+
 test('photo and voice upload → Firestore URLs → fresh subscription → playback bytes → deletion', async () => {
   await repository().saveKeepsake(item('lifecycle'));
   const value = await stored('lifecycle');

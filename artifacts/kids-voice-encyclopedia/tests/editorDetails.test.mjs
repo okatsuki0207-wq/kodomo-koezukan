@@ -45,7 +45,7 @@ class GuideAudio {
   load() {}
   removeAttribute() {}
 }
-test('guide voice begins from tap and resolves only after ended plus acoustic tail', async () => {
+test('guide voice begins from tap and recording can proceed immediately after ended', async () => {
   const audio = new GuideAudio();
   const cue = recordingCue('/test-guide.mp3', () => audio);
   assert.equal(audio.played, 1);
@@ -56,7 +56,6 @@ test('guide voice begins from tap and resolves only after ended plus acoustic ta
   await new Promise((r) => setTimeout(r, 10));
   assert.equal(finished, false);
   audio.onended();
-  assert.equal(finished, false);
   await cue.finished;
   assert.equal(finished, true);
   assert.equal(audio.onended, null);

@@ -153,8 +153,6 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(194, 104, 78
 .record-button.primary {background:#bd7057;border-color:#bd7057;color:#fff9ee;}
 .record-button.danger {color:#aa5c4b;border-color:#dfc2b4;}
 .record-button:disabled {opacity:.48;cursor:not-allowed;}
-.draft-autosave {margin:-11px 0 16px;color:#9a8d7e;font-size:10px;line-height:1.6;}
-.draft-notice {margin:0 0 14px;}
 .new-waveform-panel {margin-top:10px;padding:12px;border:1px solid #e2d5c2;border-radius:13px;background:#fffdf8;overflow:hidden;}
 .waveform-toggle {margin-top:10px;}
 .waveform-chevron {transition:transform .18s ease;}

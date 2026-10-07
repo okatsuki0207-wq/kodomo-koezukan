@@ -87,6 +87,10 @@ test('startup silently opens the populated form without a restore notice or manu
   assert.doesNotMatch(startScreenSource, /onResumeDraft|button-resume-draft|status-start-draft/u);
 });
 
+test('local draft status text and alerts are not shown in the create form', () => {
+  assert.doesNotMatch(appSource, /draft-autosave|draft-notice|status-draft-error|この端末に自動保存|下書きを確認しています/u);
+});
+
 test('successful cloud save clears the local draft afterward', () => {
   const cloudSave = appSource.indexOf('await saveKeepsake({');
   const clearDraft = appSource.indexOf('await localDraft.clear()', cloudSave);
