@@ -60,6 +60,16 @@ test('guide voice begins from tap and recording can proceed immediately after en
   assert.equal(finished, true);
   assert.equal(audio.onended, null);
 });
+test('guide playback supports browsers where play() starts audio but returns no Promise', async () => {
+  const audio = new GuideAudio();
+  audio.play = function () { this.played++; return undefined; };
+  const cue = recordingCue('/legacy-safari-guide.mp3', () => audio);
+  assert.equal(audio.played, 1);
+  await Promise.resolve();
+  assert.equal(typeof audio.onended, 'function');
+  audio.onended();
+  await cue.finished;
+});
 
 test('microphone preflight requests audio permission and releases every temporary track', async () => {
   const stopped = [];

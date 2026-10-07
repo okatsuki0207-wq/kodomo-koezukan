@@ -74,7 +74,10 @@ export function recordingCue(
   watchdog = setTimeout(() => finish(new Error('ガイドボイスの再生が完了しませんでした。もう一度録音ボタンを押してください。')), 20_000);
   // play() must run synchronously inside the user's tap, before permissions.
   try {
-    void audio.play().catch(() => finish(new Error('ガイドボイスを再生できませんでした。もう一度録音ボタンを押してください。')));
+    // Older Safari versions may start playback but return undefined instead
+    // of a Promise. Promise.resolve preserves the synchronous play() call and
+    // handles both forms without stopping a successfully-started guide.
+    void Promise.resolve(audio.play()).catch(() => finish(new Error('ガイドボイスを再生できませんでした。もう一度録音ボタンを押してください。')));
   } catch {
     finish(new Error('ガイドボイスを再生できませんでした。'));
   }
