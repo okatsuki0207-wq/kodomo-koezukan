@@ -185,11 +185,21 @@ function App() {
   }, [items, selectedCategory, playback, sharedBook]);
 
   useEffect(() => {
-    const currentIds = new Set(items.map((item) => item.id));
+    const currentIds = new Set(shownItems.map((item) => item.id));
     for (const id of voiceShuffleBags.current.keys()) {
       if (!currentIds.has(id)) voiceShuffleBags.current.delete(id);
     }
-  }, [items]);
+    for (const item of shownItems) {
+      const voices = getVoices(item);
+      if (!voices.length) continue;
+      let bag = voiceShuffleBags.current.get(item.id);
+      if (!bag) {
+        bag = new VoiceShuffleBag((candidate) => candidate.id);
+        voiceShuffleBags.current.set(item.id, bag);
+      }
+      bag.prepare(voices);
+    }
+  }, [shownItems]);
 
   useEffect(() => {
     if (shareRoute) {

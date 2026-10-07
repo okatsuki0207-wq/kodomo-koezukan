@@ -18,7 +18,7 @@ export class VoiceShuffleBag<T> {
     this.random = random;
   }
 
-  next(items: readonly T[]): T | undefined {
+  prepare(items: readonly T[]) {
     const current = new Map<string, T>();
     for (const item of items) {
       const key = this.keyOf(item);
@@ -29,7 +29,7 @@ export class VoiceShuffleBag<T> {
       this.remaining = [];
       this.previousKey = null;
       this.signature = '';
-      return undefined;
+      return;
     }
 
     const signature = JSON.stringify([...keys].sort());
@@ -38,22 +38,27 @@ export class VoiceShuffleBag<T> {
       this.remaining = [];
     }
 
-    if (!this.remaining.length) {
-      const shuffled = keys.slice();
-      for (let i = shuffled.length - 1; i > 0; i--) {
-        const value = this.random();
-        const safeValue = Number.isFinite(value) ? Math.min(0.999999999999, Math.max(0, value)) : 0;
-        const j = Math.floor(safeValue * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-      }
-      if (shuffled.length > 1 && shuffled[0] === this.previousKey) {
-        const value = this.random();
-        const safeValue = Number.isFinite(value) ? Math.min(0.999999999999, Math.max(0, value)) : 0;
-        const swapIndex = 1 + Math.floor(safeValue * (shuffled.length - 1));
-        [shuffled[0], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[0]];
-      }
-      this.remaining = shuffled;
+    if (this.remaining.length) return;
+    const shuffled = keys.slice();
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const value = this.random();
+      const safeValue = Number.isFinite(value) ? Math.min(0.999999999999, Math.max(0, value)) : 0;
+      const j = Math.floor(safeValue * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
     }
+    if (shuffled.length > 1 && shuffled[0] === this.previousKey) {
+      const value = this.random();
+      const safeValue = Number.isFinite(value) ? Math.min(0.999999999999, Math.max(0, value)) : 0;
+      const swapIndex = 1 + Math.floor(safeValue * (shuffled.length - 1));
+      [shuffled[0], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[0]];
+    }
+    this.remaining = shuffled;
+  }
+
+  next(items: readonly T[]): T | undefined {
+    this.prepare(items);
+    if (!this.remaining.length) return undefined;
+    const current = new Map(items.map((item) => [this.keyOf(item), item]));
 
     const key = this.remaining.shift();
     if (!key) return undefined;

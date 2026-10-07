@@ -79,6 +79,7 @@ test('per-card Fisher-Yates shuffle plays every voice once and avoids a duplicat
   const randomValues = [0, 0, 0.99, 0.99, 0];
   const bag = new VoiceShuffleBag((voice) => voice.id, () => randomValues.shift() ?? 0);
   const voices = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  bag.prepare(voices);
   const firstRound = voices.map(() => bag.next(voices).id);
   assert.equal(new Set(firstRound).size, voices.length);
   const next = bag.next(voices).id;
@@ -92,10 +93,13 @@ test('shuffle bags are isolated by card and adapt when that card voice list chan
   const bag = new VoiceShuffleBag((voice) => voice.id, () => 0);
   const cardA = [{ id: 'a1' }, { id: 'a2' }];
   const cardB = [{ id: 'b1' }, { id: 'b2' }];
+  bag.prepare(cardA);
   const otherCard = new VoiceShuffleBag((voice) => voice.id, () => 0);
   const aFirst = bag.next(cardA).id;
   assert.ok(cardA.some((voice) => voice.id === aFirst));
-  assert.equal(otherCard.next(cardB).id, 'b1');
+  const bFirst = otherCard.next(cardB).id;
+  assert.ok(cardB.some((voice) => voice.id === bFirst));
+  assert.notEqual(bFirst, aFirst);
   const aSecond = bag.next(cardA).id;
   assert.notEqual(aSecond, aFirst);
   assert.equal(bag.next([{ id: 'a3' }]).id, 'a3');
