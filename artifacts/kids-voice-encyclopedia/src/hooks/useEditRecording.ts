@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { recordingCue } from '../lib/recordingCue';
-import { primeMicrophonePermission } from '../lib/microphonePermission';
+import { CHILD_VOICE_MIC_CONSTRAINTS, primeMicrophonePermission } from '../lib/microphonePermission';
 
 export const MAX_RECORD_SECONDS = 60;
 const MIME_CANDIDATES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
@@ -12,15 +12,13 @@ function pickMime(): string | undefined {
 
 export const canRecord = () => typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined';
 
-/** 新規・編集共通。合図の終了後に録音し、結果のBlobだけを返す。古いセッションは破棄。 */
+/** 新規・編集共通。ガイド再生中から録音し、結果のBlobだけを返す。古いセッションは破棄。 */
 export function useEditRecording(onResult: (blob: Blob) => void) {
   const [recording, setRecording] = useState(false);
   const [starting, setStarting] = useState(false);
   const [guiding, setGuiding] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [level, setLevel] = useState(0);
-  const [guideProgress, setGuideProgress] = useState(0);
-  const [guideDurationMs, setGuideDurationMs] = useState(5000);
   const [error, setError] = useState('');
   const [micStatus, setMicStatus] = useState<'idle' | 'preparing' | 'ready' | 'denied' | 'unsupported'>('idle');
   const session = useRef(0);
@@ -28,7 +26,6 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
   const stream = useRef<MediaStream | null>(null);
   const timer = useRef<number | null>(null);
   const raf = useRef<number | null>(null);
-  const guideRaf = useRef<number | null>(null);
   const audioCtx = useRef<AudioContext | null>(null);
   const cue = useRef<ReturnType<typeof recordingCue> | null>(null);
   const startingRef = useRef(false);
@@ -43,14 +40,11 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
     timer.current = null;
     if (raf.current) cancelAnimationFrame(raf.current);
     raf.current = null;
-    if (guideRaf.current) cancelAnimationFrame(guideRaf.current);
-    guideRaf.current = null;
     void audioCtx.current?.close().catch(() => undefined);
     audioCtx.current = null;
     stream.current?.getTracks().forEach((track) => track.stop());
     stream.current = null;
     setLevel(0);
-    setGuideProgress(0);
   }, []);
 
   const stop = useCallback(() => {
@@ -106,7 +100,6 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
     const mine = ++session.current;
     startingRef.current = true;
     setStarting(true);
-    setGuideProgress(0);
     let acquired: MediaStream | null = null;
     try {
       // Unlock Web Audio synchronously in the tap gesture, before microphone
@@ -118,27 +111,32 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
       const ready = ctx.resume().then(() => null, (error: unknown) => error);
       setGuiding(true);
       cue.current = recordingCue();
-      setGuideDurationMs(cue.current.durationMs);
-      const updateGuideProgress = () => {
-        if (mine !== session.current || !cue.current) return;
-        setGuideProgress(cue.current.progress);
-        guideRaf.current = requestAnimationFrame(updateGuideProgress);
-      };
-      guideRaf.current = requestAnimationFrame(updateGuideProgress);
       // Attach rejection immediately: permission dialogs can outlast the guide.
       const guideReady = cue.current.finished.then(
         () => {
-          if (mine === session.current) {
-            if (guideRaf.current) cancelAnimationFrame(guideRaf.current);
-            guideRaf.current = null;
-            setGuideProgress(1);
-            setGuiding(false);
-          }
+          if (mine === session.current) setGuiding(false);
           return null;
         },
         (error: unknown) => error,
       );
-      acquired = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // A failed prompt invalidates the session even when recording has already
+      // started. Never return a partial clip from a failed guide session.
+      void guideReady.then((guideError) => {
+        if (guideError === null || mine !== session.current) return;
+        if (guideError instanceof DOMException && guideError.name === 'AbortError') return;
+        const activeRecorder = recorder.current;
+        recorder.current = null;
+        session.current++;
+        if (activeRecorder?.state === 'recording') {
+          try { activeRecorder.stop(); } catch { /* the track may have stopped */ }
+        }
+        release();
+        setRecording(false);
+        setStarting(false);
+        startingRef.current = false;
+        setError(guideError instanceof Error ? guideError.message : 'ガイドボイスを再生できませんでした。');
+      });
+      acquired = await navigator.mediaDevices.getUserMedia(CHILD_VOICE_MIC_CONSTRAINTS);
       if (mine !== session.current) { acquired.getTracks().forEach((t) => t.stop()); return; }
       stream.current = acquired;
       setMicStatus('ready');
@@ -147,10 +145,6 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
       if (resumeError === null && ctx.state !== 'running') await ctx.resume();
       if (mine !== session.current) return;
       if (resumeError !== null || ctx.state !== 'running') throw new Error('ガイドボイスと録音を準備できませんでした。もう一度録音ボタンを押してください。');
-      const guideError = await guideReady;
-      if (mine !== session.current) return;
-      if (guideError !== null) throw guideError;
-      cue.current = null; setGuiding(false);
       const mime = pickMime();
       const rec = mime ? new MediaRecorder(acquired, { mimeType: mime }) : new MediaRecorder(acquired);
       const parts: Blob[] = [];
@@ -185,8 +179,9 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
           tick();
       } catch { /* level meter is optional */ }
       recorder.current = rec;
-      // Start on the guide's ended event. The MediaRecorder is not active while
-      // the guide plays, so the prompt cannot be included in the child's voice.
+      // Start as soon as the microphone stream is ready, even while the guide
+      // is playing. WebRTC echo cancellation suppresses acoustic guide bleed;
+      // never discard the prompt interval because the child may speak over it.
       if (mine !== session.current) return;
       rec.start();
       setStarting(false);
@@ -214,5 +209,5 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
 
   useEffect(() => cancel, [cancel]);
 
-  return { recording, starting, guiding, seconds, level, guideProgress, guideDurationMs, error, setError, micStatus, prepareMicrophone, start, stop, cancel };
+  return { recording, starting, guiding, seconds, level, error, setError, micStatus, prepareMicrophone, start, stop, cancel };
 }

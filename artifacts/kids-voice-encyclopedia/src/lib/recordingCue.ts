@@ -1,5 +1,5 @@
-/** Fixed local guide voice. Recording starts as soon as playback ends.
- * Never silently skip a failed guide or start recording after cancellation. */
+/** Fixed local guide voice. The microphone starts while it plays; browsers
+ * use acoustic echo cancellation to reduce guide playback in the recording. */
 const GUIDE_URL = `${import.meta.env?.BASE_URL ?? '/'}assets/audio/voice_what_is_this.mp3`;
 
 // Start fetching the tiny, fixed voice as soon as this module loads. Playback

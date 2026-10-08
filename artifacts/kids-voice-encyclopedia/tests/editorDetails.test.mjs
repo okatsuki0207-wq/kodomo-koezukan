@@ -86,12 +86,24 @@ test('guide voice begins from tap and recording can proceed immediately after en
   assert.equal(finished, true);
   assert.equal(audio.onended, null);
 });
-test('recording begins after the guide ends without an extra synthesized sound', async () => {
+test('recording begins during guide playback without an extra synthesized sound', async () => {
   const hook = await readFile(new URL('../src/hooks/useEditRecording.ts', import.meta.url), 'utf8');
-  const guideCompletion = hook.indexOf('const guideError = await guideReady;');
-  const recorderStart = hook.indexOf('rec.start();', guideCompletion);
-  assert.ok(guideCompletion >= 0 && recorderStart > guideCompletion);
+  const guideReady = hook.indexOf('const guideReady =');
+  const recorderStart = hook.indexOf('rec.start();');
+  assert.ok(guideReady >= 0 && recorderStart > guideReady);
+  assert.doesNotMatch(hook, /await guideReady/);
+  assert.match(hook, /getUserMedia\(CHILD_VOICE_MIC_CONSTRAINTS\)/);
+  assert.match(hook, /echo cancellation suppresses acoustic guide bleed/);
   assert.doesNotMatch(hook, /playRecordingStartCue|createOscillator/);
+});
+
+test('guide display is a static character image without surrounding effects', async () => {
+  const guide = await readFile(new URL('../src/components/RecordingGuide.tsx', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../src/components/voice-editing.css', import.meta.url), 'utf8');
+  assert.match(guide, /<RecordingCharacter pose=/);
+  assert.doesNotMatch(guide, /<svg|<circle|rg-progress|rg-flash|rg-bubble|rg-mic-pose|recordingStartSignal/);
+  assert.match(css, /\.rg \.rg-char\s*\{[^}]*animation:\s*none/);
+  assert.doesNotMatch(css, /\.rg-(?:progress|flash|bubble|mic-pose)|rg-soft-flash|rg-photo-settle|rg-listen/);
 });
 test('guide playback supports browsers where play() starts audio but returns no Promise', async () => {
   const audio = new GuideAudio();
@@ -113,7 +125,12 @@ test('microphone preflight requests audio permission and releases every temporar
       return { getTracks: () => [{ stop: () => stopped.push('track-1') }, { stop: () => stopped.push('track-2') }] };
     },
   });
-  assert.deepEqual(constraints, { audio: true });
+  assert.deepEqual(constraints, {
+    audio: {
+      echoCancellation: { ideal: true },
+      noiseSuppression: { ideal: true },
+    },
+  });
   assert.deepEqual(stopped, ['track-1', 'track-2']);
 });
 test('guide cancellation and load failure reject instead of permitting recording', async () => {

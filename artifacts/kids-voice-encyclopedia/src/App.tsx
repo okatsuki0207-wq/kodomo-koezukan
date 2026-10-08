@@ -668,12 +668,7 @@ function App() {
                 {(rec.guiding || rec.starting || recording) && (
                   <div className="create-recording-overlay">
                     <RecordingGuide
-                      name={itemName}
-                      photo={photo || undefined}
-                      phase={rec.guiding || rec.starting ? 'guide' : 'recording'}
-                      guideDurationMs={rec.guideDurationMs}
-                      guideProgress={rec.guideProgress}
-                      recordingStartSignal={recordingSession.current}
+                      phase={recording ? 'recording' : rec.guiding || rec.starting ? 'guide' : 'idle'}
                     />
                   </div>
                 )}
@@ -693,7 +688,7 @@ function App() {
                   </>}
                 </div>
                 <p className="create-record-status" role="status" aria-live="polite">
-                  {rec.guiding ? 'これはなーに？' : rec.starting ? '準備中' : recording ? `録音中 ${formatTime(recordSeconds)}` : voice ? '録音できました' : '声をのこそう'}
+                  {recording ? `録音中 ${formatTime(recordSeconds)}` : rec.guiding ? 'これはなーに？' : rec.starting ? '準備中' : voice ? '録音できました' : '声をのこそう'}
                 </p>
                 {rec.micStatus === 'preparing' && <p className="create-mic-hint" role="status">マイクを確認しています</p>}
                 {voice && !recording && !processingVoice && !rec.starting && trimOpen && (
