@@ -1,33 +1,20 @@
 import {
-  collection, deleteDoc, doc, getDocFromServer, getDocsFromServer, onSnapshot,
-  orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, writeBatch,
+  collection, collectionGroup, doc, getDocFromServer, getDocsFromServer,
+  runTransaction, serverTimestamp, setDoc, updateDoc,
   type DocumentData, type Firestore, type QuerySnapshot,
 } from 'firebase/firestore';
-import type { Category } from './categories.ts';
 import { DEFAULT_CATEGORIES } from './categories.ts';
-import type { Keepsake } from './keepsakeRepository.ts';
-import { keepsakeFromData } from './voiceAssets.ts';
-import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, type GallerySettings } from './gallerySettings.ts';
 import { createBookId, isBookId, type BookId } from './bookIdentity.ts';
 
-export type OwnerBookContext = { ownerUid: string; bookId: BookId };
-export type SharedBook = {
-  items: Keepsake[];
-  categories: Category[];
-  settings: GallerySettings;
-  objectUrls: string[];
-};
-export type BookShareState = OwnerBookContext & { enabled: boolean };
+export type OwnerBookContext = { bookId: BookId };
 
 let database: Firestore | null = null;
 let getUid: (() => Promise<string>) | null = null;
-let cachedUid = '';
 let cachedContext: Promise<OwnerBookContext> | null = null;
 
 export function configureBookRepository(db: Firestore, userId: () => Promise<string>) {
   database = db;
   getUid = userId;
-  cachedUid = '';
   cachedContext = null;
 }
 
@@ -100,50 +87,19 @@ async function verifyCollection(
   }
 }
 
-async function retireLiveProjection(db: Firestore, uid: string, bookId: string) {
-  const shareRef = doc(db, 'users', uid, 'shares', bookId);
-  const share = await getDocFromServer(shareRef);
-  if (!share.exists() || share.data().version !== 2 || share.data().mode !== 'live') return;
-
-  if (share.data().active === true) {
-    await updateDoc(shareRef, { active: false });
-  }
-  const [cards, categories, settings] = await Promise.all([
-    getDocsFromServer(collection(db, 'users', uid, 'shares', bookId, 'cards')),
-    getDocsFromServer(collection(db, 'users', uid, 'shares', bookId, 'categories')),
-    getDocFromServer(doc(db, 'users', uid, 'shares', bookId, 'settings', 'gallery')),
-  ]);
-  const oldDocuments = [
-    ...cards.docs.map((entry) => entry.ref),
-    ...categories.docs.map((entry) => entry.ref),
-    ...(settings.exists() ? [settings.ref] : []),
-  ];
-  for (let offset = 0; offset < oldDocuments.length; offset += 400) {
-    const batch = writeBatch(db);
-    for (const reference of oldDocuments.slice(offset, offset + 400)) batch.delete(reference);
-    await batch.commit();
-  }
-}
-
 async function migrateLegacyBook(db: Firestore, uid: string, bookId: string) {
   const rootRef = bookDocument(db, bookId);
   const root = await getDocFromServer(rootRef);
-  if (!root.exists() || root.data().ownerUid !== uid) {
-    throw new Error('図鑑の所有者を確認できません。元のデータは変更していません。');
-  }
+  if (!root.exists()) throw new Error('図鑑データを確認できません。元のデータは変更していません。');
   if (root.data().migrationState === 'ready') return;
 
   // The original owner-only paths are read once. Storage objects and their download URLs
   // are kept in place; only Firestore card/category/settings documents are migrated.
-  const [cards, categories, settings, legacyShares] = await Promise.all([
+  const [cards, categories, settings] = await Promise.all([
     getDocsFromServer(collection(db, 'users', uid, 'keepsakes')),
     getDocsFromServer(collection(db, 'users', uid, 'categories')),
     getDocFromServer(doc(db, 'users', uid, 'settings', 'gallery')),
-    getDocsFromServer(collection(db, 'users', uid, 'shares')),
   ]);
-  const hadLiveShare = legacyShares.docs.some((share) =>
-    share.id === bookId && share.data().active === true &&
-    share.data().version === 2 && share.data().mode === 'live');
 
   // Categories must exist before card rules validate category references.
   await writeMissingDocuments(db, categories, bookId, 'categories');
@@ -169,18 +125,136 @@ async function migrateLegacyBook(db: Firestore, uid: string, bookId: string) {
 
   await updateDoc(rootRef, {
     migrationState: 'ready',
-    shareEnabled: hadLiveShare,
     readyAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+}
 
-  // Old live projections are deleted only after every source document has been verified.
-  // Failure here does not affect the canonical book or stop owner access.
-  try {
-    await retireLiveProjection(db, uid, bookId);
-  } catch (error) {
-    console.warn('Legacy live-share projection cleanup is pending.', error);
+type SourceDocument = { id: string; path: string; namespace: string; data: DocumentData };
+const normalizeCategoryName = (name: string) => name.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase();
+
+async function importedDocumentId(path: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(path));
+  return `import-${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function sourceNamespace(path: string) {
+  const [root, id] = path.split('/');
+  return `${root}/${id}`;
+}
+
+/**
+ * The app now has one public book for every browser and origin. On the first
+ * open, copy old canonical and legacy Firestore records into it without
+ * deleting or moving the original documents or Storage objects.
+ */
+async function consolidateExistingData(db: Firestore, bookId: string) {
+  const rootRef = bookDocument(db, bookId);
+  const root = await getDocFromServer(rootRef);
+  if (root.data()?.publicImportVersion === 1) return;
+
+  const [allBookCards, allLegacyCards, allCategories, allSettings] = await Promise.all([
+    getDocsFromServer(collectionGroup(db, 'cards')),
+    getDocsFromServer(collectionGroup(db, 'keepsakes')),
+    getDocsFromServer(collectionGroup(db, 'categories')),
+    getDocsFromServer(collectionGroup(db, 'settings')),
+  ]);
+
+  const categorySources: SourceDocument[] = allCategories.docs.flatMap((record) => {
+    const parts = record.ref.path.split('/');
+    const isAppCategory = parts.length === 4 &&
+      ((parts[0] === 'books' && parts[2] === 'categories') ||
+       (parts[0] === 'users' && parts[2] === 'categories'));
+    if (!isAppCategory || sourceNamespace(record.ref.path) === `books/${bookId}`) return [];
+    return [{ id: record.id, path: record.ref.path, namespace: sourceNamespace(record.ref.path), data: record.data() }];
+  }).sort((a, b) => a.path.localeCompare(b.path));
+
+  const cardSources: SourceDocument[] = [
+    ...allBookCards.docs.flatMap((record) => {
+      const parts = record.ref.path.split('/');
+      if (parts.length !== 4 || parts[0] !== 'books' || parts[2] !== 'cards' || parts[1] === bookId) return [];
+      return [{ id: record.id, path: record.ref.path, namespace: `books/${parts[1]}`, data: record.data() }];
+    }),
+    ...allLegacyCards.docs.flatMap((record) => {
+      const parts = record.ref.path.split('/');
+      if (parts.length !== 4 || parts[0] !== 'users' || parts[2] !== 'keepsakes') return [];
+      return [{ id: record.id, path: record.ref.path, namespace: `users/${parts[1]}`, data: record.data() }];
+    }),
+  ].sort((a, b) => a.path.localeCompare(b.path));
+
+  const targetCategories = await getDocsFromServer(bookCollection(db, bookId, 'categories'));
+  const categoryByName = new Map<string, string>(DEFAULT_CATEGORIES.map((category) => [normalizeCategoryName(category.name), category.id]));
+  const targetCategoryNames = new Map<string, string>();
+  targetCategories.docs.forEach((record) => {
+    const name = String(record.data().name ?? '');
+    categoryByName.set(normalizeCategoryName(name), record.id);
+    targetCategoryNames.set(record.id, name);
+  });
+  const categoryMap = new Map<string, string>();
+  for (const source of categorySources) {
+    const name = String(source.data.name ?? '').trim();
+    if (!name) continue;
+    const key = `${source.namespace}/${source.id}`;
+    const sameName = categoryByName.get(normalizeCategoryName(name));
+    if (sameName) {
+      categoryMap.set(key, sameName);
+      continue;
+    }
+    let targetId = source.id;
+    const nameAtId = targetCategoryNames.get(targetId);
+    if (nameAtId && normalizeCategoryName(nameAtId) !== normalizeCategoryName(name)) {
+      targetId = await importedDocumentId(source.path);
+    }
+    const targetRef = doc(db, 'books', bookId, 'categories', targetId);
+    const target = await getDocFromServer(targetRef);
+    if (!target.exists()) await setDoc(targetRef, source.data);
+    else if (normalizeCategoryName(String(target.data().name ?? '')) !== normalizeCategoryName(name)) {
+      throw new Error('既存カテゴリの内容が一致しません。元のデータはそのまま残しました。');
+    }
+    categoryMap.set(key, targetId);
+    categoryByName.set(normalizeCategoryName(name), targetId);
+    targetCategoryNames.set(targetId, name);
   }
+
+  const targetCards = await getDocsFromServer(bookCollection(db, bookId, 'cards'));
+  const targetCardData = new Map(targetCards.docs.map((record) => [record.id, record.data()]));
+  for (const source of cardSources) {
+    const sourceData = { ...source.data };
+    const originalCategory = typeof sourceData.categoryId === 'string' ? sourceData.categoryId : null;
+    if (originalCategory) {
+      sourceData.categoryId = categoryMap.get(`${source.namespace}/${originalCategory}`) ?? originalCategory;
+    }
+    let targetId = source.id;
+    const existing = targetCardData.get(targetId);
+    if (existing && stableJson(existing) !== stableJson(sourceData)) {
+      targetId = await importedDocumentId(source.path);
+    } else if (existing) {
+      continue;
+    }
+    const targetRef = doc(db, 'books', bookId, 'cards', targetId);
+    const target = await getDocFromServer(targetRef);
+    if (!target.exists()) {
+      await setDoc(targetRef, sourceData);
+      targetCardData.set(targetId, sourceData);
+    } else if (stableJson(target.data()) !== stableJson(sourceData)) {
+      throw new Error('既存キロクと移行元の内容が異なります。上書きせず、元データはそのまま残しました。');
+    }
+  }
+
+  const targetSettingsRef = doc(db, 'books', bookId, 'settings', 'gallery');
+  const targetSettings = await getDocFromServer(targetSettingsRef);
+  if (!targetSettings.exists()) {
+    const candidates = allSettings.docs.flatMap((record) => {
+      const parts = record.ref.path.split('/');
+      const isAppSettings = parts.length === 4 && parts[2] === 'settings' && parts[3] === 'gallery' &&
+        (parts[0] === 'books' || parts[0] === 'users');
+      if (!isAppSettings || record.ref.path === `books/${bookId}/settings/gallery`) return [];
+      return [{ path: record.ref.path, data: record.data() }];
+    }).sort((a, b) => a.path.localeCompare(b.path));
+    if (candidates[0]) await setDoc(targetSettingsRef, candidates[0].data);
+  }
+
+  await updateDoc(rootRef, { publicImportVersion: 1, updatedAt: serverTimestamp() });
 }
 
 async function ensureOwnerBook(uid: string): Promise<OwnerBookContext> {
@@ -192,15 +266,12 @@ async function ensureOwnerBook(uid: string): Promise<OwnerBookContext> {
     if (!isBookId(bookId)) throw new Error('この端末に保存された図鑑IDを確認できません。');
     const root = await getDocFromServer(bookDocument(db, bookId));
     if (!root.exists()) throw new Error('図鑑データの移行先が見つかりません。元データは変更していません。');
-    if (root.data().ownerUid !== uid) throw new Error('図鑑の所有者が一致しません。');
     if (root.data().migrationState !== 'ready') await migrateLegacyBook(db, uid, bookId);
-    return { ownerUid: uid, bookId };
+    await consolidateExistingData(db, bookId);
+    return { bookId };
   }
 
-  const oldShares = await getDocsFromServer(collection(db, 'users', uid, 'shares'));
-  const activeLiveShare = oldShares.docs.find((share) =>
-    share.data().active === true && share.data().version === 2 && share.data().mode === 'live');
-  const proposedBookId = activeLiveShare?.id ?? createBookId();
+  const proposedBookId = createBookId();
   if (!isBookId(proposedBookId)) throw new Error('図鑑IDを作成できません。');
 
   const bookId = await runTransaction(db, async (transaction) => {
@@ -212,139 +283,34 @@ async function ensureOwnerBook(uid: string): Promise<OwnerBookContext> {
     }
     const rootRef = bookDocument(db, proposedBookId);
     const existingRoot = await transaction.get(rootRef);
-    if (existingRoot.exists() && existingRoot.data().ownerUid !== uid) {
-      throw new Error('図鑑IDが重複しました。もう一度接続してください。');
-    }
     transaction.set(pointerRef, { bookId: proposedBookId, createdAt: serverTimestamp() });
     if (!existingRoot.exists()) {
       transaction.set(rootRef, {
-        ownerUid: uid,
-        shareEnabled: false,
         migrationState: 'copying',
         schemaVersion: 1,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
     } else if (existingRoot.data().migrationState !== 'ready') {
-      transaction.update(rootRef, { shareEnabled: false, migrationState: 'copying', updatedAt: serverTimestamp() });
+      transaction.update(rootRef, { migrationState: 'copying', updatedAt: serverTimestamp() });
     }
     return proposedBookId;
   });
 
-  const context = { ownerUid: uid, bookId };
+  const context = { bookId };
   await migrateLegacyBook(db, uid, bookId);
+  await consolidateExistingData(db, bookId);
   return context;
 }
 
 export async function getOwnerBookContext(): Promise<OwnerBookContext> {
   const { userId } = services();
   const uid = await userId();
-  if (cachedUid !== uid || !cachedContext) {
-    cachedUid = uid;
+  if (!cachedContext) {
     cachedContext = ensureOwnerBook(uid).catch((error) => {
-      if (cachedUid === uid) cachedContext = null;
+      cachedContext = null;
       throw error;
     });
   }
   return cachedContext;
-}
-
-export async function getOwnerBookShareState(): Promise<BookShareState> {
-  const { db } = services();
-  const context = await getOwnerBookContext();
-  const snapshot = await getDocFromServer(bookDocument(db, context.bookId));
-  if (!snapshot.exists() || snapshot.data().migrationState !== 'ready') {
-    throw new Error('図鑑の準備が終わっていません。少し待ってからもう一度お試しください。');
-  }
-  return { ...context, enabled: snapshot.data().shareEnabled === true };
-}
-
-export async function setOwnerBookSharing(enabled: boolean): Promise<BookId> {
-  const { db } = services();
-  const context = await getOwnerBookContext();
-  await updateDoc(bookDocument(db, context.bookId), {
-    shareEnabled: enabled,
-    updatedAt: serverTimestamp(),
-  });
-  return context.bookId;
-}
-
-function timestampMillis(value: unknown) {
-  if (value && typeof value === 'object' && 'toMillis' in value &&
-      typeof (value as { toMillis?: unknown }).toMillis === 'function') {
-    return (value as { toMillis: () => number }).toMillis();
-  }
-  return typeof value === 'number' ? value : 0;
-}
-
-export async function subscribePublicBook(
-  bookId: string,
-  onChange: (book: SharedBook) => void,
-  onError: (error: unknown) => void,
-): Promise<() => void> {
-  if (!isBookId(bookId)) throw new Error('共有リンクが正しくありません。');
-  const { db } = services();
-  const rootRef = bookDocument(db, bookId);
-  const root = await getDocFromServer(rootRef);
-  if (!root.exists() || root.data().shareEnabled !== true || root.data().migrationState !== 'ready') {
-    throw new Error('この共有リンクは停止されているか、確認できません。');
-  }
-
-  let items: Keepsake[] | null = null;
-  let categories: Category[] | null = null;
-  let settings: GallerySettings = normalizeGallerySettings(DEFAULT_GALLERY_SETTINGS);
-  let settingsLoaded = false;
-  let stopped = false;
-  const stops: Array<() => void> = [];
-  const emit = () => {
-    if (!stopped && items && categories && settingsLoaded) {
-      onChange({ items, categories, settings, objectUrls: [] });
-    }
-  };
-  const fail = (error: unknown) => {
-    if (stopped) return;
-    stopped = true;
-    stops.splice(0).forEach((stop) => stop());
-    onError(error);
-  };
-
-  stops.push(onSnapshot(rootRef, (snapshot) => {
-    if (!snapshot.exists() || snapshot.data().shareEnabled !== true ||
-        snapshot.data().migrationState !== 'ready') {
-      fail(new Error('この共有リンクは停止されています。'));
-    }
-  }, fail));
-  stops.push(onSnapshot(
-    query(bookCollection(db, bookId, 'cards'), orderBy('createdAt', 'desc')),
-    (snapshot) => {
-      items = snapshot.docs.map((record) => keepsakeFromData(record.id, record.data()));
-      emit();
-    },
-    fail,
-  ));
-  stops.push(onSnapshot(
-    query(bookCollection(db, bookId, 'categories'), orderBy('createdAt', 'asc')),
-    (snapshot) => {
-      categories = [
-        ...DEFAULT_CATEGORIES,
-        ...snapshot.docs.map((record) => ({
-          id: record.id,
-          name: String(record.data().name ?? ''),
-          createdAt: timestampMillis(record.data().createdAt),
-        })),
-      ];
-      emit();
-    },
-    fail,
-  ));
-  stops.push(onSnapshot(doc(db, 'books', bookId, 'settings', 'gallery'), (snapshot) => {
-    settings = normalizeGallerySettings(snapshot.exists() ? snapshot.data() : DEFAULT_GALLERY_SETTINGS);
-    settingsLoaded = true;
-    emit();
-  }, fail));
-
-  return () => {
-    stopped = true;
-    stops.splice(0).forEach((stop) => stop());
-  };
 }

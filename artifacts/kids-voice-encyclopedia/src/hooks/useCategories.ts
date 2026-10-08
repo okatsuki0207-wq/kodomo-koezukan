@@ -2,22 +2,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { DEFAULT_CATEGORIES, type Category } from '../lib/categories';
 import { createCategory, firebaseError, subscribeCategories } from '../lib/keepsakeStore';
 
-const RULES_NOTE = 'Firestoreからアクセスを拒否されました。ルールに加えて、FirebaseのプロジェクトIDと保存時と同じ匿名認証ユーザーで開いているか確認してください。';
-
-export function useCategories(connectionAttempt: number, enabled = true) {
+export function useCategories(connectionAttempt: number) {
   const [categories, setCategories] = useState<Category[]>([...DEFAULT_CATEGORIES]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [denied, setDenied] = useState(false);
 
   useEffect(() => {
-    if (!enabled) {
-      setCategories([...DEFAULT_CATEGORIES]);
-      setLoading(false);
-      setError('');
-      setDenied(false);
-      return;
-    }
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
     setLoading(true);
@@ -30,10 +20,7 @@ export function useCategories(connectionAttempt: number, enabled = true) {
     const fail = (caught: unknown) => {
       if (cancelled) return;
       window.clearTimeout(timer);
-      const code = (caught as { code?: string })?.code ?? '';
-      const isDenied = code.includes('permission-denied');
-      setDenied(isDenied);
-      setError(isDenied ? RULES_NOTE : firebaseError(caught));
+      setError(firebaseError(caught));
       setLoading(false);
     };
     subscribeCategories((next) => {
@@ -44,10 +31,10 @@ export function useCategories(connectionAttempt: number, enabled = true) {
         const ids = new Set(next.map((c) => c.id));
         return [...next, ...local.filter((c) => !ids.has(c.id) && c.createdAt === -1)];
       });
-      setError(''); setDenied(false); setLoading(false);
+       setError(''); setLoading(false);
     }, fail).then((stop) => { if (cancelled) stop(); else unsubscribe = stop; }).catch(fail);
     return () => { cancelled = true; window.clearTimeout(timer); unsubscribe?.(); };
-  }, [connectionAttempt, enabled]);
+  }, [connectionAttempt]);
 
   const create = useCallback(async (name: string): Promise<Category> => {
     const made = await createCategory(name);
@@ -55,10 +42,7 @@ export function useCategories(connectionAttempt: number, enabled = true) {
     return made;
   }, []);
 
-  const describeError = useCallback((caught: unknown) => {
-    const code = (caught as { code?: string })?.code ?? '';
-    return code.includes('permission-denied') ? RULES_NOTE : firebaseError(caught);
-  }, []);
+  const describeError = useCallback((caught: unknown) => firebaseError(caught), []);
 
-  return { categories, loading, error, denied, create, describeError };
+  return { categories, loading, error, create, describeError };
 }

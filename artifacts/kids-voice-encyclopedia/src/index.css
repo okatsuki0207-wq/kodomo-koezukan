@@ -116,8 +116,6 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(194, 104, 78
 .empty-copy { color:#958879;font-size:13px;line-height:1.9;margin:0 0 21px; }
 .empty-action { border:1px solid #d9ad8e;background:#fff8ec;color:#a85f49;padding:11px 20px;border-radius:999px;font-size:13px;font-weight:700; }
 .empty-action:hover {background:#faecda;}
-.footer-note { display:flex;justify-content:center;align-items:center;gap:8px;color:#a59a8a;font-size:11px;letter-spacing:.04em;margin-top:48px; }
-.footer-note svg {color:#a8b79d;}
 
 .overlay { position:fixed;inset:0;background:rgba(47,43,35,.48);backdrop-filter:blur(5px);z-index:20;display:flex;align-items:center;justify-content:center;padding:20px;animation:fade .18s ease-out; }
 .dialog { position:relative;width:min(100%,520px);max-height:min(92dvh,850px);overflow:auto;background:#fcf8ef;border-radius:19px;border:1px solid #eee1cf;box-shadow:0 25px 80px rgba(51,41,29,.22);padding:28px 30px 27px;animation:rise .25s both; }
@@ -205,7 +203,6 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(194, 104, 78
   .sticker-collage {gap:16px 8px;padding:12px 0 28px;}
   .sticker-name {font-size:13px;letter-spacing:.02em;}
   .empty-state {min-height:320px;}
-  .footer-note {margin-top:32px;text-align:center;}
   .dialog {padding:22px 18px 20px;border-radius:16px;}
   .dialog-detail {padding:9px;}
   .detail-meta {align-items:flex-start;}
@@ -357,13 +354,12 @@ button:disabled {cursor:not-allowed;opacity:.55;}
   .start-character .rg-char { width:104px; height:104px; }
 }
 
-/* Spacing scale (8px) and supplemental notes */
+/* Spacing scale (8px) */
 :root { --space-1:8px; --space-2:16px; --space-3:24px; --space-4:32px; --note-gray:#6b7280; }
 .page-main { padding:var(--space-1) var(--space-2) var(--space-4); max-width:1120px; }
 .category-bar { margin:var(--space-1) 0; gap:var(--space-1); padding:0; }
 .category-tabs { gap:var(--space-1); }
 .sticker-collage { gap:var(--space-3) var(--space-2); padding:var(--space-1) 0 var(--space-3); }
-.footer-note { margin-top:var(--space-3); }
 .notice { margin-top:var(--space-1); padding:var(--space-1) 12px; }
 .dialog { padding:var(--space-3); }
 .dialog-head { margin-bottom:var(--space-2); }

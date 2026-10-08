@@ -1,5 +1,4 @@
 import { initializeApp } from 'firebase/app';
-import { indexedDBLocalPersistence, initializeAuth, signInAnonymously } from 'firebase/auth';
 import { collection, doc, getFirestore, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { getDownloadURL, getStorage, ref } from 'firebase/storage';
 import { firebaseConfig, isFirebaseConfigured } from '../firebaseConfig';
@@ -7,16 +6,12 @@ import { storageFailureMessage } from './storageDiagnostics';
 import { createKeepsakeRepository, FirebaseTimeoutError, type Keepsake } from './keepsakeRepository';
 import { createKeepsakeEditor } from './keepsakeEditor';
 import { createUnusedMediaService } from './unusedMedia';
-import {
-  configureBookRepository, getOwnerBookContext, getOwnerBookShareState,
-  setOwnerBookSharing, subscribePublicBook, type SharedBook,
-} from './bookRepository';
+import { configureBookRepository, getOwnerBookContext } from './bookRepository';
 export type { Keepsake } from './keepsakeRepository';
 import { categoryIdForName, DEFAULT_CATEGORIES, keepsakeMetadata, validateCategoryId, validateCategoryName, type Category } from './categories';
 import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, type GallerySettings } from './gallerySettings';
 
 const app = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
-const auth = app ? initializeAuth(app, { persistence: indexedDBLocalPersistence }) : null;
 const db = app ? getFirestore(app) : null;
 // GCSで作成した指定バケットを明示。写真・音声のアップロード、URL取得、
 // 削除はすべてこのStorageインスタンスからrefを作成する。
@@ -25,7 +20,7 @@ if (storage) {
   storage.maxOperationRetryTime = 25_000;
   storage.maxUploadRetryTime = 25_000;
 }
-let ready: Promise<string> | null = null;
+const PUBLIC_OWNER_ID = 'public';
 const currentBookId = async () => (await getOwnerBookContext()).bookId;
 
 function deadline<T>(operation: Promise<T>, milliseconds = 30_000): Promise<T> {
@@ -36,14 +31,9 @@ function deadline<T>(operation: Promise<T>, milliseconds = 30_000): Promise<T> {
 }
 
 async function userId(): Promise<string> {
-  if (!auth) throw new Error('Firebase が未設定です。src/firebaseConfig.ts の設定とセットアップ手順を確認してください。');
-  if (!ready) {
-    ready = (async () => {
-      await auth.authStateReady();
-      return auth.currentUser?.uid ?? (await signInAnonymously(auth)).user.uid;
-    })().catch((error: unknown) => { ready = null; throw error; });
-  }
-  return deadline(ready, 20_000);
+  if (!db) throw new Error('Firebase が未設定です。src/firebaseConfig.ts の設定を確認してください。');
+  // All origins use the same public namespace; no browser identity or login is involved.
+  return PUBLIC_OWNER_ID;
 }
 
 if (db) configureBookRepository(db, userId);
@@ -51,7 +41,6 @@ if (db) configureBookRepository(db, userId);
 const repository = createKeepsakeRepository(db!, storage!, userId, currentBookId);
 export const { saveKeepsake, deleteKeepsake } = repository;
 export const { editKeepsake } = createKeepsakeEditor(db!, storage!, userId, currentBookId);
-export { getOwnerBookShareState, setOwnerBookSharing, subscribePublicBook, type SharedBook } from './bookRepository';
 
 export async function subscribeKeepsakes(
   onChange: (items: Keepsake[]) => void,
@@ -59,10 +48,14 @@ export async function subscribeKeepsakes(
 ) {
   return repository.subscribeKeepsakes(onChange, onError);
 }
-/** Read-only link refresh for saved voices; never access another user's paths. */
+/** Refresh media URLs from the shared app namespace, including imported old records. */
 export async function refreshVoiceDownloadUrl(path: string): Promise<string> {
-  const uid = await userId();
-  if (!storage || !path.startsWith(`users/${uid}/keepsakes/`) || path.includes('..')) {
+  await userId();
+  const parts = path.split('/');
+  const validAppVoicePath = parts.length >= 5 && parts[0] === 'users' &&
+    parts[1] !== '' && parts[2] === 'keepsakes' && parts[3] !== '' &&
+    parts.at(-1) === 'voice' && parts.every((part) => part !== '' && part !== '.' && part !== '..');
+  if (!storage || !validAppVoicePath) {
     throw new Error('保存済み音声の参照先を確認できません。元の音声は変更していません。');
   }
   return deadline(getDownloadURL(ref(storage, path)), 20_000);
@@ -150,10 +143,7 @@ export function firebaseError(error: unknown): string {
   const code = (error as { code?: string })?.code ?? '';
   const storageMessage = storageFailureMessage(error, firebaseConfig.storageBucket!);
   if (storageMessage) return storageMessage;
-  if (code.includes('configuration-not-found')) return 'Firebase Authentication が未設定です。Firebase ConsoleでAuthenticationの「始める」を押し、ログイン方法の「匿名」を有効にしてから再接続してください。';
-  if (code.includes('unauthorized-domain')) return 'このURLがFirebase Authenticationの承認済みドメインにありません。Firebase ConsoleのAuthentication → 設定 → 承認済みドメインに、アドレス欄のホスト名を追加してください。';
-  if (code.includes('permission-denied') || code.includes('unauthorized')) return 'Firebaseからアクセスを拒否されました。Firestoreのデータは匿名認証ユーザーごとに分かれます。保存時と同じURL・ブラウザで開いているか、FirebaseのプロジェクトIDとルールの公開先が一致しているか確認してください。';
-  if (code.includes('operation-not-allowed')) return 'Firebase Authentication の匿名ログインを有効にしてください。';
+  if (code.includes('permission-denied') || code.includes('unauthorized')) return 'Firebaseへのアクセスが拒否されました。Firestore・Storageの公開ルールをFirebase Consoleに反映したか確認してください。';
   if (code.includes('network') || code.includes('unavailable') || code.includes('retry-limit')) return 'Firebase に接続できませんでした。通信を確認してもう一度お試しください。';
   return error instanceof Error ? error.message : 'Firebase の処理に失敗しました。設定と通信をご確認ください。';
 }

@@ -6,7 +6,6 @@ import {
   Check,
   ChevronDown,
   CircleHelp,
-  Eye,
   Image as ImageIcon,
   Mic,
   Pause,
@@ -16,8 +15,6 @@ import {
   RotateCcw,
   Scissors,
   Settings,
-  Share2,
-  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';
@@ -34,20 +31,16 @@ import { useNewKeepsakeDraft } from './hooks/useNewKeepsakeDraft';
 import { VoicePlayback, VoiceShuffleBag } from './lib/voicePlayback';
 import DetailDialogShell from './components/DetailDialogShell';
 import StartScreen from './components/StartScreen';
-import ShareDialog from './components/ShareDialog';
 import SettingsDialog from './components/SettingsDialog';
-import ModeLockDialog from './components/ModeLockDialog';
 import { useCategories } from './hooks/useCategories';
 import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, sortGalleryItems, type GallerySettings } from './lib/gallerySettings';
-import { deleteKeepsake, editKeepsake, firebaseError, saveGallerySettings, saveKeepsake, subscribeGallerySettings, subscribeKeepsakes, subscribePublicBook, updateKeepsakeCategory, type Keepsake, type SharedBook } from './lib/keepsakeStore';
-import { decodeLegacyShareId, isBookId } from './lib/bookIdentity';
+import { deleteKeepsake, editKeepsake, firebaseError, saveGallerySettings, saveKeepsake, subscribeGallerySettings, subscribeKeepsakes, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
 import { getVoices, type VoiceAsset } from './lib/voiceAssets';
 import { trimLeadingSilence } from './lib/audioTrim';
 import { preloadRecordingGuide } from './lib/recordingCue';
 import { hasNewKeepsakeDraftContent, type NewKeepsakeDraftInput } from './lib/newKeepsakeDraft';
 import { isFirebaseConfigured } from './firebaseConfig';
 import './index.css';
-import './components/sharing.css';
 
 function formatStamp(timestamp: number) {
   return new Intl.DateTimeFormat('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(timestamp);
@@ -57,29 +50,12 @@ function formatDate(timestamp: number) {
   return new Intl.DateTimeFormat('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }).format(timestamp);
 }
 
-function readShareRoute(): { bookId: string | null } | null {
-  if (typeof window === 'undefined') return null;
-  const route = window.location.pathname.match(/\/view\/([^/]+)\/?$/u);
-  if (route) return { bookId: isBookId(route[1]) ? route[1] : null };
-  if (window.location.hash.startsWith('#share=')) {
-    return { bookId: decodeLegacyShareId(window.location.hash.slice('#share='.length)) };
-  }
-  return null;
-}
-
 function App() {
   const [items, setItems] = useState<Keepsake[]>([]);
-  const [shareRoute] = useState(readShareRoute);
-  const [sharedBook, setSharedBook] = useState<SharedBook | null>(null);
-  const [shareMode, setShareMode] = useState<'loading' | 'live' | 'error'>('loading');
-  const [shareAccessError, setShareAccessError] = useState('');
-  const [localReadOnly, setLocalReadOnly] = useState(false);
-  const [unlockOpen, setUnlockOpen] = useState(false);
-  const [shareOpen, setShareOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [gallerySettings, setGallerySettings] = useState<GallerySettings>(() => ({ ...DEFAULT_GALLERY_SETTINGS }));
   const [settingsLoading, setSettingsLoading] = useState(true);
-  const [view, setView] = useState<'start' | 'library'>(shareRoute ? 'library' : 'start');
+  const [view, setView] = useState<'start' | 'library'>(() => window.location.pathname.includes('/view/') ? 'library' : 'start');
   const [createOpen, setCreateOpen] = useState(false);
   const [detail, setDetail] = useState<Keepsake | null>(null);
   const [itemName, setItemName] = useState('');
@@ -107,12 +83,8 @@ function App() {
   const [catBusy, setCatBusy] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const localDraft = useNewKeepsakeDraft();
-  const { categories, create: createCategoryEntry, describeError } = useCategories(0, !shareRoute);
+  const { categories, create: createCategoryEntry, describeError } = useCategories(0);
   useEffect(() => {
-    if (shareRoute) {
-      setSettingsLoading(false);
-      return;
-    }
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
     setSettingsLoading(true);
@@ -130,13 +102,9 @@ function App() {
       else unsubscribe = stop;
     }).catch(fail);
     return () => { cancelled = true; unsubscribe?.(); };
-  }, [shareRoute]);
-  const readOnly = !!shareRoute || localReadOnly;
-  const shownItems = sharedBook?.items ?? items;
-  const activeGallerySettings = sharedBook?.settings ?? gallerySettings;
-  const shownCategories = sharedBook?.categories ?? categories;
-  const visibleItems = sortGalleryItems(shownItems, activeGallerySettings, selectedCategory);
-  const categoryName = (id: string | null | undefined) => shownCategories.find((c) => c.id === id)?.name;
+  }, []);
+  const visibleItems = sortGalleryItems(items, gallerySettings, selectedCategory);
+  const categoryName = (id: string | null | undefined) => categories.find((c) => c.id === id)?.name;
   const recordingSession = useRef(0);
   const createDraftSession = useRef(0);
   const draftCancelled = useRef(false);
@@ -155,7 +123,6 @@ function App() {
   const latestDraft = useRef(draftSnapshot);
   latestDraft.current = draftSnapshot;
   useEffect(() => {
-    if (shareRoute) return;
     let active = true;
     const session = ++createDraftSession.current;
     void localDraft.load().then((draft) => {
@@ -174,7 +141,7 @@ function App() {
       setCreateOpen(true);
     });
     return () => { active = false; };
-  }, [localDraft.load, shareRoute]);
+  }, [localDraft.load]);
   const [playback] = useState(() => new VoicePlayback({
     onChange: (state) => {
       setPlaying(state?.playing ?? false);
@@ -211,14 +178,14 @@ function App() {
     const urls: string[] = [];
     for (let i = 0; i < 5; i++) for (const clips of voices) if (clips[i]) urls.push(clips[i].url);
     playback.warm(urls);
-  }, [items, selectedCategory, playback, sharedBook]);
+  }, [items, selectedCategory, playback]);
 
   useEffect(() => {
-    const currentIds = new Set(shownItems.map((item) => item.id));
+    const currentIds = new Set(items.map((item) => item.id));
     for (const id of voiceShuffleBags.current.keys()) {
       if (!currentIds.has(id)) voiceShuffleBags.current.delete(id);
     }
-    for (const item of shownItems) {
+    for (const item of items) {
       const voices = getVoices(item);
       if (!voices.length) continue;
       let bag = voiceShuffleBags.current.get(item.id);
@@ -228,14 +195,9 @@ function App() {
       }
       bag.prepare(voices);
     }
-  }, [shownItems]);
+  }, [items]);
 
   useEffect(() => {
-    if (shareRoute) {
-      setItems([]);
-      setLoading(false);
-      return;
-    }
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
     setLoading(true);
@@ -261,50 +223,7 @@ function App() {
       }
     }, fail).then((stop) => { if (cancelled) stop(); else unsubscribe = stop; }).catch(fail);
     return () => { cancelled = true; window.clearTimeout(timer); unsubscribe?.(); };
-  }, [shareRoute]);
-
-  useEffect(() => {
-    if (!shareRoute) return;
-    let cancelled = false;
-    let unsubscribe: (() => void) | null = null;
-    setShareMode('loading');
-    setShareAccessError('');
-    if (!shareRoute.bookId) {
-      setShareAccessError('共有リンクが正しくありません。リンクを送ってくれた人に確認してください。');
-      setShareMode('error');
-      return;
-    }
-    void subscribePublicBook(
-      shareRoute.bookId,
-      (book) => {
-        if (!cancelled) {
-          setSharedBook(book);
-          setShareMode('live');
-          setSelectedCategory(null);
-        }
-      },
-      (caught) => {
-        if (!cancelled) {
-          setShareAccessError(firebaseError(caught));
-          setShareMode('error');
-        }
-      },
-    ).then((stop) => {
-      if (cancelled) stop();
-      else {
-        unsubscribe = stop;
-        setShareMode('live');
-      }
-    }).catch((caught) => {
-      if (cancelled) return;
-      setShareAccessError(caught instanceof Error ? caught.message : '共有リンクを開けませんでした。');
-      setShareMode('error');
-    });
-    return () => {
-      cancelled = true;
-      unsubscribe?.();
-    };
-  }, [shareRoute]);
+  }, []);
 
   useEffect(() => () => {
     recordingSession.current++;
@@ -342,15 +261,11 @@ function App() {
     };
   }, [createOpen, draftReady, localDraft.saveNow]);
 
-  useEffect(() => () => {
-    sharedBook?.objectUrls.forEach((url) => URL.revokeObjectURL(url));
-  }, [sharedBook]);
-
   const stopPlayback = () => playback.stop();
 
   const longPress = useLongPress<Keepsake>((item) => {
     const current = items.find((entry) => entry.id === item.id);
-    if (!readOnly && !mutationLock.current && current) openDetail(current);
+    if (!mutationLock.current && current) openDetail(current);
   }, undefined, (item) => playKeepsake(item));
   const closeDetail = () => { if (mutationLock.current) return; stopPlayback(); setDetail(null); setEditOpen(false); setConfirmDelete(false); };
 
@@ -367,7 +282,6 @@ function App() {
   };
 
   const openDetail = (item: Keepsake) => {
-    if (readOnly) return;
     stopPlayback();
     setError('');
     setDetail(item);
@@ -378,7 +292,7 @@ function App() {
   const playKeepsake = (item: Keepsake) => {
     const voices = getVoices(item);
     if (!voices.length) {
-      if (!readOnly) openDetail(item);
+      openDetail(item);
       return;
     }
     setError('');
@@ -556,83 +470,46 @@ function App() {
   };
 
   const formatTime = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
-  const enterReadOnly = () => {
-    createDraftSession.current++;
-    stopPlayback();
-    setSettingsOpen(false);
-    setView('library');
-    setLocalReadOnly(true);
-    setDetail(null);
-    setEditOpen(false);
-    setCreateOpen(false);
-    setPhotoEditorSource('');
-    setCategoryOpen(false);
-    setNewCatInCreate(false);
-    setShareOpen(false);
-  };
-  const finishUnlock = () => {
-    setUnlockOpen(false);
-    if (shareRoute) {
-      window.location.replace(`${window.location.pathname}${window.location.search}`);
-      return;
-    }
-    setLocalReadOnly(false);
-  };
-  const requestExitReadOnly = () => {
-    if (!readOnly) return;
-    setSettingsOpen(false);
-    setUnlockOpen(true);
-  };
   return (
     <div className="app-shell">
-      <header className="topbar" inert={createOpen || !!detail || categoryOpen || shareOpen || settingsOpen || unlockOpen}>
-        <button type="button" className="brand brand-home" onClick={() => setView('start')} disabled={readOnly} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
+      <header className="topbar" inert={createOpen || !!detail || categoryOpen || settingsOpen}>
+        <button type="button" className="brand brand-home" onClick={() => setView('start')} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
           <span className="brand-mark"><BookOpen size={20} strokeWidth={1.8} /></span>
           <h1 className="brand-title" style={{ margin: 0 }}>こどもの こえずかん</h1>
         </button>
         <div className="topbar-actions">
-          {view === 'library' && !readOnly && <button type="button" className="header-create" onClick={openCreate} data-testid="button-create-card"><Plus size={18} /><span>キロクする</span></button>}
-          {!shareRoute && <button type="button" className="header-settings-button" onClick={() => { stopPlayback(); setSettingsOpen(true); }} disabled={!readOnly && settingsLoading} aria-label="設定" title="設定" data-testid="button-settings"><Settings size={17} /></button>}
-          {!readOnly && isFirebaseConfigured && <button type="button" className="header-share-button" onClick={() => { createDraftSession.current++; setShareOpen(true); }} aria-label="ずかんを共有する" data-testid="button-share-encyclopedia"><Share2 size={15} /><span>共有</span></button>}
+          {view === 'library' && <button type="button" className="header-create" onClick={openCreate} data-testid="button-create-card"><Plus size={18} /><span>キロクする</span></button>}
+          <button type="button" className="header-settings-button" onClick={() => { stopPlayback(); setSettingsOpen(true); }} disabled={settingsLoading} aria-label="設定" title="設定" data-testid="button-settings"><Settings size={17} /></button>
         </div>
       </header>
 
-      {shareRoute && (shareMode === 'loading' || shareMode === 'error') ? (
-        <main className="share-gate-main">
-          <section className="share-gate-card" aria-live="polite">
-            {shareMode === 'loading'
-              ? <p className="share-gate-copy" role="status">共有されたずかんを読み込んでいます…</p>
-              : <p className="share-error" role="alert">{shareAccessError}</p>}
-          </section>
-        </main>
-      ) : view === 'start' && !readOnly ? (
-        <main className="start-main" inert={createOpen || !!detail || categoryOpen || shareOpen || settingsOpen || unlockOpen}>
+      {view === 'start' ? (
+        <main className="start-main" inert={createOpen || !!detail || categoryOpen || settingsOpen}>
           <StartScreen onRecord={openCreate} onOpenEncyclopedia={() => { createDraftSession.current++; setView('library'); }} />
         </main>
       ) : (
-      <main className="page-main" inert={createOpen || !!detail || categoryOpen || shareOpen || settingsOpen || unlockOpen}>
+      <main className="page-main" inert={createOpen || !!detail || categoryOpen || settingsOpen}>
         <CategoryBar
-          categories={shownCategories}
+          categories={categories}
           selected={selectedCategory}
           onSelect={(id) => { stopPlayback(); setSelectedCategory(id); }}
           onNew={() => setCategoryOpen(true)}
           disabled={busy}
-          readOnly={readOnly}
         />
         <div id="category-panel" role="tabpanel" aria-labelledby={`category-tab-${selectedCategory ?? 'all'}`}>
-        {!shareRoute && loading ? <p className="notice neutral" role="status">Firebase から図鑑を読み込んでいます…</p> : shownItems.length === 0 && selectedCategory === null ? (
+        {loading ? <p className="notice neutral" role="status">Firebase から図鑑を読み込んでいます…</p> : items.length === 0 && selectedCategory === null ? (
           <section className="empty-state" data-testid="empty-keepsakes">
             <div className="empty-illustration"><BookOpen size={46} strokeWidth={1.35} /></div>
-            <h2 className="empty-title">{readOnly ? 'このずかんは、まだまっさらです' : 'まだ、まっさらなページ'}</h2>
-            <p className="empty-copy">{readOnly ? '共有されたキロクは、まだありません。' : <>いちばん最初のキロクを残してみよう。<br />写真といっしょに、声も大切にしまえます。</>}</p>
-            {!readOnly && <button type="button" className="empty-action" onClick={openCreate} data-testid="button-empty-create">はじめのキロクを残す</button>}
+            <h2 className="empty-title">まだ、まっさらなページ</h2>
+            <p className="empty-copy">いちばん最初のキロクを残してみよう。<br />写真といっしょに、声も大切にしまえます。</p>
+            <button type="button" className="empty-action" onClick={openCreate} data-testid="button-empty-create">はじめのキロクを残す</button>
           </section>
         ) : visibleItems.length === 0 ? (
           <section className="empty-state category-empty" data-testid="empty-category">
             <div className="empty-illustration"><BookOpen size={46} strokeWidth={1.35} /></div>
             <h2 className="empty-title">{categoryName(selectedCategory) ?? 'このカテゴリ'}は、まだ空っぽ</h2>
-            <p className="empty-copy">{readOnly ? 'このページには、まだキロクがありません。' : <>このページはまだ空っぽ。<br />新しいキロクを残すか、ほかのキロクのページを変えられます。</>}</p>
-            {!readOnly && <button type="button" className="empty-action" onClick={openCreate} data-testid="button-category-empty-create">このページにキロクする</button>}
+            <p className="empty-copy">このページはまだ空っぽ。<br />新しいキロクを残すか、ほかのキロクのページを変えられます。</p>
+            <button type="button" className="empty-action" onClick={openCreate} data-testid="button-category-empty-create">このページにキロクする</button>
           </section>
         ) : (
           <section className="sticker-collage" aria-label="わが家のキロク" data-testid="grid-keepsakes">
@@ -655,9 +532,7 @@ function App() {
                     : <ImageIcon size={44} />}
                   {playing && playingItemId === item.id && <span className="voice-notes" aria-hidden="true"><span>♪</span><span>♫</span><span>♪</span></span>}
                 </button>
-                {readOnly
-                  ? <span className="sticker-name" data-testid={`text-card-name-${item.id}`}>{item.itemName}</span>
-                  : <button type="button" className="sticker-name" onClick={() => openDetail(item)} aria-label={`${item.itemName}の写真を大きく表示`} data-testid={`button-detail-${item.id}`}>{item.itemName}</button>}
+                <button type="button" className="sticker-name" onClick={() => openDetail(item)} aria-label={`${item.itemName}の写真を大きく表示`} data-testid={`button-detail-${item.id}`}>{item.itemName}</button>
                 <span className="sr-only" role="status">{playing && playingItemId === item.id ? `${item.itemName}の声を再生中` : ''}</span>
               </article>
             ))}
@@ -665,11 +540,10 @@ function App() {
         )}
 
         </div>
-        <footer className="footer-note">{readOnly ? <><Eye size={14} /> 閲覧専用モード。キロクの変更はできません。</> : <><Sparkles size={14} /> 写真と声はFirebaseに保存します。同じブラウザの匿名アカウントで閲覧できます。</>}</footer>
       </main>
       )}
 
-      {createOpen && !readOnly && !photoEditorSource && (
+      {createOpen && !photoEditorSource && (
         <div className="overlay" role="presentation" inert={newCatInCreate} onMouseDown={(event) => { if (event.target === event.currentTarget) closeCreate(); }}>
           <DetailDialogShell className="dialog" label="新しいキロクをつくる" returnSelector='[data-testid="button-create-card"]' onClose={closeCreate}>
             <div className="dialog-head">
@@ -762,12 +636,11 @@ function App() {
               <button type="button" className="cancel-button" disabled={busy} onClick={closeCreate} data-testid="button-cancel-create">やめる</button>
               <button type="button" className="save-button" onClick={saveCard} disabled={recording || rec.micStatus === 'preparing' || rec.starting || processingVoice || draftLoading || busy || !isFirebaseConfigured || loading} data-testid="button-save-card"><Check size={16} /> {busy ? 'キロクを残しています…' : 'キロクする'}</button>
             </div>
-            {!isFirebaseConfigured && <p className="form-error" role="status">保存にはFirebaseの設定が必要です。src/firebaseConfig.ts をご確認ください。</p>}
           </DetailDialogShell>
         </div>
       )}
 
-      {photoEditorSource && !readOnly && (
+      {photoEditorSource && (
         <PhotoEditor
           source={photoEditorSource}
           onCancel={() => { setPendingPhotoBlob(null); setPhotoEditorSource(''); }}
@@ -781,7 +654,7 @@ function App() {
         />
       )}
 
-      {detail && !readOnly && !editOpen && (
+      {detail && !editOpen && (
         <div className="overlay" role="presentation" onMouseDown={(event) => { if (!busy && event.target === event.currentTarget) closeDetail(); }}>
           <DetailDialogShell label={`${detail.itemName}のキロク`} returnSelector={`[data-testid="button-detail-${detail.id}"]`} onClose={closeDetail}>
             <button type="button" className="icon-button" disabled={busy} style={{ position: 'absolute', zIndex: 2, right: 25, top: 25 }} onClick={closeDetail} aria-label="閉じる" data-testid="button-close-detail"><X size={19} /></button>
@@ -800,7 +673,7 @@ function App() {
           </DetailDialogShell>
         </div>
       )}
-      {categoryOpen && !readOnly && (
+      {categoryOpen && (
         <CategoryDialog
           categories={categories}
           onCreate={createCategoryEntry}
@@ -809,7 +682,7 @@ function App() {
           onCreated={(made) => { setSelectedCategory(made.id); setCategoryOpen(false); }}
         />
       )}
-      {newCatInCreate && !readOnly && (
+      {newCatInCreate && (
         <CategoryDialog
           categories={categories}
           onCreate={createCategoryEntry}
@@ -820,7 +693,7 @@ function App() {
         />
       )}
 
-      {editOpen && detail && !readOnly && (
+      {editOpen && detail && (
         <EditCardDialog
           item={detail}
           categories={categories}
@@ -833,13 +706,9 @@ function App() {
           }}
         />
       )}
-      {shareOpen && !readOnly && <ShareDialog onClose={() => setShareOpen(false)} />}
-      {settingsOpen && !shareRoute && <SettingsDialog
+      {settingsOpen && <SettingsDialog
         settings={gallerySettings}
-        readOnly={readOnly}
         onClose={() => setSettingsOpen(false)}
-        onChooseViewMode={enterReadOnly}
-        onExitReadOnly={requestExitReadOnly}
         onSave={async (next) => {
           try {
             await saveGallerySettings(next);
@@ -849,7 +718,6 @@ function App() {
           }
         }}
       />}
-      {unlockOpen && readOnly && <ModeLockDialog onClose={() => setUnlockOpen(false)} onUnlock={finishUnlock} />}
     </div>
   );
 }

@@ -135,22 +135,32 @@ export function createKeepsakeRepository(
   }
 
   async function deleteKeepsake(item: Keepsake): Promise<void> {
-    const [uid, ownerBookId] = await Promise.all([userId(), bookId()]);
+    const ownerBookId = await bookId();
+    const isCardMediaPath = (path: string | null | undefined) => {
+      if (!path) return false;
+      const parts = path.split('/');
+      return parts.length >= 5 && parts[0] === 'users' && parts[1] !== '' &&
+        parts[2] === 'keepsakes' && parts[3] === item.id &&
+        parts.slice(4).every((part) => part !== '' && part !== '.' && part !== '..');
+    };
     // Validate the supplied snapshot before resolving the current server version.
     // A stale but valid snapshot may be refreshed; a mismatched URL is never trusted.
     for (const [path, url] of [[item.photoPath, item.photo], ...getVoices(item).map((v) => [v.path, v.url])]) {
-      if (path?.startsWith(`users/${uid}/keepsakes/${item.id}/`) && url && io.ref(storage, url).fullPath !== path) {
+      if (isCardMediaPath(path) && url && io.ref(storage, url).fullPath !== path) {
         throw new Error('ファイルの保存パスが一致しません。削除していません。');
       }
     }
     const record = doc(db, 'books', ownerBookId, 'cards', item.id);
     const latest = await deadline(io.getDoc(record), timeoutMs);
-    const current = latest.exists() ? keepsakeFromData(item.id, latest.data()!) : item;
+    // A stale dialog must not use its old snapshot to delete files after another
+    // client has already removed the card.
+    if (!latest.exists()) return;
+    const current = keepsakeFromData(item.id, latest.data()!);
     const files = [[current.photoPath, current.photo], ...getVoices(current).map((v) => [v.path, v.url])];
     const removed = new Set<string>();
     for (const [path, url] of files) {
       if (!path || removed.has(path)) continue;
-      if (path?.startsWith(`users/${uid}/keepsakes/${item.id}/`)) await removeFile(path, url ?? undefined);
+      if (isCardMediaPath(path)) await removeFile(path, url ?? undefined);
       removed.add(path);
     }
     await deadline(io.deleteDoc(record), timeoutMs);

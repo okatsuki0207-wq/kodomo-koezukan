@@ -7,7 +7,6 @@ type Props = {
   onSelect: (id: string | null) => void;
   onNew: () => void;
   disabled?: boolean;
-  readOnly?: boolean;
 };
 
 export default function CategoryBar({
@@ -16,7 +15,6 @@ export default function CategoryBar({
   onSelect,
   onNew,
   disabled,
-  readOnly,
 }: Props) {
   return (
     <div className="category-bar" data-testid="category-bar">
@@ -52,7 +50,7 @@ export default function CategoryBar({
             </button>
           ))}
         </div>
-        {!readOnly && <button type="button" className="category-chip category-new" onClick={onNew} disabled={disabled} aria-label="新しいカテゴリを追加" title="新しいカテゴリを追加" data-testid="button-new-category"><Plus size={15} /><span>新しいカテゴリ</span></button>}
+        <button type="button" className="category-chip category-new" onClick={onNew} disabled={disabled} aria-label="新しいカテゴリを追加" title="新しいカテゴリを追加" data-testid="button-new-category"><Plus size={15} /><span>新しいカテゴリ</span></button>
       </div>
     </div>
   );

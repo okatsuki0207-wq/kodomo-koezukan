@@ -26,11 +26,6 @@ if (!vm.SourceTextModule) {
     });
     const exports = {
       'firebase/app': { initializeApp: () => ({}) },
-      'firebase/auth': {
-        indexedDBLocalPersistence: {},
-        initializeAuth: () => ({ authStateReady: async () => {}, currentUser: { uid } }),
-        signInAnonymously: async () => ({ user: { uid } }),
-      },
       'firebase/firestore': {
         getFirestore: () => ({}),
         collection: (_db, ...parts) => parts.join('/'),
@@ -72,10 +67,7 @@ if (!vm.SourceTextModule) {
       './keepsakeEditor': { createKeepsakeEditor: () => ({ editKeepsake: () => { throw new Error('Not a metadata-only operation'); } }) },
       './bookRepository': {
         configureBookRepository: () => {},
-        getOwnerBookContext: async () => ({ ownerUid: uid, bookId: 'test-book' }),
-        getOwnerBookShareState: async () => ({ ownerUid: uid, bookId: 'test-book', enabled: false }),
-        setOwnerBookSharing: async () => 'test-book',
-        subscribePublicBook: async () => () => {},
+        getOwnerBookContext: async () => ({ bookId: 'test-book' }),
       },
       './gallerySettings': {
         DEFAULT_GALLERY_SETTINGS: { displayMode: 'ordered', shuffleSeed: 0 },
@@ -120,7 +112,7 @@ if (!vm.SourceTextModule) {
     return { api: store.namespace, records, calls, timestamp, uid };
   }
 
-  test('category creation writes only to the current owner and retries are idempotent', async () => {
+  test('category creation writes to the common book and retries are idempotent', async () => {
     const { api, records, calls, uid } = await fixture();
     const first = await api.createCategory('  のりもの  ');
     const second = await api.createCategory('のりもの');
@@ -131,7 +123,7 @@ if (!vm.SourceTextModule) {
     assert.deepEqual(Object.keys(records.values().next().value).sort(), ['createdAt', 'name']);
   });
 
-  test('category subscriptions are private and include all three defaults', async () => {
+  test('category subscriptions read the common book and include all three defaults', async () => {
     const { api, calls, uid } = await fixture();
     let categories;
     const stop = await api.subscribeCategories((value) => { categories = value; }, assert.fail);

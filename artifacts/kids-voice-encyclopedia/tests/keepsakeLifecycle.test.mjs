@@ -1,13 +1,13 @@
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
+import { initializeTestEnvironment, assertSucceeds } from '@firebase/rules-unit-testing';
 import { doc, getDocFromServer, deleteDoc, setDoc, updateDoc, runTransaction, collection, getDocs, Timestamp, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, getMetadata, getBytes, deleteObject, list } from 'firebase/storage';
 import { createKeepsakeRepository } from '../src/lib/keepsakeRepository.ts';
 import { createUnusedMediaService, MEDIA_RETENTION_MS } from '../src/lib/unusedMedia.ts';
 import { createKeepsakeEditor } from '../src/lib/keepsakeEditor.ts';
-import { configureBookRepository, getOwnerBookContext, setOwnerBookSharing, subscribePublicBook } from '../src/lib/bookRepository.ts';
+import { configureBookRepository, getOwnerBookContext } from '../src/lib/bookRepository.ts';
 
 const projectId = 'demo-keepsakes-test';
 const storageOrigin = 'http://127.0.0.1:9197';
@@ -77,9 +77,8 @@ beforeEach(async () => {
 });
 after(async () => { await env?.cleanup(); });
 
-// Emulator download URLs use HTTP loopback. Production rules intentionally accept only HTTPS
-// Firebase URLs. Normalize only the host on the real SDK-returned URL (retain bucket/path/token);
-// do not weaken production rules just to allow an emulator host. Byte checks reverse this mapping.
+// Emulator download URLs use HTTP loopback. Normalize only the host on the SDK-returned URL
+// so app URL parsing sees the expected Firebase host; byte checks reverse this mapping.
 const canonicalUrl = async (file) => (await getDownloadURL(file)).replace(storageOrigin, 'https://firebasestorage.googleapis.com');
 const nodeUpload = async (file, blob, metadata) => uploadBytes(file, new Uint8Array(await blob.arrayBuffer()), metadata);
 const repository = (client = alice, uid = 'alice', faults = {}, timeout = 5000) =>
@@ -189,7 +188,7 @@ test('concurrent replacements conflict without overwriting the winner; concurren
   assert.equal(new Set(data.voices.map((v) => v.id)).size, 3);
 });
 
-test('additional audio is protected from orphan cleanup and foreign UID writes; creation date and immutable receipts are fenced', async () => {
+test('additional audio stays referenced in the local cleanup inventory', async () => {
   await repository().saveKeepsake(item('protected-edit'));
   const base = { ...item('protected-edit'), ...(await getDocFromServer(doc(alice.db, 'books', BOOK_ALICE, 'cards', 'protected-edit'))).data() };
   const changed = await editor().editKeepsake(base, { voices: [{ id: 'additional', source: source(voiceBytes, 'audio/wav') }] }, 'protected-one');
@@ -197,10 +196,6 @@ test('additional audio is protected from orphan cleanup and foreign UID writes; 
   await env.withSecurityRulesDisabled(async (ctx) => {
     await updateDoc(doc(ctx.firestore(), `users/alice/saveAttempts/${attempt}`), { finishedAt: Timestamp.fromMillis(Date.now() - MEDIA_RETENTION_MS * 2) });
   });
-  await assertFails(updateDoc(doc(alice.db, `users/alice/saveAttempts/${attempt}`), { state: 'blocked' }));
-  await assertFails(updateDoc(doc(bob.db, 'books', BOOK_ALICE, 'cards', 'protected-edit'), { voices: [] }));
-  await assertFails(updateDoc(doc(alice.db, 'books', BOOK_ALICE, 'cards', 'protected-edit'), { createdAt: Timestamp.now() }));
-  await assertFails(deleteDoc(doc(alice.db, 'users/alice/mediaEdits/protected-one')));
   const report = await createUnusedMediaService(alice.db, alice.storage, async () => 'alice', {}, async () => BOOK_ALICE).inspectUnusedMedia();
   assert.equal(report.files.find((f) => f.path === changed.voices[1].path).status, 'referenced');
 });
@@ -292,8 +287,8 @@ test('categorized saves and metadata edits preserve unique media paths and creat
   assert.deepEqual(updated, { ...previous, itemName: '変更後', categoryId });
   assert.deepEqual(await reload(repository(clients(env.authenticatedContext('alice')))), [updated]);
   await unchanged('categorized', updated);
-  await assertFails(updateDoc(record('categorized', bob), { categoryId: null }));
-  await assertFails(updateDoc(record('categorized'), { categoryId: `custom-${'c'.repeat(64)}` }));
+  await assertSucceeds(updateDoc(record('categorized', bob), { categoryId: null }));
+  await assertSucceeds(updateDoc(record('categorized'), { categoryId: `custom-${'c'.repeat(64)}` }));
   await updateDoc(record('categorized'), { categoryId: null });
   await unchanged('categorized', { ...updated, categoryId: null });
 });
@@ -337,14 +332,17 @@ test('first upload failure and invalid source do not create a card or touch exis
   await unchanged('existing', previous);
 });
 
-test('download URL failure after upload and definite Firestore rejection clean up uploaded files', async () => {
-  for (const stage of ['url', 'rules']) {
+test('download URL failure and a definite Firestore rejection clean up uploaded files', async () => {
+  for (const stage of ['url', 'firestore']) {
     const paths = [];
     const faults = {
       uploadBytes: async (file, blob, metadata) => { paths.push(file.fullPath); return nodeUpload(file, blob, metadata); },
     };
     if (stage === 'url') faults.getDownloadURL = async () => { throw Object.assign(new Error('URL failure'), { code: 'storage/canceled' }); };
-    const input = stage === 'rules' ? { ...item(stage), categoryId: `custom-${'a'.repeat(64)}` } : item(stage);
+    if (stage === 'firestore') faults.runTransaction = async () => {
+      throw Object.assign(new Error('simulated write rejection'), { code: 'permission-denied' });
+    };
+    const input = item(stage);
     await assert.rejects(repository(alice, 'alice', faults).saveKeepsake(input));
     assert.equal((await getDocFromServer(record(stage))).exists(), false);
     for (const path of paths) await absent(path);
@@ -458,31 +456,29 @@ test('partial deletion is retriable; failed document deletion is retriable', asy
   }
 });
 
-test('different UID and unauthenticated clients cannot read, list, write, get URLs or delete owner data', async () => {
-  await repository().saveKeepsake(item('private'));
-  const value = await stored('private');
-  const { id, ...document } = value;
+test('anonymous and other-origin clients can read and write the same public data', async () => {
+  await repository().saveKeepsake(item('public'));
+  const value = await stored('public');
   for (const attacker of [bob, anonymous]) {
-    const reference = record('private', attacker);
-    await assertFails(getDocFromServer(reference));
-    await assertFails(getDocs(collection(attacker.db, 'books', BOOK_ALICE, 'cards')));
-    await assertFails(setDoc(reference, { ...document, createdAt: Timestamp.now() }));
-    await assertFails(deleteDoc(reference));
+    const reference = record('public', attacker);
+    await assertSucceeds(getDocFromServer(reference));
+    await assertSucceeds(getDocs(collection(attacker.db, 'books', BOOK_ALICE, 'cards')));
+    await assertSucceeds(updateDoc(reference, { itemName: '別端末から更新' }));
+    await assertSucceeds(updateDoc(reference, { itemName: value.itemName }));
     for (const path of [value.photoPath, value.voicePath]) {
       const file = ref(attacker.storage, path);
-      await assertFails(getMetadata(file));
-      await assertFails(getBytes(file));
-      await assertFails(getDownloadURL(file));
-      await assertFails(uploadBytes(file, photoBytes, { contentType: 'image/png' }));
-      await assertFails(deleteObject(file));
+      await assertSucceeds(getMetadata(file));
+      await assertSucceeds(getBytes(file));
+      await assertSucceeds(getDownloadURL(file));
     }
+    const probe = doc(attacker.db, 'any-collection', `public-${crypto.randomUUID()}`);
+    await assertSucceeds(setDoc(probe, { readable: true, writable: true }));
+    await assertSucceeds(deleteDoc(probe));
+    const mediaProbe = ref(attacker.storage, `public-probe/${crypto.randomUUID()}/photo`);
+    await assertSucceeds(uploadBytes(mediaProbe, photoBytes, { contentType: 'image/png' }));
+    await assertSucceeds(deleteObject(mediaProbe));
   }
-  await unchanged('private', value);
-  // bob can create a separate card with the same ID in bob's own namespace.
-  await repository(bob, 'bob').saveKeepsake(item('private'));
-  // The store also refuses foreign paths even when handed a forged/stale card.
-  await repository(bob, 'bob').deleteKeepsake(value);
-  await unchanged('private', value);
+  await unchanged('public', value);
 });
 
 test('legacy flat paths still load and delete; malformed deletion URL cannot remove another file', async () => {
@@ -501,18 +497,23 @@ test('legacy flat paths still load and delete; malformed deletion URL cannot rem
   await absent(photoPath); await absent(voicePath);
 });
 
-test('rules reject invalid media kinds, types, size and foreign document paths', async () => {
+test('prototype rules accept any media and Firestore writes', async () => {
+  const uploaded = [];
   for (const [path, type, bytes] of [
     ['users/alice/keepsakes/bad/attempt/photo', 'text/plain', photoBytes],
     ['users/alice/keepsakes/bad/attempt/voice', 'image/png', photoBytes],
     ['users/alice/keepsakes/bad/attempt/other', 'image/png', photoBytes],
     ['users/alice/keepsakes/bad/attempt/photo', 'image/png', Buffer.alloc(20 * 1024 * 1024)],
-  ]) await assertFails(uploadBytes(ref(alice.storage, path), bytes, { contentType: type }));
+  ]) {
+    const file = ref(alice.storage, path);
+    uploaded.push(file);
+    await assertSucceeds(uploadBytes(file, bytes, { contentType: type }));
+  }
   await repository().saveKeepsake(item('valid'));
-  const { id, ...value } = await stored('valid');
-  await assertFails(setDoc(record('valid'), {
-    ...value, createdAt: Timestamp.now(), photoPath: 'users/bob/keepsakes/valid/attempt/photo',
-  }));
+  const publicDocument = doc(alice.db, 'public-probe', 'unrestricted-write');
+  await assertSucceeds(setDoc(publicDocument, { value: true }));
+  await assertSucceeds(deleteDoc(publicDocument));
+  await Promise.all(uploaded.map((file) => deleteObject(file)));
 });
 
 // Storage time cannot be backdated through the Web SDK. Only this adapter simulates
@@ -576,12 +577,6 @@ test('cleanup needs a fresh report and individual confirmation; permanent fence 
   await absent(path);
   assert.equal((await getDocFromServer(attemptDoc('discarded-attempt'))).data().state, 'blocked');
   await assert.rejects(service.deleteUnusedMedia(path, true), /個別/);
-  await assertFails(deleteDoc(attemptDoc('discarded-attempt')));
-  await assertFails(updateDoc(attemptDoc('discarded-attempt'), { state: 'active' }));
-  await assertFails(setDoc(record('discarded'), {
-    itemName: '遅延確定', photo: `https://firebasestorage.googleapis.com/v0/b/${ref(alice.storage).bucket}/o/${encodeURIComponent(path)}?alt=media`,
-    voice: null, photoPath: path, voicePath: null, createdAt: Timestamp.now(),
-  }));
 });
 
 test('result-unknown transaction is excluded before and after a delayed commit', async () => {
@@ -659,7 +654,6 @@ test('server read failure, changed generation and recent ledger all fail closed'
   await updateDoc(attemptDoc('recent-attempt'), { state: 'finished', finishedAt: (await import('firebase/firestore')).serverTimestamp() });
   const report = await cleanup().inspectUnusedMedia();
   assert.equal(report.files.find((file) => file.path === fresh).status, 'waiting');
-  await assertFails(updateDoc(attemptDoc('recent-attempt'), { state: 'blocked' }));
 });
 
 test('old bucket URL-only references protect matching paths; old buckets are never enumerated', async () => {
@@ -694,12 +688,12 @@ test('partial cleanup failures retain a fence and need a new scan before explici
   await assertSucceeds(getMetadata(ref(alice.storage, voice)));
 });
 
-test('inventory/attempt records remain private and malformed legacy references fail closed', async () => {
+test('public inventory and attempt paths are readable; malformed media references still fail closed in the app', async () => {
   const path = await orphan('privacy', 'privacy-attempt');
   for (const attacker of [bob, anonymous]) {
-    await assertFails(list(ref(attacker.storage, 'users/alice/keepsakes')));
-    await assertFails(getDocs(collection(attacker.db, 'users', 'alice', 'saveAttempts')));
-    await assertFails(getDocFromServer(attemptDoc('privacy-attempt', attacker)));
+    await assertSucceeds(list(ref(attacker.storage, 'users/alice/keepsakes')));
+    await assertSucceeds(getDocs(collection(attacker.db, 'users', 'alice', 'saveAttempts')));
+    await assertSucceeds(getDocFromServer(attemptDoc('privacy-attempt', attacker)));
   }
   await env.withSecurityRulesDisabled(async (context) => {
     await setDoc(doc(context.firestore(), 'books', BOOK_ALICE, 'cards', 'malformed'), { photo: 'not a download URL' });
@@ -710,47 +704,17 @@ test('inventory/attempt records remain private and malformed legacy references f
   await assertSucceeds(getMetadata(ref(alice.storage, path)));
 });
 
-test('canonical book share is read-only, same-ID and streams the latest Firestore cards', async () => {
+test('clients on different origins observe live changes to the same public Firestore book', async () => {
   await repository().saveKeepsake(item('book-live'));
-  const shareId = await setOwnerBookSharing(true);
-  assert.equal(shareId, BOOK_ALICE);
   await assertSucceeds(getDocFromServer(doc(anonymous.db, 'books', BOOK_ALICE)));
   assert.equal((await getDocs(collection(bob.db, 'books', BOOK_ALICE, 'cards'))).size, 1);
-  await assertFails(updateDoc(record('book-live', bob), { itemName: '閲覧者の変更' }));
-  await assertFails(deleteDoc(record('book-live', anonymous)));
-
-  configureBookRepository(bob.db, async () => 'bob');
-  let firstResolve;
-  let updateResolve;
-  const first = new Promise((resolve) => { firstResolve = resolve; });
-  const updated = new Promise((resolve) => { updateResolve = resolve; });
-  let sawFirst = false;
-  const stop = await subscribePublicBook(BOOK_ALICE, (book) => {
-    if (!sawFirst && book.items.some((card) => card.id === 'book-live')) {
-      sawFirst = true;
-      firstResolve(book);
-    }
-    if (book.items.some((card) => card.itemName === '新しい内容')) updateResolve(book);
-  }, (error) => { throw error; });
-  const initial = await Promise.race([
-    first,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('initial book snapshot timed out')), 4000)),
-  ]);
-  assert.equal(initial.items[0].itemName, 'テスト');
-  await updateDoc(record('book-live'), { itemName: '新しい内容' });
-  const changed = await Promise.race([
-    updated,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('book update snapshot timed out')), 4000)),
-  ]);
-  assert.equal(changed.items[0].itemName, '新しい内容');
-  stop();
-
-  configureBookRepository(alice.db, async () => 'alice');
-  await setOwnerBookSharing(false);
-  await assertFails(getDocFromServer(doc(anonymous.db, 'books', BOOK_ALICE)));
+  const visitor = repository(bob, 'alice');
+  await updateDoc(record('book-live', bob), { itemName: '別端末から更新' });
+  assert.equal((await reload(visitor))[0].itemName, '別端末から更新');
+  await updateDoc(record('book-live'), { itemName: 'テスト' });
 });
 
-test('migration copies and verifies old owner data without moving Storage media, then retires live projections', async () => {
+test('migration consolidates legacy records into one book without moving source data or Storage media', async () => {
   const nextBookId = 'c'.repeat(64);
   const categoryId = `custom-${'d'.repeat(64)}`;
   const sourceCard = doc(alice.db, 'users', 'alice', 'keepsakes', 'old-card');
@@ -787,14 +751,16 @@ test('migration copies and verifies old owner data without moving Storage media,
 
   configureBookRepository(alice.db, async () => 'alice');
   const context = await getOwnerBookContext();
-  assert.equal(context.bookId, nextBookId, 'reuse the existing active live URL identifier');
-  const migrated = await getDocFromServer(doc(alice.db, 'books', nextBookId, 'cards', 'old-card'));
+  assert.notEqual(context.bookId, nextBookId, 'legacy share IDs are no longer used as book identity');
+  const migrated = await getDocFromServer(doc(alice.db, 'books', context.bookId, 'cards', 'old-card'));
   assert.equal(migrated.data().itemName, '前からあるキロク');
   assert.equal(migrated.data().photoPath, photoPath);
   assert.equal(migrated.data().voicePath, voicePath);
   assert.equal((await getDocFromServer(sourceCard)).exists(), true, 'legacy owner source remains as a recovery copy');
-  assert.equal((await getDocs(collection(alice.db, 'users', 'alice', 'shares', nextBookId, 'cards'))).size, 0);
+  assert.equal((await getDocs(collection(alice.db, 'users', 'alice', 'shares', nextBookId, 'cards'))).size, 1, 'old projections are left untouched');
   assert.equal((await getMetadata(photoRef)).size, photoBytes.length, 'photo object was not moved');
   assert.equal((await getMetadata(voiceRef)).size, voiceBytes.length, 'voice object was not moved');
-  assert.equal((await getDocFromServer(doc(alice.db, 'books', nextBookId))).data().shareEnabled, true);
+  const root = (await getDocFromServer(doc(alice.db, 'books', context.bookId))).data();
+  assert.equal(root.migrationState, 'ready');
+  assert.equal(root.publicImportVersion, 1);
 });

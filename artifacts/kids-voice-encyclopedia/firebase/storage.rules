@@ -1,58 +1,11 @@
 rules_version = '2';
+
 service firebase.storage {
   match /b/{bucket}/o {
-    // Listing is private to the authenticated user's namespace (rules v2 required).
-    match /users/{uid}/keepsakes/{rest=**} {
-      allow list: if request.auth != null && request.auth.uid == uid;
-    }
-    match /users/{uid}/shares/{shareId} {
-      allow list: if request.auth != null && request.auth.uid == uid
-        && shareId.matches('[a-f0-9]{64}');
-    }
-    match /users/{uid}/shares/{shareId}/assets {
-      allow list: if request.auth != null && request.auth.uid == uid
-        && shareId.matches('[a-f0-9]{64}');
-    }
-    match /users/{uid}/shares/{shareId}/{rest=**} {
-      allow list: if request.auth != null && request.auth.uid == uid
-        && shareId.matches('[a-f0-9]{64}');
-    }
-    match /users/{uid}/keepsakes/{id}/{kind} {
-      function owner() { return request.auth != null && request.auth.uid == uid; }
-      allow read, delete: if owner();
-      allow create, update: if owner()
-        && request.resource.size < 20 * 1024 * 1024
-        && ((kind == 'photo' && request.resource.contentType.matches('image/(jpeg|png|webp)'))
-          || (kind == 'voice' && request.resource.contentType.matches('audio/.*')));
-    }
-    // Unique save attempts keep concurrent saves and rollback isolated.
-    match /users/{uid}/keepsakes/{id}/{attempt}/{kind} {
-      function owner() { return request.auth != null && request.auth.uid == uid; }
-      allow read, delete: if owner();
-      allow create: if owner()
-        && attempt.matches('[a-zA-Z0-9-]+')
-        && request.resource.size < 20 * 1024 * 1024
-        && ((kind == 'photo' && request.resource.contentType.matches('image/(jpeg|png|webp)'))
-          || (kind == 'voice' && request.resource.contentType.matches('audio/.*')));
-    }
-    match /users/{uid}/shares/{shareId}/assets/{assetId} {
-      function owner() { return request.auth != null && request.auth.uid == uid; }
-      // Retired encrypted-share assets are no longer served publicly.
-      allow get: if owner()
-        && shareId.matches('[a-f0-9]{64}')
-        && assetId.matches('[a-f0-9]{32}');
-      allow list: if owner()
-        && shareId.matches('[a-f0-9]{64}')
-        && assetId.matches('[a-f0-9]{32}');
-      allow create: if owner()
-        && shareId.matches('[a-f0-9]{64}')
-        && assetId.matches('[a-f0-9]{32}')
-        && request.resource.size < 20 * 1024 * 1024
-        && request.resource.contentType == 'application/octet-stream';
-      allow update: if false;
-      allow delete: if owner()
-        && shareId.matches('[a-f0-9]{64}')
-        && assetId.matches('[a-f0-9]{32}');
+    // Prototype-only open access. Anyone can read, upload, overwrite, or delete
+    // every object in this Firebase Storage bucket. Replace before launch.
+    match /{allPaths=**} {
+      allow read, write: if true;
     }
   }
 }

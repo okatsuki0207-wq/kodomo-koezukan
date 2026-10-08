@@ -5,22 +5,14 @@ import type { FirebaseOptions } from 'firebase/app';
  * 1. https://console.firebase.google.com/ でプロジェクトと Web アプリを登録。
  * 2. プロジェクト設定 → Web アプリの firebaseConfig を下記へコピー。
  *    これは公開用 Web 設定です。サービスアカウントの秘密鍵は入れないでください。
- * 3. Authentication → ログイン方法 → 匿名を有効化。
- * 4. Firestore Database と Storage を作成し、firebase/ 配下のルールを公開。
- *    テストモード（全員に読み書き許可）は使わないでください。
- * 5. Authentication → 設定 → 承認済みドメインに、開発プレビューと公開版の
- *    ホスト名をそれぞれ追加（https:// やパスは不要）。replit.dev の匿名認証も
- *    ここで許可する必要があります。開発版と公開版では匿名ユーザーIDは別になります。
- * 6. 保存・再読み込み・削除を確認してください。
+ * 3. Firestore Database と Storage を作成し、firebase/ 配下のルールを公開。
+ * 4. この試作の rules は Firestore と Storage の全データを誰でも読み書きできます。
+ *    URLを知る人は写真・録音を含め、Firebaseプロジェクト内の全データを変更・削除できます。
  *
  * 注意: 2026年現在、Storage は Blaze（課金アカウント登録）が必須です。
  * 無料枠はありますが、リージョン・使用量で料金が発生します。
  * 予算アラートは料金の上限ではありません。完全無料は保証できません。
  * https://firebase.google.com/docs/storage/faqs-storage-changes-announced-sept-2024
- *
- * 匿名認証の ID は IndexedDB で保持します（LocalStorage には保存しません）。
- * 同じブラウザで再利用できますが、別端末やブラウザデータ消去後の復元には
- * 匿名アカウントを通常のログインにリンクする追加実装が必要です。
  */
 export const firebaseConfig: FirebaseOptions = {
   apiKey: 'AIzaSyC3_8iu6dW6CA0dDieQogrejlCRO8cyba4',
