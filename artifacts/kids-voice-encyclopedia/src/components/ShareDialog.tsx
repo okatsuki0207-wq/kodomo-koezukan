@@ -4,6 +4,7 @@ import type { Category } from '../lib/categories';
 import type { GallerySettings } from '../lib/gallerySettings';
 import type { Keepsake } from '../lib/keepsakeRepository';
 import { firebaseError, getOrCreateLiveShare, listPasswordShares, revokePasswordShare } from '../lib/keepsakeStore';
+import { ShareOperationError, type ShareOperationStage } from '../lib/shareRepository';
 import { createShareUrl } from '../lib/shareCrypto';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 
@@ -25,9 +26,50 @@ function shareLink(share: ShareOwnerAndId): LinkState {
 }
 
 function userError(caught: unknown, fallback: string) {
-  const message = caught instanceof Error ? caught.message : '';
-  if (/^(Firebase|FirebaseError):|\((firestore|storage)\//u.test(message)) return firebaseError(caught);
+  const operation = caught instanceof ShareOperationError ? caught : null;
+  const cause = operation?.originalError ?? caught;
+  const message = cause instanceof Error ? cause.message : '';
+  const name = cause instanceof Error ? cause.name : '';
+  const code = typeof cause === 'object' && cause !== null && 'code' in cause
+    && typeof cause.code === 'string' ? cause.code : '';
+  const isFirebaseError = name === 'FirebaseError' || /^(firestore|storage|auth)\//u.test(code)
+    || /^(Firebase|FirebaseError):|\((firestore|storage)\//u.test(message);
+
+  if (operation) {
+    console.error('Live share operation failed', { stage: operation.stage, code, name });
+    if (code.includes('permission-denied') || code.includes('unauthorized')) {
+      return permissionError(operation.stage);
+    }
+    if (code.includes('unauthenticated') || code.includes('operation-not-allowed')
+      || code.includes('configuration-not-found')) {
+      return 'Firebaseの匿名ログインが使えません。Firebase ConsoleでAuthenticationの「匿名」を有効にしてから、もう一度お試しください。';
+    }
+    if (code.includes('network') || code.includes('unavailable') || code.includes('deadline-exceeded')) {
+      return 'Firebaseに接続できませんでした。通信を確認して、もう一度お試しください。';
+    }
+    if (isFirebaseError) return stageError(operation.stage);
+    if (/^[ぁ-んァ-ヶ一-龠]/u.test(message)) return message;
+    return stageError(operation.stage);
+  }
+
+  if (isFirebaseError) return firebaseError(cause);
   return /^[ぁ-んァ-ヶ一-龠]/u.test(message) ? message : fallback;
+}
+
+function permissionError(stage: ShareOperationStage) {
+  if (stage === 'lookup') {
+    return '共有リンクの読み取りがFirestoreに拒否されました。Firebase Consoleで最新のFirestoreルールを公開してから、もう一度お試しください。';
+  }
+  if (stage === 'create') {
+    return '共有リンクの登録がFirestoreに拒否されました。Firebase Consoleで最新のFirestoreルールを公開し、匿名ログインが有効か確認してください。';
+  }
+  return '共有カード情報の保存がFirestoreに拒否されました。Firebase Consoleで最新のFirestoreルールを公開してから、もう一度お試しください。';
+}
+
+function stageError(stage: ShareOperationStage) {
+  if (stage === 'lookup') return '共有リンクを確認できませんでした。通信とFirebaseの設定を確認して、もう一度お試しください。';
+  if (stage === 'create') return 'Firebaseに共有リンクを登録できませんでした。Firestoreの設定を確認して、もう一度お試しください。';
+  return '共有するカード情報をFirebaseに保存できませんでした。Firestoreの設定を確認して、もう一度お試しください。';
 }
 
 export default function ShareDialog({ items, categories, settings, onClose }: Props) {

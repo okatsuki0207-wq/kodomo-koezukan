@@ -23,6 +23,21 @@ const MAX_SHARED_FILES = MAX_SHARE_CARDS * 6;
 const SHARE_FORMAT_VERSION = 1;
 
 export type ShareId = { ownerUid: string; shareId: string };
+export type ShareOperationStage = 'lookup' | 'create' | 'projection';
+export class ShareOperationError extends Error {
+  readonly stage: ShareOperationStage;
+  readonly originalError: unknown;
+
+  constructor(
+    stage: ShareOperationStage,
+    originalError: unknown,
+  ) {
+    super('共有リンクの処理に失敗しました。');
+    this.name = 'ShareOperationError';
+    this.stage = stage;
+    this.originalError = originalError;
+  }
+}
 export type ShareSummary = {
   ownerUid: string;
   shareId: string;
@@ -248,23 +263,27 @@ export async function createLiveShare(
   const ownerUid = await userId();
   const shareId = createShareId();
   const shareRef = doc(db, 'users', ownerUid, 'shares', shareId);
-  await runTransaction(db, async (transaction) => {
-    const existing = await transaction.get(shareRef);
-    if (existing.exists()) throw new Error('共有リンクIDが重複しました。もう一度お試しください。');
-    transaction.set(shareRef, {
-      active: true,
-      version: 2,
-      mode: 'live',
-      createdAt: serverTimestamp(),
+  try {
+    await runTransaction(db, async (transaction) => {
+      const existing = await transaction.get(shareRef);
+      if (existing.exists()) throw new Error('共有リンクIDが重複しました。もう一度お試しください。');
+      transaction.set(shareRef, {
+        active: true,
+        version: 2,
+        mode: 'live',
+        createdAt: serverTimestamp(),
+      });
     });
-  });
+  } catch (error) {
+    throw new ShareOperationError('create', error);
+  }
   try {
     await writeProjection(db, ownerUid, shareId, items, categories, settings);
     return { ownerUid, shareId };
   } catch (error) {
     // Never leave an intentionally incomplete public link active.
     await updateDoc(shareRef, { active: false }).catch(() => {});
-    throw error;
+    throw new ShareOperationError('projection', error);
   }
 }
 
@@ -371,7 +390,13 @@ export async function getOrCreateLiveShare(
   categories: readonly Category[],
   settings: GallerySettings = DEFAULT_GALLERY_SETTINGS,
 ): Promise<ShareId> {
-  const existing = (await listPasswordShares()).find((share) => share.active && share.mode === 'live');
+  let shares: ShareSummary[];
+  try {
+    shares = await listPasswordShares();
+  } catch (error) {
+    throw new ShareOperationError('lookup', error);
+  }
+  const existing = shares.find((share) => share.active && share.mode === 'live');
   if (existing) return { ownerUid: existing.ownerUid, shareId: existing.shareId };
   return createLiveShare(items, categories, settings);
 }
