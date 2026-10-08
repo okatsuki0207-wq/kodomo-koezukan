@@ -151,6 +151,7 @@ export function firebaseError(error: unknown): string {
   const storageMessage = storageFailureMessage(error, firebaseConfig.storageBucket!);
   if (storageMessage) return storageMessage;
   if (code.includes('configuration-not-found')) return 'Firebase Authentication が未設定です。Firebase ConsoleでAuthenticationの「始める」を押し、ログイン方法の「匿名」を有効にしてから再接続してください。';
+  if (code.includes('unauthorized-domain')) return 'このURLがFirebase Authenticationの承認済みドメインにありません。Firebase ConsoleのAuthentication → 設定 → 承認済みドメインに、アドレス欄のホスト名を追加してください。';
   if (code.includes('permission-denied') || code.includes('unauthorized')) return 'Firebaseからアクセスを拒否されました。Firestoreのデータは匿名認証ユーザーごとに分かれます。保存時と同じURL・ブラウザで開いているか、FirebaseのプロジェクトIDとルールの公開先が一致しているか確認してください。';
   if (code.includes('operation-not-allowed')) return 'Firebase Authentication の匿名ログインを有効にしてください。';
   if (code.includes('network') || code.includes('unavailable') || code.includes('retry-limit')) return 'Firebase に接続できませんでした。通信を確認してもう一度お試しください。';

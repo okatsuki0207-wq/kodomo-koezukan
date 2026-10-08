@@ -68,8 +68,6 @@ function readShareRoute(): { bookId: string | null } | null {
 }
 
 function App() {
-  const isDevelopmentPreview = typeof window !== 'undefined' &&
-    window.location.hostname.endsWith('.replit.dev');
   const [items, setItems] = useState<Keepsake[]>([]);
   const [shareRoute] = useState(readShareRoute);
   const [sharedBook, setSharedBook] = useState<SharedBook | null>(null);
@@ -80,7 +78,6 @@ function App() {
   const [shareOpen, setShareOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [gallerySettings, setGallerySettings] = useState<GallerySettings>(() => ({ ...DEFAULT_GALLERY_SETTINGS }));
-  const [settingsIssue, setSettingsIssue] = useState('');
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [view, setView] = useState<'start' | 'library'>(shareRoute ? 'library' : 'start');
   const [createOpen, setCreateOpen] = useState(false);
@@ -112,7 +109,7 @@ function App() {
   const [catBusy, setCatBusy] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const localDraft = useNewKeepsakeDraft();
-  const { categories, error: categoryIssue, create: createCategoryEntry, describeError } = useCategories(connectionAttempt, !shareRoute);
+  const { categories, create: createCategoryEntry, describeError } = useCategories(connectionAttempt, !shareRoute);
   useEffect(() => {
     if (shareRoute) {
       setSettingsLoading(false);
@@ -121,21 +118,14 @@ function App() {
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
     setSettingsLoading(true);
-    setSettingsIssue('');
     const fail = (caught: unknown) => {
       if (cancelled) return;
-      const code = caught && typeof caught === 'object' && 'code' in caught
-        ? (caught as { code?: string }).code
-        : undefined;
-      setSettingsIssue(code === 'permission-denied'
-        ? 'Firestoreからアクセスを拒否されました。保存時と同じ匿名認証ユーザー・URLで開いているか、FirebaseのプロジェクトIDとルールの公開先が一致しているか確認してください。'
-        : firebaseError(caught));
+      console.error('図鑑の表示設定を読み込めませんでした。', caught);
       setSettingsLoading(false);
     };
     subscribeGallerySettings((next) => {
       if (cancelled) return;
       setGallerySettings(next);
-      setSettingsIssue('');
       setSettingsLoading(false);
     }, fail).then((stop) => {
       if (cancelled) stop();
@@ -603,7 +593,7 @@ function App() {
         </button>
         <div className="topbar-actions">
           {view === 'library' && !readOnly && <button type="button" className="header-create" onClick={openCreate} data-testid="button-create-card"><Plus size={18} /><span>キロクする</span></button>}
-          {!shareRoute && <button type="button" className="header-settings-button" onClick={() => { stopPlayback(); setSettingsOpen(true); }} disabled={!readOnly && (settingsLoading || !!settingsIssue)} aria-label="設定" title="設定" data-testid="button-settings"><Settings size={17} /></button>}
+          {!shareRoute && <button type="button" className="header-settings-button" onClick={() => { stopPlayback(); setSettingsOpen(true); }} disabled={!readOnly && settingsLoading} aria-label="設定" title="設定" data-testid="button-settings"><Settings size={17} /></button>}
           {!readOnly && isFirebaseConfigured && <button type="button" className="header-share-button" onClick={() => { createDraftSession.current++; setShareOpen(true); }} aria-label="ずかんを共有する" data-testid="button-share-encyclopedia"><Share2 size={15} /><span>共有</span></button>}
         </div>
       </header>
@@ -630,21 +620,6 @@ function App() {
           disabled={busy}
           readOnly={readOnly}
         />
-        {!shareRoute && isDevelopmentPreview && <div className="notice neutral" role="note" data-testid="notice-development-preview">
-          <CircleHelp size={16} />
-          <span className="notice-message">開発プレビュー（replit.dev）で開いています。Firebaseの匿名アカウントは公開URLとは別です。以前のキロクを見るには、保存したときと同じURLで開いてください。</span>
-        </div>}
-        {!shareRoute && categoryIssue && <div className="notice" role="alert" data-testid="status-categories-load-error"><AlertCircle size={16} />{categoryIssue}
-          <button type="button" className="record-button" onClick={() => setConnectionAttempt((value) => value + 1)} disabled={busy}>再接続</button>
-        </div>}
-        {!shareRoute && storageIssue && <div className="notice" role="alert" data-testid="status-storage-error"><AlertCircle size={16} />{storageIssue}
-          {isFirebaseConfigured && <button type="button" className="record-button" onClick={() => setConnectionAttempt((value) => value + 1)} disabled={busy}>再接続</button>}
-        </div>}
-        {!shareRoute && settingsIssue && <div className="notice" role="alert" data-testid="status-gallery-settings-error"><AlertCircle size={16} /><span className="notice-message">表示設定を読み込めませんでした。{settingsIssue}</span>
-          <button type="button" className="record-button" onClick={() => setConnectionAttempt((value) => value + 1)} disabled={busy || settingsLoading}>再接続</button>
-        </div>}
-        {error && !createOpen && !detail && <p className="form-error" role="alert">{error}</p>}
-
         <div id="category-panel" role="tabpanel" aria-labelledby={`category-tab-${selectedCategory ?? 'all'}`}>
         {!shareRoute && loading ? <p className="notice neutral" role="status">Firebase から図鑑を読み込んでいます…</p> : shownItems.length === 0 && selectedCategory === null ? (
           <section className="empty-state" data-testid="empty-keepsakes">
@@ -870,7 +845,6 @@ function App() {
           try {
             await saveGallerySettings(next);
             setGallerySettings(next);
-            setSettingsIssue('');
           } catch (caught) {
             throw new Error(firebaseError(caught));
           }

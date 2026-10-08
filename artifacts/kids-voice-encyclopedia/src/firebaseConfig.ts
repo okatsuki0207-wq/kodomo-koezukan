@@ -8,7 +8,9 @@ import type { FirebaseOptions } from 'firebase/app';
  * 3. Authentication → ログイン方法 → 匿名を有効化。
  * 4. Firestore Database と Storage を作成し、firebase/ 配下のルールを公開。
  *    テストモード（全員に読み書き許可）は使わないでください。
- * 5. 開発・公開 URL を Authentication の承認済みドメインに追加。
+ * 5. Authentication → 設定 → 承認済みドメインに、開発プレビューと公開版の
+ *    ホスト名をそれぞれ追加（https:// やパスは不要）。replit.dev の匿名認証も
+ *    ここで許可する必要があります。開発版と公開版では匿名ユーザーIDは別になります。
  * 6. 保存・再読み込み・削除を確認してください。
  *
  * 注意: 2026年現在、Storage は Blaze（課金アカウント登録）が必須です。
