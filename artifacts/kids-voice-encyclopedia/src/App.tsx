@@ -68,6 +68,7 @@ function App() {
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [readOnlyMode, setReadOnlyMode] = useState(loadReadOnlyMode);
   const [shareFeedback, setShareFeedback] = useState('');
+  const shareFeedbackTimer = useRef<number | null>(null);
   const [view, setView] = useState<'start' | 'library'>(() => window.location.pathname.includes('/view/') ? 'library' : 'start');
   const [createOpen, setCreateOpen] = useState(false);
   const [detail, setDetail] = useState<Keepsake | null>(null);
@@ -115,6 +116,16 @@ function App() {
       else unsubscribe = stop;
     }).catch(fail);
     return () => { cancelled = true; unsubscribe?.(); };
+  }, []);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(READ_ONLY_MODE_STORAGE_KEY, String(readOnlyMode));
+    } catch {
+      // The current tab still honors the mode if browser storage is unavailable.
+    }
+  }, [readOnlyMode]);
+  useEffect(() => () => {
+    if (shareFeedbackTimer.current !== null) window.clearTimeout(shareFeedbackTimer.current);
   }, []);
   const visibleItems = sortGalleryItems(items, gallerySettings, selectedCategory);
   const categoryName = (id: string | null | undefined) => categories.find((c) => c.id === id)?.name;
@@ -283,7 +294,7 @@ function App() {
   const closeDetail = () => { if (mutationLock.current) return; stopPlayback(); setDetail(null); setEditOpen(false); setConfirmDelete(false); };
 
   const changeDetailCategory = async (categoryId: string | null) => {
-    if (!detail || mutationLock.current) return;
+    if (readOnlyMode || !detail || mutationLock.current) return;
     const target = detail;
     mutationLock.current = true; setBusy(true); setCatBusy(true); setError('');
     try {
@@ -320,7 +331,7 @@ function App() {
   };
 
   const openCreate = () => {
-    if (busy) return;
+    if (readOnlyMode || busy) return;
     draftCancelled.current = false;
     preloadRecordingGuide();
     // The request starts on the create-button gesture and releases the
@@ -414,7 +425,7 @@ function App() {
   const stopRecording = rec.stop;
 
   const saveCard = async () => {
-    if (mutationLock.current || recording || processingVoice || rec.starting) return;
+    if (readOnlyMode || mutationLock.current || recording || processingVoice || rec.starting) return;
     const cleanItemName = itemName.trim();
     if (!cleanItemName) {
       setError('キロクの名前を入力してください。');
@@ -461,7 +472,7 @@ function App() {
   };
 
   const deleteCard = async () => {
-    if (!detail || mutationLock.current) return;
+    if (readOnlyMode || !detail || mutationLock.current) return;
     mutationLock.current = true;
     setBusy(true);
     setError('');
@@ -482,23 +493,58 @@ function App() {
     stopPlayback(); playback.play(url, detail.id);
   };
 
+  const showShareFeedback = (message: string) => {
+    setShareFeedback(message);
+    if (shareFeedbackTimer.current !== null) window.clearTimeout(shareFeedbackTimer.current);
+    shareFeedbackTimer.current = window.setTimeout(() => {
+      setShareFeedback('');
+      shareFeedbackTimer.current = null;
+    }, 2600);
+  };
+
+  const shareEncyclopedia = async () => {
+    const url = window.location.href;
+    try {
+      if (typeof navigator.share === 'function') {
+        await navigator.share({
+          title: 'こどもの こえずかん',
+          text: 'わが家のずかんを見てね。',
+          url,
+        });
+        return;
+      }
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API is unavailable');
+      await navigator.clipboard.writeText(url);
+      showShareFeedback('共有リンクをコピーしました。');
+    } catch (caught) {
+      if (caught instanceof Error && caught.name === 'AbortError') return;
+      showShareFeedback('共有リンクをコピーできませんでした。');
+    }
+  };
+
   const formatTime = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   return (
     <div className="app-shell">
-      <header className="topbar" inert={createOpen || !!detail || categoryOpen || settingsOpen}>
-        <button type="button" className="brand brand-home" onClick={() => setView('start')} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
-          <span className="brand-mark"><BookOpen size={20} strokeWidth={1.8} /></span>
-          <h1 className="brand-title" style={{ margin: 0 }}>こどもの こえずかん</h1>
-        </button>
-        <div className="topbar-actions">
-          {view === 'library' && <button type="button" className="header-create" onClick={openCreate} data-testid="button-create-card"><Plus size={18} /><span>キロクする</span></button>}
-          <button type="button" className="header-settings-button" onClick={() => { stopPlayback(); setSettingsOpen(true); }} disabled={settingsLoading} aria-label="設定" title="設定" data-testid="button-settings"><Settings size={17} /></button>
+      <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen}>
+        <div className="topbar-row">
+          <button type="button" className="brand brand-home" onClick={() => setView('start')} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
+            <span className="brand-mark"><BookOpen size={20} strokeWidth={1.8} /></span>
+            <h1 className="brand-title" style={{ margin: 0 }}>こどもの こえずかん</h1>
+          </button>
+          <div className="topbar-actions">
+            <button type="button" className="header-settings-button" onClick={() => { stopPlayback(); setSettingsOpen(true); }} disabled={settingsLoading} aria-label="設定" title="設定" data-testid="button-settings"><Settings size={17} /></button>
+            <button type="button" className="header-settings-button" onClick={() => { void shareEncyclopedia(); }} aria-label="ずかんを共有" title="ずかんを共有" data-testid="button-share"><Share2 size={17} /></button>
+          </div>
         </div>
+        {view === 'library' && !readOnlyMode && (
+          <button type="button" className="header-create" onClick={openCreate} data-testid="button-create-card"><Plus size={19} /><span>キロクする</span></button>
+        )}
       </header>
+      {shareFeedback && <p className="share-feedback" role="status" data-testid="status-share-feedback">{shareFeedback}</p>}
 
       {view === 'start' ? (
         <main className="start-main" inert={createOpen || !!detail || categoryOpen || settingsOpen}>
-          <StartScreen onRecord={openCreate} onOpenEncyclopedia={() => { createDraftSession.current++; setView('library'); }} />
+          <StartScreen onRecord={openCreate} showRecordAction={!readOnlyMode} onOpenEncyclopedia={() => { createDraftSession.current++; setView('library'); }} />
         </main>
       ) : (
       <main className="page-main" inert={createOpen || !!detail || categoryOpen || settingsOpen}>
@@ -506,7 +552,8 @@ function App() {
           categories={categories}
           selected={selectedCategory}
           onSelect={(id) => { stopPlayback(); setSelectedCategory(id); }}
-          onNew={() => setCategoryOpen(true)}
+          onNew={() => { if (!readOnlyMode) setCategoryOpen(true); }}
+          showNew={!readOnlyMode}
           disabled={busy}
         />
         <div id="category-panel" role="tabpanel" aria-labelledby={`category-tab-${selectedCategory ?? 'all'}`}>
@@ -515,14 +562,14 @@ function App() {
             <div className="empty-illustration"><RecordingCharacter pose="sit" /></div>
             <h2 className="empty-title">まだ、まっさらなページ</h2>
             <p className="empty-copy">いちばん最初のキロクを残してみよう。<br />写真といっしょに、声も大切にしまえます。</p>
-            <button type="button" className="empty-action" onClick={openCreate} data-testid="button-empty-create">はじめのキロクを残す</button>
+            {!readOnlyMode && <button type="button" className="empty-action" onClick={openCreate} data-testid="button-empty-create">はじめのキロクを残す</button>}
           </section>
         ) : visibleItems.length === 0 ? (
           <section className="empty-state category-empty" data-testid="empty-category">
             <div className="empty-illustration"><RecordingCharacter pose="sit" /></div>
             <h2 className="empty-title">{categoryName(selectedCategory) ?? 'このカテゴリ'}は、まだ空っぽ</h2>
             <p className="empty-copy">このページはまだ空っぽ。<br />新しいキロクを残すか、ほかのキロクのページを変えられます。</p>
-            <button type="button" className="empty-action" onClick={openCreate} data-testid="button-category-empty-create">このページにキロクする</button>
+            {!readOnlyMode && <button type="button" className="empty-action" onClick={openCreate} data-testid="button-category-empty-create">このページにキロクする</button>}
           </section>
         ) : (
           <section className="sticker-collage" aria-label="わが家のキロク" data-testid="grid-keepsakes">
@@ -673,15 +720,15 @@ function App() {
             <button type="button" className="icon-button" disabled={busy} style={{ position: 'absolute', zIndex: 2, right: 25, top: 25 }} onClick={closeDetail} aria-label="閉じる" data-testid="button-close-detail"><X size={19} /></button>
             {detail.photo ? <img className="detail-image" src={detail.photo} alt={`${detail.itemName}の写真`} /> : <div className="detail-image-placeholder"><ImageIcon size={54} /></div>}
             <div className="detail-meta">
-              <div><h2 className="detail-name">{detail.itemName}</h2><p className="detail-date" data-testid="text-detail-created-at">キロクした日時：{formatStamp(detail.createdAt)}</p><p className="detail-date" data-testid="text-detail-category">カテゴリ: {categoryName(detail.categoryId) ?? (detail.categoryId ? '読み込み中のカテゴリ' : '未分類')}</p><div className="detail-category"><CategorySelect id="detail-category" categories={categories} value={detail.categoryId ?? null} onChange={(id) => void changeDetailCategory(id)} disabled={busy || catBusy} testId="select-detail-category" /></div>{getVoices(detail).length === 0 && <p className="detail-date">このキロクには、まだ声がありません</p>}</div>
+              <div><h2 className="detail-name">{detail.itemName}</h2><p className="detail-date" data-testid="text-detail-created-at">キロクした日時：{formatStamp(detail.createdAt)}</p><p className="detail-date" data-testid="text-detail-category">カテゴリ: {categoryName(detail.categoryId) ?? (detail.categoryId ? '読み込み中のカテゴリ' : '未分類')}</p>{!readOnlyMode && <div className="detail-category"><CategorySelect id="detail-category" categories={categories} value={detail.categoryId ?? null} onChange={(id) => void changeDetailCategory(id)} disabled={busy || catBusy} testId="select-detail-category" /></div>}{getVoices(detail).length === 0 && <p className="detail-date">このキロクには、まだ声がありません</p>}</div>
               <div className="detail-actions">
                 {getVoices(detail).map((v, i, all) => { const on = playing && playingItemId === detail.id && playingUrl === v.url; return (
                   <button key={v.id} type="button" className="record-button primary" onClick={() => playDetailVoice(v.url)} data-testid={i === 0 ? 'button-play-detail-voice' : `button-play-detail-voice-${i}`}>{on ? <Pause size={16} /> : <Play size={16} />}{on ? 'とめる' : all.length > 1 ? `声${i + 1}をきく` : '声をきく'}</button>); })}
-                <button type="button" className="record-button" disabled={busy} onClick={() => { stopPlayback(); setEditOpen(true); }} data-testid="button-edit-card"><Pencil size={15} /> へんしゅう</button>
-                <button type="button" className="plain-action" disabled={busy} onClick={() => setConfirmDelete((value) => !value)} aria-label="このキロクを削除" data-testid="button-delete-card"><Trash2 size={17} /></button>
+                 {!readOnlyMode && <button type="button" className="record-button" disabled={busy} onClick={() => { stopPlayback(); setEditOpen(true); }} data-testid="button-edit-card"><Pencil size={15} /> へんしゅう</button>}
+                 {!readOnlyMode && <button type="button" className="plain-action" disabled={busy} onClick={() => setConfirmDelete((value) => !value)} aria-label="このキロクを削除" data-testid="button-delete-card"><Trash2 size={17} /></button>}
               </div>
             </div>
-            {confirmDelete && <div className="delete-confirm" role="alert"><AlertCircle size={16} />写真・声・このキロクを完全に削除しますか？<button type="button" disabled={busy} onClick={deleteCard} data-testid="button-confirm-delete">{busy ? '削除中…' : '削除する'}</button><button type="button" disabled={busy} onClick={() => setConfirmDelete(false)}>やめる</button></div>}
+            {confirmDelete && !readOnlyMode && <div className="delete-confirm" role="alert"><AlertCircle size={16} />写真・声・このキロクを完全に削除しますか？<button type="button" disabled={busy} onClick={deleteCard} data-testid="button-confirm-delete">{busy ? '削除中…' : '削除する'}</button><button type="button" disabled={busy} onClick={() => setConfirmDelete(false)}>やめる</button></div>}
             {error && <p className="form-error" role="alert">{error}</p>}
           </DetailDialogShell>
         </div>
@@ -713,6 +760,7 @@ function App() {
           describeError={describeError}
           onClose={() => setEditOpen(false)}
           onSave={async (base, changes, editId) => {
+            if (readOnlyMode) return;
             const saved = await editKeepsake(base, changes, editId);
             setDetail((current) => current && current.id === saved.id ? saved : current);
             setItems((list) => list.map((entry) => entry.id === saved.id ? saved : entry));
@@ -721,6 +769,8 @@ function App() {
       )}
       {settingsOpen && <SettingsDialog
         settings={gallerySettings}
+        readOnlyMode={readOnlyMode}
+        onToggleReadOnlyMode={() => setReadOnlyMode((enabled) => !enabled)}
         onClose={() => setSettingsOpen(false)}
         onSave={async (next) => {
           try {

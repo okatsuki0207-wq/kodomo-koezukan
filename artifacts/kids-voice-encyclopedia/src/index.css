@@ -388,3 +388,15 @@ button:disabled {cursor:not-allowed;opacity:.55;}
   .category-new span { display:none; }
   .header-create { gap:4px; padding-inline:10px; font-size:12px; }
 }
+
+/* Library header: title and tools share the first row; the main action sits below. */
+.topbar-row { width:100%; min-width:0; display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.topbar-actions { display:flex; align-items:center; gap:8px; flex:0 0 auto; }
+.topbar-library { height:auto; min-height:0; flex-direction:column; align-items:stretch; justify-content:flex-start; gap:10px; padding-top:10px; padding-bottom:8px; }
+.topbar-library .header-create { width:min(100%, 460px); height:48px; align-self:flex-end; justify-content:center; gap:8px; font-size:15px; }
+.share-feedback { max-width:1200px; margin:0 auto; padding:0 32px; color:#607b62; font-size:12px; text-align:right; }
+@media (max-width:760px) {
+  .topbar-library { padding:8px 16px 10px; }
+  .topbar-library .header-create { width:100%; max-width:none; }
+  .share-feedback { padding-inline:16px; }
+}

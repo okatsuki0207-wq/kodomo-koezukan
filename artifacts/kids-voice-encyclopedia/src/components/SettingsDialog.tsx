@@ -1,10 +1,12 @@
 import { useRef, useState } from 'react';
-import { Shuffle, X } from 'lucide-react';
+import { Eye, Shuffle, X } from 'lucide-react';
 import { normalizeGallerySettings, type GallerySettings } from '../lib/gallerySettings';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 
 type Props = {
   settings: GallerySettings;
+  readOnlyMode: boolean;
+  onToggleReadOnlyMode: () => void;
   onSave: (settings: GallerySettings) => Promise<void>;
   onClose: () => void;
 };
@@ -18,6 +20,8 @@ function nextShuffleSeed() {
 
 export default function SettingsDialog({
   settings,
+  readOnlyMode,
+  onToggleReadOnlyMode,
   onSave,
   onClose,
 }: Props) {
@@ -52,13 +56,29 @@ export default function SettingsDialog({
         <div className="dialog-head">
           <div>
             <h2 id="settings-title" className="dialog-title">ずかんの設定</h2>
-            <p className="dialog-lede">ずかんの表示方法を切り替えられます。</p>
+            <p className="dialog-lede">閲覧・編集と、ずかんの表示方法を切り替えられます。</p>
           </div>
           <button type="button" className="icon-button" disabled={busy} onClick={close} aria-label="閉じる" data-testid="button-close-settings"><X size={19} /></button>
         </div>
 
         <section className="settings-section settings-toggles" aria-label="設定項目">
           <div className="settings-mode-options" role="group" aria-label="ずかんの設定">
+            <button
+              type="button"
+              className={`settings-mode-option${readOnlyMode ? ' selected' : ''}`}
+              aria-pressed={readOnlyMode}
+              aria-label={`閲覧モード ${readOnlyMode ? 'オン' : 'オフ'}`}
+              disabled={busy}
+              onClick={onToggleReadOnlyMode}
+              data-testid="setting-read-only"
+            >
+              <Eye size={18} />
+              <span className="settings-option-copy">
+                <strong>閲覧モード</strong>
+                <small>{readOnlyMode ? 'オン：キロクの追加・編集・削除をかくします。閲覧と再生はできます。' : 'オフ：キロクの追加・編集・削除ができます。'}</small>
+              </span>
+              <span className={`settings-switch${readOnlyMode ? ' is-on' : ''}`} aria-hidden="true"><span /></span>
+            </button>
             <button
               type="button"
               className={`settings-mode-option${settings.displayMode === 'shuffle' ? ' selected' : ''}`}
