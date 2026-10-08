@@ -40,6 +40,7 @@ import { getVoices, type VoiceAsset } from './lib/voiceAssets';
 import { trimLeadingSilence } from './lib/audioTrim';
 import { preloadRecordingGuide } from './lib/recordingCue';
 import { hasNewKeepsakeDraftContent, type NewKeepsakeDraftInput } from './lib/newKeepsakeDraft';
+import { APP_VIEW_STORAGE_KEY, persistAppView, restoreAppView, type AppView } from './lib/appViewState';
 import { isFirebaseConfigured } from './firebaseConfig';
 import './index.css';
 
@@ -69,12 +70,18 @@ function App() {
   const [readOnlyMode, setReadOnlyMode] = useState(loadReadOnlyMode);
   const [shareFeedback, setShareFeedback] = useState('');
   const shareFeedbackTimer = useRef<number | null>(null);
-  const [view, setView] = useState<'start' | 'library'>(() => window.location.pathname.includes('/view/') ? 'library' : 'start');
+  const [view, setView] = useState<AppView>(() => {
+    let saved: string | null = null;
+    try { saved = window.localStorage.getItem(APP_VIEW_STORAGE_KEY); } catch { /* private browsing can block storage */ }
+    return restoreAppView(window.location.pathname, saved);
+  });
+  const [recordPromptId, setRecordPromptId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [detail, setDetail] = useState<Keepsake | null>(null);
   const [itemName, setItemName] = useState('');
   const [photo, setPhoto] = useState('');
   const [pendingPhotoBlob, setPendingPhotoBlob] = useState<Blob | null>(null);
+  const photoBeforeEditor = useRef<{ photo: string; pendingPhotoBlob: Blob | null } | null>(null);
   const [photoEditorSource, setPhotoEditorSource] = useState('');
   const [voice, setVoice] = useState<string | null>(null);
   const [voiceBlob, setVoiceBlob] = useState<Blob | null>(null);
@@ -98,6 +105,10 @@ function App() {
   const [editOpen, setEditOpen] = useState(false);
   const localDraft = useNewKeepsakeDraft();
   const { categories, create: createCategoryEntry, describeError } = useCategories(0);
+  const navigate = (next: AppView) => {
+    setView(next);
+    persistAppView(next);
+  };
   useEffect(() => {
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
@@ -308,6 +319,7 @@ function App() {
   const openDetail = (item: Keepsake) => {
     stopPlayback();
     setError('');
+    setRecordPromptId(null);
     setDetail(item);
     setEditOpen(false);
     setConfirmDelete(false);
@@ -316,9 +328,11 @@ function App() {
   const playKeepsake = (item: Keepsake) => {
     const voices = getVoices(item);
     if (!voices.length) {
-      openDetail(item);
+      stopPlayback();
+      setRecordPromptId(item.id);
       return;
     }
+    setRecordPromptId(null);
     setError('');
     if (playback.isActive(item.id)) { playback.restart(item.id); return; }
     let bag = voiceShuffleBags.current.get(item.id);
@@ -328,6 +342,16 @@ function App() {
     }
     const selected = bag.next(voices);
     if (selected) playback.play(selected.url, item.id);
+  };
+
+  const openRecordEditor = (item: Keepsake) => {
+    if (readOnlyMode || busy) return;
+    stopPlayback();
+    setRecordPromptId(null);
+    setError('');
+    setDetail(item);
+    setEditOpen(true);
+    setConfirmDelete(false);
   };
 
   const openCreate = () => {
@@ -344,6 +368,7 @@ function App() {
     setCardCategory(selectedCategory);
     setPhoto('');
     setPendingPhotoBlob(null);
+    photoBeforeEditor.current = null;
     setPhotoEditorSource('');
     setVoice(null);
     setVoiceBlob(null);
@@ -406,6 +431,7 @@ function App() {
     }
     try {
       // Keep the original file as a temporary URL, not a large base64 copy.
+      photoBeforeEditor.current = { photo, pendingPhotoBlob };
       setPendingPhotoBlob(file);
       setPhotoEditorSource(URL.createObjectURL(file));
       void localDraft.saveNow({ ...latestDraft.current, pendingPhotoBlob: file });
@@ -457,7 +483,7 @@ function App() {
         return;
       }
       setCreateOpen(false);
-      setView('library');
+      navigate('library');
       setItemName('');
       setPhoto('');
       setPendingPhotoBlob(null);
@@ -527,7 +553,7 @@ function App() {
     <div className="app-shell">
       <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen}>
         <div className="topbar-row">
-          <button type="button" className="brand brand-home" onClick={() => setView('start')} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
+          <button type="button" className="brand brand-home" onClick={() => navigate('start')} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
             <span className="brand-mark"><BookOpen size={20} strokeWidth={1.8} /></span>
             <h1 className="brand-title" style={{ margin: 0 }}>こどもの こえずかん</h1>
           </button>
@@ -544,14 +570,14 @@ function App() {
 
       {view === 'start' ? (
         <main className="start-main" inert={createOpen || !!detail || categoryOpen || settingsOpen}>
-          <StartScreen onRecord={openCreate} showRecordAction={!readOnlyMode} onOpenEncyclopedia={() => { createDraftSession.current++; setView('library'); }} />
+          <StartScreen onRecord={openCreate} showRecordAction={!readOnlyMode} onOpenEncyclopedia={() => { createDraftSession.current++; navigate('library'); }} />
         </main>
       ) : (
       <main className="page-main" inert={createOpen || !!detail || categoryOpen || settingsOpen}>
         <CategoryBar
           categories={categories}
           selected={selectedCategory}
-          onSelect={(id) => { stopPlayback(); setSelectedCategory(id); }}
+          onSelect={(id) => { stopPlayback(); setRecordPromptId(null); setSelectedCategory(id); }}
           onNew={() => { if (!readOnlyMode) setCategoryOpen(true); }}
           showNew={!readOnlyMode}
           disabled={busy}
@@ -584,7 +610,7 @@ function App() {
                   className="sticker-photo-button"
                   onClick={() => playKeepsake(item)}
                   {...longPress(item)}
-                  aria-label={getVoices(item).length ? `${item.itemName}の声をきく` : item.itemName}
+                  aria-label={getVoices(item).length ? `${item.itemName}の声をきく` : readOnlyMode ? item.itemName : `${item.itemName}の録音ボタンを表示`}
                   data-testid={`button-play-card-${item.id}`}
                 >
                   {item.photo
@@ -592,6 +618,18 @@ function App() {
                     : <ImageIcon size={44} />}
                   {playing && playingItemId === item.id && <span className="voice-notes" aria-hidden="true"><span>♪</span><span>♫</span><span>♪</span></span>}
                 </button>
+                {!readOnlyMode && !getVoices(item).length && recordPromptId === item.id && (
+                  <button
+                    type="button"
+                    className="sticker-record-prompt"
+                    onClick={() => openRecordEditor(item)}
+                    aria-label={`${item.itemName}を録音する`}
+                    title="録音する"
+                    data-testid={`button-record-card-${item.id}`}
+                  >
+                    <Mic size={20} />
+                  </button>
+                )}
                 <button type="button" className="sticker-name" onClick={() => openDetail(item)} aria-label={`${item.itemName}の写真を大きく表示`} data-testid={`button-detail-${item.id}`}>{item.itemName}</button>
                 <span className="sr-only" role="status">{playing && playingItemId === item.id ? `${item.itemName}の声を再生中` : ''}</span>
               </article>
@@ -692,10 +730,25 @@ function App() {
       {photoEditorSource && (
         <PhotoEditor
           source={photoEditorSource}
-          onCancel={() => { setPendingPhotoBlob(null); setPhotoEditorSource(''); }}
+          onCancel={() => {
+            const previous = photoBeforeEditor.current;
+            setPhoto(previous?.photo ?? '');
+            setPendingPhotoBlob(previous?.pendingPhotoBlob ?? null);
+            photoBeforeEditor.current = null;
+            setPhotoEditorSource('');
+          }}
+          onUseOriginal={() => {
+            if (!pendingPhotoBlob) return;
+            setPhoto(URL.createObjectURL(pendingPhotoBlob));
+            photoBeforeEditor.current = null;
+            setPhotoEditorSource('');
+            setError('');
+            setNotice('写真をそのまま使います。');
+          }}
           onApply={(processedPhoto) => {
             setPhoto(processedPhoto);
             setPendingPhotoBlob(null);
+            photoBeforeEditor.current = null;
             setPhotoEditorSource('');
             setError('');
             setNotice('ととのえた写真をこのキロクに使います。');

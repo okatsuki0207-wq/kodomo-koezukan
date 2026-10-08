@@ -8,6 +8,16 @@ const geometry = await import(`data:text/javascript;base64,${Buffer.from(stripTy
 const viewport = { width: 320, height: 360 };
 const original = { x: 70, y: 90, width: 150, height: 160 };
 
+test('initial crop shows the complete source and starts at the largest contained frame', () => {
+  const stage = { width: 320, height: 360 };
+  const image = { width: 1200, height: 600 };
+  const rectangle = geometry.initialCropFrame(stage, false, image);
+  assert.deepEqual(rectangle, { x: 0, y: 100, width: 320, height: 160 });
+  const sourceRect = geometry.sourceCropRect(image, stage, { zoom: 1, pan: { x: 0, y: 0 } }, rectangle);
+  assert.deepEqual(sourceRect, { x: 0, y: 0, width: 1200, height: 600 });
+  assert.deepEqual(geometry.initialCropFrame(stage, true, image), { x: 80, y: 100, width: 160, height: 160 });
+});
+
 test('rectangle corners/edges resize independently and keep opposite edges anchored', () => {
   const east = geometry.resizeCropFrame(original, 'e', { x: 50, y: 100 }, viewport, false);
   assert.deepEqual(east, { ...original, width: 200 });

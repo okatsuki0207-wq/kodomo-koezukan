@@ -7,11 +7,20 @@ export type ResizeHandle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const minimum = (size: Size) => Math.min(40, size.width, size.height);
 
-export function initialCropFrame(viewport: Size, circle: boolean): CropFrame {
-  const side = Math.min(viewport.width * .72, viewport.height * .72, 320);
-  const width = circle ? side : Math.min(viewport.width * .72, 420);
-  const height = circle ? side : Math.min(viewport.height * .72, 320);
-  return { x: (viewport.width - width) / 2, y: (viewport.height - height) / 2, width, height };
+export function containScale(image: Size, viewport: Size): number {
+  if (!image.width || !image.height || !viewport.width || !viewport.height) return 1;
+  return Math.min(viewport.width / image.width, viewport.height / image.height);
+}
+
+export function initialCropFrame(viewport: Size, circle: boolean, image: Size = viewport): CropFrame {
+  const fit = containScale(image, viewport);
+  const imageWidth = image.width * fit;
+  const imageHeight = image.height * fit;
+  const x = (viewport.width - imageWidth) / 2;
+  const y = (viewport.height - imageHeight) / 2;
+  const width = circle ? Math.min(imageWidth, imageHeight) : imageWidth;
+  const height = circle ? width : imageHeight;
+  return { x: x + (imageWidth - width) / 2, y: y + (imageHeight - height) / 2, width, height };
 }
 
 export function moveCropFrame(frame: CropFrame, delta: Point, viewport: Size): CropFrame {
@@ -25,7 +34,7 @@ export function moveCropFrameWithinImage(
 ): CropFrame {
   const next = moveCropFrame(frame, delta, viewport);
   if (!image.width || !image.height || !viewport.width || !viewport.height) return next;
-  const fit = Math.max(viewport.width / image.width, viewport.height / image.height);
+  const fit = containScale(image, viewport);
   const width = image.width * fit * transform.zoom;
   const height = image.height * fit * transform.zoom;
   const left = viewport.width / 2 + transform.pan.x - width / 2;
@@ -71,7 +80,7 @@ export function resizeCropFrame(
 /** Keep every crop pixel inside the source; zooming out cannot introduce blank strips. */
 export function clampTransform(transform: Transform, image: Size, viewport: Size, frame: CropFrame): Transform {
   if (!image.width || !image.height || !viewport.width || !viewport.height) return transform;
-  const fit = Math.max(viewport.width / image.width, viewport.height / image.height);
+  const fit = containScale(image, viewport);
   const minZoom = Math.max(.05, frame.width / (image.width * fit), frame.height / (image.height * fit));
   const zoom = clamp(transform.zoom, minZoom, Math.max(8, minZoom));
   const width = image.width * fit * zoom;
@@ -100,7 +109,7 @@ export function pinchTransform(
 }
 
 export function sourceCropRect(image: Size, viewport: Size, transform: Transform, frame: CropFrame): CropFrame {
-  const fit = Math.max(viewport.width / image.width, viewport.height / image.height);
+  const fit = containScale(image, viewport);
   const safe = clampTransform(transform, image, viewport, frame);
   const scale = fit * safe.zoom;
   return { x: image.width / 2 + (frame.x - viewport.width / 2 - safe.pan.x) / scale,

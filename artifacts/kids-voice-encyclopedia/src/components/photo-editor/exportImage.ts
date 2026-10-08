@@ -52,12 +52,10 @@ export function cropToShape(
     context.beginPath();
     context.ellipse(canvas.width / 2, canvas.height / 2, canvas.width / 2, canvas.height / 2, 0, 0, Math.PI * 2);
     context.clip();
-  } else {
-    context.fillStyle = '#fff';
-    context.fillRect(0, 0, canvas.width, canvas.height);
   }
   context.drawImage(image, rect.x, rect.y, rect.width, rect.height, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL(circle ? 'image/png' : 'image/jpeg', JPEG_QUALITY);
+  // Always encode a crop as PNG so existing alpha is not flattened to white.
+  return canvas.toDataURL('image/png');
 }
 
 /** Rectangle-only ROI for AI. Preserve source transparency, and never send the

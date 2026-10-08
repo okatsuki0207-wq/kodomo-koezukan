@@ -43,7 +43,7 @@ export function usePhotoCrop({ stageRef, enabled, viewport, image, circle, reset
     gesture.current = null;
     handleGesture.current = null;
     if (!viewport.width || !viewport.height || !image.width || !image.height) return;
-    const f = initialCropFrame(viewport, circle);
+    const f = initialCropFrame(viewport, circle, image);
     setFrame(f);
     setTransform(clampTransform(IDENTITY, image, viewport, f));
     // eslint-disable-next-line react-hooks/exhaustive-deps

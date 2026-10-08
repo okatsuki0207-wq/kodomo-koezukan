@@ -25,6 +25,15 @@ type Slot = { key: string; id: string; url: string; path?: string | null; blob?:
 
 const fmt = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
+function readBlobAsDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('写真を読み込めませんでした。'));
+    reader.onerror = () => reject(reader.error ?? new Error('写真を読み込めませんでした。'));
+    reader.readAsDataURL(blob);
+  });
+}
+
 export default function EditCardDialog({ item, categories, onSave, describeError, onClose }: Props) {
   const base = useRef(item).current; // ダイアログを開いた時点の不変な基準
   const editId = useRef(crypto.randomUUID());
@@ -33,6 +42,7 @@ export default function EditCardDialog({ item, categories, onSave, describeError
   const [categoryId, setCategoryId] = useState<string | null>(base.categoryId ?? null);
   const [photo, setPhoto] = useState<string | null>(null);
   const [photoSource, setPhotoSource] = useState('');
+  const [originalPhoto, setOriginalPhoto] = useState<Blob | null>(null);
   const [slots, setSlots] = useState<Slot[]>(() =>
     getVoices(base).map((v) => ({ key: v.id, id: v.id, url: v.url, path: v.path, fresh: false, replaced: false })));
   const [target, setTarget] = useState<string | null>(null); // 録音/処理中のスロット
@@ -119,6 +129,7 @@ export default function EditCardDialog({ item, categories, onSave, describeError
   // 写真ソース用のblob URLも自分で作ったものだけ破棄
   const clearPhotoSource = () => {
     setPhotoSource((current) => { if (current.startsWith('blob:')) URL.revokeObjectURL(current); return ''; });
+    setOriginalPhoto(null);
   };
   useEffect(() => () => { if (photoSource.startsWith('blob:')) URL.revokeObjectURL(photoSource); }, [photoSource]);
 
@@ -133,8 +144,15 @@ export default function EditCardDialog({ item, categories, onSave, describeError
     input.value = '';
     if (!file) return;
     if (!file.type.startsWith('image/')) { setError('写真を選んでください。'); return; }
-    try { setPhotoSource(URL.createObjectURL(file)); setError(''); }
+    try { setOriginalPhoto(file); setPhotoSource(URL.createObjectURL(file)); setError(''); }
     catch { setError('写真を読み込めませんでした。別の写真を選んでください。'); }
+  };
+
+  const useOriginalPhoto = () => {
+    if (!originalPhoto) return;
+    void readBlobAsDataUrl(originalPhoto)
+      .then((dataUrl) => { setPhoto(dataUrl); clearPhotoSource(); setError(''); })
+      .catch(() => setError('写真を読み込めませんでした。もう一度お試しください。'));
   };
 
   const togglePlay = (slot: Slot) => {
@@ -227,7 +245,7 @@ export default function EditCardDialog({ item, categories, onSave, describeError
               {previewPhoto && <img src={previewPhoto} alt="現在の写真" />}
               <span className="em-photo-label"><Camera size={15} /> {photo ? '変更予定' : '写真を変更'}</span>
             </button>
-            {photo && <button type="button" className="record-button em-inline" disabled={busy} onClick={() => setPhoto(null)} data-testid="button-undo-photo"><RotateCcw size={14} /> 元の写真にもどす</button>}
+            {photo && <button type="button" className="record-button em-inline" disabled={busy} onClick={() => { setPhoto(null); setOriginalPhoto(null); }} data-testid="button-undo-photo"><RotateCcw size={14} /> 元の写真にもどす</button>}
           </div>
           <div className="form-block">
             <span className="field-label"><Mic size={14} /> 声（{slots.length}/{MAX_VOICES}）</span>
@@ -304,6 +322,7 @@ export default function EditCardDialog({ item, categories, onSave, describeError
         <PhotoEditor
           source={photoSource}
           onCancel={clearPhotoSource}
+          onUseOriginal={useOriginalPhoto}
           onApply={(processed) => { setPhoto(processed); clearPhotoSource(); setError(''); }}
         />
       )}

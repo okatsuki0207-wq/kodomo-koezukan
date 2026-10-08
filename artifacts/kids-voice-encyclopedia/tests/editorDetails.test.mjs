@@ -9,9 +9,35 @@ async function load(name) {
 }
 const gesture = await load('longPressGesture');
 const subject = await load('subjectMask');
+const appViewState = await load('appViewState');
 const { loadVoiceSource } = await load('voiceSource');
 const { recordingCue } = await load('recordingCue');
 const { primeMicrophonePermission } = await load('microphonePermission');
+
+test('the last main screen is restored, the first visit starts at the start screen, and viewer routes open the library', () => {
+  assert.equal(appViewState.restoreAppView('/', null), 'start');
+  assert.equal(appViewState.restoreAppView('/', 'library'), 'library');
+  assert.equal(appViewState.restoreAppView('/', 'start'), 'start');
+  assert.equal(appViewState.restoreAppView('/view/book-123', 'start'), 'library');
+  const writes = [];
+  appViewState.persistAppView('library', { setItem: (...args) => writes.push(args) });
+  assert.deepEqual(writes, [[appViewState.APP_VIEW_STORAGE_KEY, 'library']]);
+});
+
+test('a voiceless sticker tap reveals a recording icon without opening details or the editor', async () => {
+  const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  assert.match(app, /if \(!voices\.length\) \{\s*stopPlayback\(\);\s*setRecordPromptId\(item\.id\);\s*return;/);
+  assert.match(app, /className="sticker-record-prompt"[\s\S]*?onClick=\{\(\) => openRecordEditor\(item\)\}/);
+});
+
+test('transparent images can be kept as-is and rectangular crops are exported as PNG', async () => {
+  const exporter = await readFile(new URL('../src/components/photo-editor/exportImage.ts', import.meta.url), 'utf8');
+  const editor = await readFile(new URL('../src/components/PhotoEditor.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(exporter, /fillStyle\s*=\s*['"]#fff['"]/);
+  assert.match(exporter, /toDataURL\('image\/png'\)/);
+  assert.match(editor, /button-use-original-photo/);
+  assert.match(editor, /別アプリで背景透過した画像をそのまま追加することもできます/);
+});
 
 test('waveform drafts keep Blob bytes usable after their temporary URL is revoked', async () => {
   const blob = new Blob(['synthetic WAV bytes'], { type: 'audio/wav' });

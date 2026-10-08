@@ -76,7 +76,26 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(194, 104, 78
   gap: 20px 16px;
   padding: 22px 8px 48px;
 }
-.sticker-item { min-width: 0; text-align: center; animation: card-arrive .48s both; }
+.sticker-item { position:relative; min-width: 0; text-align: center; animation: card-arrive .48s both; }
+.sticker-record-prompt {
+  position:absolute;
+  z-index:3;
+  top:8px;
+  right:8px;
+  width:44px;
+  height:44px;
+  display:grid;
+  place-items:center;
+  padding:0;
+  border:1px solid transparent;
+  border-radius:50%;
+  background:linear-gradient(#fff,#fff) padding-box,var(--rainbow-line) border-box;
+  color:#b36b55;
+  box-shadow:0 3px 12px rgba(80,65,54,.16);
+  animation:record-prompt-pop .22s ease-out both;
+}
+.sticker-record-prompt:focus-visible { outline:3px solid #8aa38a; outline-offset:3px; }
+@keyframes record-prompt-pop { from { opacity:0; transform:scale(.72); } to { opacity:1; transform:scale(1); } }
 .sticker-photo-button {
   display: grid;
   place-items: center;
@@ -519,7 +538,13 @@ button:focus-visible {
   box-shadow:0 4px 16px rgba(112,96,124,.1);
 }
 .create-photo-picker:hover { background:linear-gradient(#fffcff,#fffcff) padding-box,var(--rainbow-line) border-box; }
-.create-photo-picker.has-photo { border-style:solid; background:linear-gradient(#fff,#fff) padding-box,var(--rainbow-line) border-box; }
+.create-photo-picker.has-photo {
+  border-style:solid;
+  background:
+    linear-gradient(45deg,#e7e9eb 25%,transparent 25%,transparent 75%,#e7e9eb 75%) 0 0 / 12px 12px padding-box,
+    linear-gradient(45deg,#e7e9eb 25%,#fff 25%,#fff 75%,#e7e9eb 75%) 6px 6px / 12px 12px padding-box,
+    var(--rainbow-line) border-box;
+}
 .create-photo-picker img { object-fit:contain; border-radius:20px; }
 .create-photo-picker > svg { width:clamp(42px,8vw,56px); height:clamp(42px,8vw,56px); stroke-width:1.5; }
 .create-photo-change {

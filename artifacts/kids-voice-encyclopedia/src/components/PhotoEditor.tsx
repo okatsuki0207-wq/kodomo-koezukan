@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, Circle, LoaderCircle, PenLine, RotateCcw, Sparkles, Square, X } from 'lucide-react';
-import { smoothTracePath } from '../lib/cropGeometry';
+import { Check, Circle, Image as ImageIcon, LoaderCircle, PenLine, RotateCcw, Sparkles, Square, X } from 'lucide-react';
+import { containScale, smoothTracePath } from '../lib/cropGeometry';
 import type { ResizeHandle, Size } from '../lib/cropGeometry';
 import { containMap, naturalToStage } from './photo-editor/contain';
 import { cropForAi, cropFreehand, cropToShape, resizedDataUrl } from './photo-editor/exportImage';
@@ -11,7 +11,7 @@ import './PhotoEditor.css';
 
 type EditMode = 'shape' | 'freehand' | 'ai';
 type CropShape = 'circle' | 'square';
-type Props = { source: string; onCancel: () => void; onApply: (image: string) => void };
+type Props = { source: string; onCancel: () => void; onApply: (image: string) => void; onUseOriginal: () => void };
 
 const CIRCLE_HANDLES: ResizeHandle[] = ['nw', 'ne', 'se', 'sw'];
 const RECT_HANDLES: ResizeHandle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
@@ -25,7 +25,7 @@ function handlePos(handle: ResizeHandle, f: { x: number; y: number; width: numbe
   return { left: cx, top: cy };
 }
 
-export default function PhotoEditor({ source, onCancel, onApply }: Props) {
+export default function PhotoEditor({ source, onCancel, onApply, onUseOriginal }: Props) {
   const stageRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const runId = useRef(0);
@@ -120,7 +120,7 @@ export default function PhotoEditor({ source, onCancel, onApply }: Props) {
   };
 
   const map = containMap(imageSize, viewport);
-  const fit = imageSize.width ? Math.max(viewport.width / imageSize.width, viewport.height / imageSize.height) : 1;
+  const fit = containScale(imageSize, viewport);
   let imageStyle: React.CSSProperties | undefined;
   if (loaded && viewport.width) {
     if (mode === 'shape' || mode === 'ai') {
@@ -238,13 +238,17 @@ export default function PhotoEditor({ source, onCancel, onApply }: Props) {
                   <button type="button" aria-label="四角形" title="四角形" aria-pressed={!circle} onClick={() => setShape('square')} data-testid="button-crop-square"><Square size={19} /></button>
                 </div>
                 <p className="photo-editor-hint">枠の中をドラッグで枠を移動、外側で写真を移動。2本指のピンチやマウスホイールで拡大縮小、枠の角{circle ? '' : 'や辺'}で大きさを変えられます。</p>
-                <button type="button" className="photo-editor-primary" aria-label="この形で切り抜く" title="この形で切り抜く" onClick={runShapeCrop} disabled={!crop.ready || f.width <= 0} data-testid="button-run-shape-crop"><Check size={19} /></button>
+                <div className="photo-editor-actions">
+                  <button type="button" className="photo-editor-secondary" aria-label="切り抜かず写真をそのまま使う" title="切り抜かず写真をそのまま使う" onClick={onUseOriginal} data-testid="button-use-original-photo"><ImageIcon size={19} /></button>
+                  <button type="button" className="photo-editor-primary" aria-label="この形で切り抜く" title="この形で切り抜く" onClick={runShapeCrop} disabled={!crop.ready || f.width <= 0} data-testid="button-run-shape-crop"><Check size={19} /></button>
+                </div>
               </>
             )}
             {mode === 'freehand' && (
               <>
                 <p className="photo-editor-hint">ドラッグ中はペンの線だけが表示されます。指を離すと、始点と終点をなめらかにつないで内側を切り抜きます。</p>
                 <div className="photo-editor-actions">
+                  <button type="button" className="photo-editor-secondary" aria-label="切り抜かず写真をそのまま使う" title="切り抜かず写真をそのまま使う" onClick={onUseOriginal} data-testid="button-use-original-photo"><ImageIcon size={19} /></button>
                   <button type="button" className="photo-editor-secondary" aria-label="なぞり直す" title="なぞり直す" onClick={() => { freehand.clear(); setError(''); }} disabled={freehand.points.length === 0} data-testid="button-clear-photo-trace"><RotateCcw size={19} /></button>
                   <button type="button" className="photo-editor-primary" aria-label="なぞった範囲を切り抜く" title="なぞった範囲を切り抜く" onClick={runFreehandCrop} disabled={!loaded || freehand.drawing || freehand.points.length < 3} data-testid="button-run-freehand-crop"><Check size={19} /></button>
                 </div>
@@ -253,7 +257,11 @@ export default function PhotoEditor({ source, onCancel, onApply }: Props) {
             {mode === 'ai' && (
               <>
                 <p className="photo-editor-hint">① 四角い枠を対象のすぐ外側に合わせます（角や辺をドラッグ）。② 枠の中だけをAIで背景削除します。透明な余白も詰めて仕上げます。処理は端末内で行います。</p>
-                <button type="button" className="photo-editor-primary" aria-label="この範囲をAIで背景カット" title="この範囲をAIで背景カット" onClick={() => void runAi()} disabled={!loaded || !crop.ready || f.width <= 0 || Boolean(processing)} data-testid="button-run-photo-ai"><Sparkles size={20} /></button>
+                <p className="photo-editor-alpha-note">※別アプリで背景透過した画像をそのまま追加することもできます</p>
+                <div className="photo-editor-actions">
+                  <button type="button" className="photo-editor-secondary" aria-label="切り抜かず写真をそのまま使う" title="切り抜かず写真をそのまま使う" onClick={onUseOriginal} data-testid="button-use-original-photo"><ImageIcon size={19} /></button>
+                  <button type="button" className="photo-editor-primary" aria-label="この範囲をAIで背景カット" title="この範囲をAIで背景カット" onClick={() => void runAi()} disabled={!loaded || !crop.ready || f.width <= 0 || Boolean(processing)} data-testid="button-run-photo-ai"><Sparkles size={20} /></button>
+                </div>
               </>
             )}
             {error && <p className="photo-editor-error" role="alert" data-testid="status-photo-editor-error">{error}</p>}
