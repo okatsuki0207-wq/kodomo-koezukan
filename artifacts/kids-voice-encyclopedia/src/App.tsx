@@ -13,6 +13,7 @@ import {
   Play,
   Plus,
   RotateCcw,
+  Share2,
   Scissors,
   Settings,
   Trash2,
@@ -50,11 +51,23 @@ function formatDate(timestamp: number) {
   return new Intl.DateTimeFormat('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }).format(timestamp);
 }
 
+const READ_ONLY_MODE_STORAGE_KEY = 'kids-voice-encyclopedia:read-only-mode';
+
+function loadReadOnlyMode() {
+  try {
+    return window.localStorage.getItem(READ_ONLY_MODE_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
 function App() {
   const [items, setItems] = useState<Keepsake[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [gallerySettings, setGallerySettings] = useState<GallerySettings>(() => ({ ...DEFAULT_GALLERY_SETTINGS }));
   const [settingsLoading, setSettingsLoading] = useState(true);
+  const [readOnlyMode, setReadOnlyMode] = useState(loadReadOnlyMode);
+  const [shareFeedback, setShareFeedback] = useState('');
   const [view, setView] = useState<'start' | 'library'>(() => window.location.pathname.includes('/view/') ? 'library' : 'start');
   const [createOpen, setCreateOpen] = useState(false);
   const [detail, setDetail] = useState<Keepsake | null>(null);
