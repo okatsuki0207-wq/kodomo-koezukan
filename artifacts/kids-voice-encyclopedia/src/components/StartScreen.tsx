@@ -12,7 +12,7 @@ export default function StartScreen({ onRecord, onOpenEncyclopedia }: Props) {
       <div className="start-character" aria-hidden="true">
         <span className="start-orbit start-orbit-one" />
         <span className="start-orbit start-orbit-two" />
-        <RecordingCharacter />
+        <RecordingCharacter pose="welcome" />
       </div>
       <p className="start-kicker">だいすきなものを</p>
       <h2 id="start-title" className="start-title">さあ キロクしよう！</h2>

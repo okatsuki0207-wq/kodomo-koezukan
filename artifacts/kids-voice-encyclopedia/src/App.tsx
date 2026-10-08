@@ -24,7 +24,7 @@ import CategoryDialog from './components/CategoryDialog';
 import { useLongPress } from './hooks/useLongPress';
 import CategorySelect from './components/CategorySelect';
 import EditCardDialog from './components/EditCardDialog';
-import RecordingGuide from './components/RecordingGuide';
+import RecordingGuide, { RecordingCharacter } from './components/RecordingGuide';
 import VoiceTrimEditor from './components/VoiceTrimEditor';
 import { useEditRecording } from './hooks/useEditRecording';
 import { useNewKeepsakeDraft } from './hooks/useNewKeepsakeDraft';
@@ -499,14 +499,14 @@ function App() {
         <div id="category-panel" role="tabpanel" aria-labelledby={`category-tab-${selectedCategory ?? 'all'}`}>
         {loading ? <p className="notice neutral" role="status">Firebase から図鑑を読み込んでいます…</p> : items.length === 0 && selectedCategory === null ? (
           <section className="empty-state" data-testid="empty-keepsakes">
-            <div className="empty-illustration"><BookOpen size={46} strokeWidth={1.35} /></div>
+            <div className="empty-illustration"><RecordingCharacter pose="sit" /></div>
             <h2 className="empty-title">まだ、まっさらなページ</h2>
             <p className="empty-copy">いちばん最初のキロクを残してみよう。<br />写真といっしょに、声も大切にしまえます。</p>
             <button type="button" className="empty-action" onClick={openCreate} data-testid="button-empty-create">はじめのキロクを残す</button>
           </section>
         ) : visibleItems.length === 0 ? (
           <section className="empty-state category-empty" data-testid="empty-category">
-            <div className="empty-illustration"><BookOpen size={46} strokeWidth={1.35} /></div>
+            <div className="empty-illustration"><RecordingCharacter pose="sit" /></div>
             <h2 className="empty-title">{categoryName(selectedCategory) ?? 'このカテゴリ'}は、まだ空っぽ</h2>
             <p className="empty-copy">このページはまだ空っぽ。<br />新しいキロクを残すか、ほかのキロクのページを変えられます。</p>
             <button type="button" className="empty-action" onClick={openCreate} data-testid="button-category-empty-create">このページにキロクする</button>

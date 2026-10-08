@@ -25,6 +25,7 @@
 .rg { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; padding: 12px; margin-top: 12px; border-radius: 14px; background: #f8f9fa; }
 .rg-stage { position: relative; width: 108px; height: 108px; flex: 0 0 auto; background: #fff; border: 1px solid #e3e6ea; border-radius: 50%; display: grid; place-items: center; overflow: visible; }
 .rg-char { width: 88px; height: 88px; flex: 0 0 auto; animation: rg-bob 1.6s ease-in-out infinite; }
+.rg-char { object-fit: contain; user-select: none; -webkit-user-drag: none; }
 .rg-bubble { position: absolute; left: 72px; top: 0; width: max-content; max-width: 230px; background: #fff; border: 2px solid #e5be7a; border-radius: 18px; padding: 7px 12px; font-size: 15px; font-weight: 900; color: #65513d; }
 .rg-bubble::before { content: ""; position: absolute; left: -7px; bottom: 8px; width: 10px; height: 10px; background: #fff; border-left: 2px solid #e5be7a; border-bottom: 2px solid #e5be7a; transform: rotate(45deg); }
 .rg-cue { margin: 0; font-size: 14px; font-weight: 700; color: #a85f49; text-align: center; min-height: 24px; }

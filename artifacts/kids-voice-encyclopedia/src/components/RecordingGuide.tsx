@@ -15,21 +15,43 @@ type Props = {
   recordingStartSignal?: number | string;
 };
 
-export function RecordingCharacter() {
+export type VoicelPose =
+  | 'welcome'
+  | 'stand'
+  | 'listen'
+  | 'record'
+  | 'happy'
+  | 'sleep'
+  | 'think'
+  | 'fly'
+  | 'cheer'
+  | 'surprise'
+  | 'sit';
+
+const voicelImageByPose: Record<VoicelPose, string> = {
+  welcome: 'voicel_welcome.png',
+  stand: 'voicel_stand.png',
+  listen: 'voicel_listen.png',
+  record: 'voicel_record.png',
+  happy: 'voicel_happy.png',
+  sleep: 'voicel_sleep.png',
+  think: 'voicel_think.png',
+  fly: 'voicel_fly.png',
+  cheer: 'voicel_cheer.png',
+  surprise: 'voicel_surprise.png',
+  sit: 'voicel_sit.png',
+};
+
+export function RecordingCharacter({ pose = 'welcome' }: { pose?: VoicelPose }) {
   return (
-    <svg className="rg-char" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
-      <circle cx="26" cy="28" r="14" fill="#e5be7a" />
-      <circle cx="74" cy="28" r="14" fill="#e5be7a" />
-      <circle cx="26" cy="28" r="7" fill="#f5e7dc" />
-      <circle cx="74" cy="28" r="7" fill="#f5e7dc" />
-      <ellipse cx="50" cy="56" rx="36" ry="34" fill="#f2cf94" stroke="#bd7057" strokeWidth="2.5" />
-      <circle cx="38" cy="50" r="4.5" fill="#493d33" />
-      <circle cx="62" cy="50" r="4.5" fill="#493d33" />
-      <ellipse cx="50" cy="62" rx="8" ry="6" fill="#bd7057" />
-      <path className="rg-mouth" d="M42 72 Q50 80 58 72" fill="none" stroke="#493d33" strokeWidth="2.5" strokeLinecap="round" />
-      <circle cx="28" cy="64" r="5" fill="#f0b7a2" opacity=".7" />
-      <circle cx="72" cy="64" r="5" fill="#f0b7a2" opacity=".7" />
-    </svg>
+    <img
+      className="rg-char"
+      src={`${import.meta.env.BASE_URL}character/${voicelImageByPose[pose]}`}
+      alt=""
+      aria-hidden="true"
+      draggable={false}
+      decoding="async"
+    />
   );
 }
 
@@ -101,7 +123,7 @@ export default function RecordingGuide({
           />
         )}
         <div className="rg-character-wrap" data-testid="recording-character-stage">
-          <RecordingCharacter />
+          <RecordingCharacter pose={phase === 'guide' ? 'listen' : 'record'} />
           {phase === 'recording' && (
             <span className="rg-mic-pose" aria-hidden="true" data-testid="recording-microphone-pose">
               <Mic size={17} strokeWidth={2.4} />
