@@ -97,11 +97,9 @@ function App() {
   const [playingItemId, setPlayingItemId] = useState<string | null>(null);
   const [playingUrl, setPlayingUrl] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [storageIssue, setStorageIssue] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [processingVoice, setProcessingVoice] = useState(false);
-  const [connectionAttempt, setConnectionAttempt] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [cardCategory, setCardCategory] = useState<string | null>(null);
   const [categoryOpen, setCategoryOpen] = useState(false);
@@ -109,7 +107,7 @@ function App() {
   const [catBusy, setCatBusy] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const localDraft = useNewKeepsakeDraft();
-  const { categories, create: createCategoryEntry, describeError } = useCategories(connectionAttempt, !shareRoute);
+  const { categories, create: createCategoryEntry, describeError } = useCategories(0, !shareRoute);
   useEffect(() => {
     if (shareRoute) {
       setSettingsLoading(false);
@@ -132,7 +130,7 @@ function App() {
       else unsubscribe = stop;
     }).catch(fail);
     return () => { cancelled = true; unsubscribe?.(); };
-  }, [connectionAttempt, shareRoute]);
+  }, [shareRoute]);
   const readOnly = !!shareRoute || localReadOnly;
   const shownItems = sharedBook?.items ?? items;
   const activeGallerySettings = sharedBook?.settings ?? gallerySettings;
@@ -236,33 +234,34 @@ function App() {
     if (shareRoute) {
       setItems([]);
       setLoading(false);
-      setStorageIssue('');
       return;
     }
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
     setLoading(true);
-    setStorageIssue('');
     const timer = window.setTimeout(() => {
       if (!cancelled) {
         setLoading(false);
-        setStorageIssue('Firebaseからの応答がありません。通信と設定を確認し、再接続してください。');
+        console.warn('Firebaseのキロク読み込みがタイムアウトしました。');
       }
     }, 20_000);
     const fail = (caught: unknown) => {
       window.clearTimeout(timer);
-      if (!cancelled) { setStorageIssue(firebaseError(caught)); setLoading(false); }
+      if (!cancelled) {
+        console.error('Firebaseのキロク読み込みに失敗しました。', firebaseError(caught));
+        setLoading(false);
+      }
     };
     void subscribeKeepsakes((next) => {
       window.clearTimeout(timer);
       if (!cancelled) {
         setItems(next);
         setDetail((current) => current ? next.find((item) => item.id === current.id) ?? null : null);
-        setLoading(false); setStorageIssue('');
+        setLoading(false);
       }
     }, fail).then((stop) => { if (cancelled) stop(); else unsubscribe = stop; }).catch(fail);
     return () => { cancelled = true; window.clearTimeout(timer); unsubscribe?.(); };
-  }, [connectionAttempt, shareRoute]);
+  }, [shareRoute]);
 
   useEffect(() => {
     if (!shareRoute) return;
@@ -761,7 +760,7 @@ function App() {
             {error && <p className="form-error" role="alert" data-testid="status-form-error">{error}</p>}
             <div className="dialog-actions">
               <button type="button" className="cancel-button" disabled={busy} onClick={closeCreate} data-testid="button-cancel-create">やめる</button>
-              <button type="button" className="save-button" onClick={saveCard} disabled={recording || rec.micStatus === 'preparing' || rec.starting || processingVoice || draftLoading || busy || !isFirebaseConfigured || !!storageIssue || loading} data-testid="button-save-card"><Check size={16} /> {busy ? 'キロクを残しています…' : 'キロクする'}</button>
+              <button type="button" className="save-button" onClick={saveCard} disabled={recording || rec.micStatus === 'preparing' || rec.starting || processingVoice || draftLoading || busy || !isFirebaseConfigured || loading} data-testid="button-save-card"><Check size={16} /> {busy ? 'キロクを残しています…' : 'キロクする'}</button>
             </div>
             {!isFirebaseConfigured && <p className="form-error" role="status">保存にはFirebaseの設定が必要です。src/firebaseConfig.ts をご確認ください。</p>}
           </DetailDialogShell>
