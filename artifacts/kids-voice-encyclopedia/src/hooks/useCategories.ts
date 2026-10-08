@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { DEFAULT_CATEGORIES, type Category } from '../lib/categories';
 import { createCategory, firebaseError, subscribeCategories } from '../lib/keepsakeStore';
 
-const RULES_NOTE = 'カテゴリの保存権限がありません。firebase/firestore.rules を Firebase Console で公開してから、再接続してください。標準タブと既存カードの表示は継続できます。';
+const RULES_NOTE = 'Firestoreからアクセスを拒否されました。ルールに加えて、FirebaseのプロジェクトIDと保存時と同じ匿名認証ユーザーで開いているか確認してください。';
 
 export function useCategories(connectionAttempt: number, enabled = true) {
   const [categories, setCategories] = useState<Category[]>([...DEFAULT_CATEGORIES]);

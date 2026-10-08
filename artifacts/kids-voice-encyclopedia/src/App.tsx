@@ -68,6 +68,8 @@ function readShareRoute(): { bookId: string | null } | null {
 }
 
 function App() {
+  const isDevelopmentPreview = typeof window !== 'undefined' &&
+    window.location.hostname.endsWith('.replit.dev');
   const [items, setItems] = useState<Keepsake[]>([]);
   const [shareRoute] = useState(readShareRoute);
   const [sharedBook, setSharedBook] = useState<SharedBook | null>(null);
@@ -126,7 +128,7 @@ function App() {
         ? (caught as { code?: string }).code
         : undefined;
       setSettingsIssue(code === 'permission-denied'
-        ? 'Firestore の設定読み取りが拒否されました。firebase/firestore.rules の更新をFirebase Consoleで公開し、「再接続」を押してください。'
+        ? 'Firestoreからアクセスを拒否されました。保存時と同じ匿名認証ユーザー・URLで開いているか、FirebaseのプロジェクトIDとルールの公開先が一致しているか確認してください。'
         : firebaseError(caught));
       setSettingsLoading(false);
     };
@@ -628,6 +630,10 @@ function App() {
           disabled={busy}
           readOnly={readOnly}
         />
+        {!shareRoute && isDevelopmentPreview && <div className="notice neutral" role="note" data-testid="notice-development-preview">
+          <CircleHelp size={16} />
+          <span className="notice-message">開発プレビュー（replit.dev）で開いています。Firebaseの匿名アカウントは公開URLとは別です。以前のキロクを見るには、保存したときと同じURLで開いてください。</span>
+        </div>}
         {!shareRoute && categoryIssue && <div className="notice" role="alert" data-testid="status-categories-load-error"><AlertCircle size={16} />{categoryIssue}
           <button type="button" className="record-button" onClick={() => setConnectionAttempt((value) => value + 1)} disabled={busy}>再接続</button>
         </div>}
