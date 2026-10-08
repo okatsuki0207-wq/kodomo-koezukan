@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Check, Copy, Eye, Link2, LockKeyhole, Share2, Trash2, X } from 'lucide-react';
+import { Check, Copy, Eye, LockKeyhole, Share2, X } from 'lucide-react';
 import type { Category } from '../lib/categories';
 import type { GallerySettings } from '../lib/gallerySettings';
 import type { Keepsake } from '../lib/keepsakeRepository';
-import { createLiveShare, firebaseError, listPasswordShares, revokePasswordShare } from '../lib/keepsakeStore';
+import { firebaseError, getOrCreateLiveShare, listPasswordShares, revokePasswordShare } from '../lib/keepsakeStore';
 import { createShareUrl } from '../lib/shareCrypto';
-import type { ShareSummary } from '../lib/shareRepository';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 
 type Props = {
@@ -16,10 +15,13 @@ type Props = {
 };
 
 type LinkState = { ownerUid: string; shareId: string; url: string };
+type ShareOwnerAndId = Pick<LinkState, 'ownerUid' | 'shareId'>;
 
-function formatDate(time: number) {
-  if (!time) return '作成日時を確認できません';
-  return new Intl.DateTimeFormat('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }).format(time);
+function shareLink(share: ShareOwnerAndId): LinkState {
+  return {
+    ...share,
+    url: createShareUrl(share.ownerUid, share.shareId, window.location.href),
+  };
 }
 
 function userError(caught: unknown, fallback: string) {
@@ -30,25 +32,30 @@ function userError(caught: unknown, fallback: string) {
 
 export default function ShareDialog({ items, categories, settings, onClose }: Props) {
   const dialog = useRef<HTMLDivElement>(null);
-  const [shares, setShares] = useState<ShareSummary[]>([]);
   const [link, setLink] = useState<LinkState | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [lookupFailed, setLookupFailed] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [copiedId, setCopiedId] = useState('');
   const linkInput = useRef<HTMLInputElement>(null);
   useDialogFocus(dialog, '[data-testid="button-share-encyclopedia"]', () => { if (!busy) onClose(); });
 
-  const refresh = async () => {
-    const values = await listPasswordShares();
-    setShares(values);
-  };
   useEffect(() => {
     let cancelled = false;
-    void listPasswordShares().then((values) => { if (!cancelled) setShares(values); })
-      .catch((caught) => { if (!cancelled) setError(userError(caught, '共有一覧を読み込めませんでした。')); })
+    void listPasswordShares().then((values) => {
+      if (cancelled) return;
+      const existing = values.find((share) => share.active && share.mode === 'live');
+      if (existing) setLink(shareLink(existing));
+    })
+      .catch((caught) => {
+        if (!cancelled) {
+          setLookupFailed(true);
+          setError(userError(caught, '共有リンクを確認できませんでした。通信を確認してもう一度お試しください。'));
+        }
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
@@ -59,11 +66,9 @@ export default function ShareDialog({ items, categories, settings, onClose }: Pr
     setError(''); setNotice('');
     setBusy(true);
     try {
-      const created = await createLiveShare(items, categories, settings);
-      const url = createShareUrl(created.ownerUid, created.shareId, window.location.href);
-      setLink({ ...created, url });
-      await refresh();
-      setNotice('共有リンクを作りました。リンクを知っている人は、別の端末からも最新のずかんを見られます。');
+      const ready = await getOrCreateLiveShare(items, categories, settings);
+      setLink(shareLink(ready));
+      setNotice('この共有リンクを、別の端末から最新のずかんを見るときに使えます。');
     } catch (caught) {
       setError(userError(caught, '共有リンクを作れませんでした。'));
     } finally { setBusy(false); }
@@ -86,11 +91,6 @@ export default function ShareDialog({ items, categories, settings, onClose }: Pr
     }
   };
 
-  const shareLink = (share: ShareSummary): LinkState => {
-    const url = createShareUrl(share.ownerUid, share.shareId, window.location.href);
-    return { ownerUid: share.ownerUid, shareId: share.shareId, url };
-  };
-
   const revoke = async (shareId: string) => {
     if (busy) return;
     setBusy(true); setError(''); setNotice('');
@@ -98,12 +98,24 @@ export default function ShareDialog({ items, categories, settings, onClose }: Pr
       await revokePasswordShare(shareId);
       setRevokeTarget(null);
       if (link?.shareId === shareId) setLink(null);
-      await refresh();
       setNotice('この共有リンクを停止しました。相手が保存した内容や控えた写真・声のURLは回収できません。');
     } catch (caught) {
       setError(userError(caught, '共有を停止できませんでした。'));
-      await refresh().catch(() => {});
     } finally { setBusy(false); }
+  };
+
+  const retryLookup = () => {
+    if (busy || loading) return;
+    setLoading(true);
+    setLookupFailed(false);
+    setError('');
+    void listPasswordShares().then((values) => {
+      const existing = values.find((share) => share.active && share.mode === 'live');
+      setLink(existing ? shareLink(existing) : null);
+    }).catch((caught) => {
+      setLookupFailed(true);
+      setError(userError(caught, '共有リンクを確認できませんでした。通信を確認してもう一度お試しください。'));
+    }).finally(() => setLoading(false));
   };
 
   return (
@@ -122,11 +134,13 @@ export default function ShareDialog({ items, categories, settings, onClose }: Pr
 
         {!link && <form className="share-form" onSubmit={(event) => void create(event)}>
           <p className="share-count"><Eye size={15} /> 共有するキロク {items.length}件・声を含む写真と録音</p>
-          <button type="submit" className="share-primary" disabled={busy}>{busy ? '共有リンクを準備しています…' : '共有リンクを作る'}</button>
+          <button type="submit" className="share-primary" disabled={busy || loading || lookupFailed}>
+            {loading ? '共有リンクを確認しています…' : busy ? '共有リンクを準備しています…' : '共有リンクを表示する'}
+          </button>
         </form>}
 
         {link && <section className="share-created" aria-live="polite">
-          <p className="share-success"><Check size={17} /> 共有リンクを作りました</p>
+          <p className="share-success"><Check size={17} /> いつもの共有リンク</p>
           <label htmlFor="created-share-url">共有リンク</label>
           <div className="share-copy-row">
             <input ref={linkInput} id="created-share-url" className="share-url-input" readOnly value={link.url} onFocus={(event) => event.currentTarget.select()} />
@@ -136,35 +150,14 @@ export default function ShareDialog({ items, categories, settings, onClose }: Pr
             </button>
           </div>
           <p className="share-hint">リンクを知っている人は閲覧できます。家族など、見せたい相手だけに伝えてください。</p>
-          <button type="button" className="share-text-button" onClick={() => setLink(null)}>別の共有リンクを作る</button>
+          <button type="button" className="share-text-button" disabled={busy} onClick={() => setRevokeTarget(link.shareId)}>この共有リンクを停止する</button>
         </section>}
-
-        <section className="share-list" aria-labelledby="share-list-heading">
-          <h3 id="share-list-heading"><Link2 size={16} /> いまの共有リンク</h3>
-          {loading ? <p className="share-muted" role="status">確認しています…</p> : shares.length === 0
-            ? <p className="share-muted">まだ共有リンクはありません。</p>
-            : shares.map((share) => {
-              const current = shareLink(share);
-              return <div className={`share-row${share.active ? '' : ' is-inactive'}`} key={share.shareId}>
-                <div className="share-row-info">
-                  <strong>{share.active ? '共有中' : '停止済み・削除待ち'}</strong>
-                  <span>{formatDate(share.createdAt)}</span>
-                <input className="share-url-input" readOnly value={current.url} aria-label="共有リンク" onFocus={(event) => event.currentTarget.select()} />
-                </div>
-                <button type="button" className="share-icon-action" disabled={busy || !share.active} onClick={(event) => void copy(current, event.currentTarget.parentElement?.querySelector('input'))} aria-label="リンクをコピー">
-                  {copiedId === share.shareId ? <Check size={17} /> : <Copy size={17} />}
-                </button>
-                {share.active
-                  ? <button type="button" className="share-icon-action danger" disabled={busy} onClick={() => setRevokeTarget(share.shareId)} aria-label="共有を停止"><Trash2 size={17} /></button>
-                  : <button type="button" className="share-icon-action danger" disabled={busy} onClick={() => void revoke(share.shareId)} aria-label="共有データの削除を続ける"><Trash2 size={17} /></button>}
-              </div>;
-            })}
-        </section>
 
         {revokeTarget && <div className="share-revoke-confirm" role="alert">
           <p>このリンクからは開けなくなります。すでに保存された写真・声や、相手が控えた個別URLは回収できません。</p>
           <div><button type="button" className="share-danger" disabled={busy} onClick={() => void revoke(revokeTarget)}>{busy ? '停止しています…' : '共有を停止する'}</button><button type="button" className="share-secondary" disabled={busy} onClick={() => setRevokeTarget(null)}>もどる</button></div>
         </div>}
+        {lookupFailed && <button type="button" className="share-text-button" disabled={loading || busy} onClick={retryLookup}>共有リンクを再確認する</button>}
         {error && <p className="share-error" role="alert">{error}</p>}
         {notice && <p className="share-notice" role="status">{notice}</p>}
       </div>

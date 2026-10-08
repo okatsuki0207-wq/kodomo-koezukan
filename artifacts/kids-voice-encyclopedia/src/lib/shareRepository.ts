@@ -362,6 +362,20 @@ export async function listPasswordShares(): Promise<ShareSummary[]> {
   });
 }
 
+/**
+ * Keep one active live-share URL for the owner. Reuse and refresh its projection
+ * on subsequent requests instead of generating a new public capability token.
+ */
+export async function getOrCreateLiveShare(
+  items: readonly Keepsake[],
+  categories: readonly Category[],
+  settings: GallerySettings = DEFAULT_GALLERY_SETTINGS,
+): Promise<ShareId> {
+  const existing = (await listPasswordShares()).find((share) => share.active && share.mode === 'live');
+  if (existing) return { ownerUid: existing.ownerUid, shareId: existing.shareId };
+  return createLiveShare(items, categories, settings);
+}
+
 async function listShareFiles(directory: StorageReference): Promise<StorageReference[]> {
   const { items, prefixes } = await listAll(directory);
   const nested = await Promise.all(prefixes.map(listShareFiles));

@@ -7,7 +7,7 @@ import { ref, uploadBytes, getDownloadURL, getMetadata, getBytes, deleteObject, 
 import { createKeepsakeRepository } from '../src/lib/keepsakeRepository.ts';
 import { createUnusedMediaService, MEDIA_RETENTION_MS } from '../src/lib/unusedMedia.ts';
 import { createKeepsakeEditor } from '../src/lib/keepsakeEditor.ts';
-import { configureShareRepository, createLiveShare, syncLiveShareProjections, subscribeLiveShare } from '../src/lib/shareRepository.ts';
+import { configureShareRepository, createLiveShare, getOrCreateLiveShare, syncLiveShareProjections, subscribeLiveShare } from '../src/lib/shareRepository.ts';
 
 const projectId = 'demo-keepsakes-test';
 const storageOrigin = 'http://127.0.0.1:9197';
@@ -832,6 +832,11 @@ test('live share repository publishes without Storage copies and streams owner c
   ]);
   assert.equal(first.items[0].itemName, '最初のキロク');
   assert.equal(first.categories[0].name, 'おもちゃ');
+
+  const reused = await getOrCreateLiveShare([{ ...original, itemName: '最新の内容' }], categories);
+  assert.deepEqual(reused, share);
+  const storedShares = await getDocs(collection(alice.db, 'users', 'alice', 'shares'));
+  assert.equal(storedShares.size, 1, 'reopening share settings must reuse the existing share document');
 
   await syncLiveShareProjections([{ ...original, itemName: '更新後のキロク' }], categories, {
     displayMode: 'shuffle',

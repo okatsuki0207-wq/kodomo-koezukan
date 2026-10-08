@@ -47,7 +47,7 @@ if (db && storage) configureShareRepository(db, storage, userId);
 const repository = createKeepsakeRepository(db!, storage!, userId);
 export const { saveKeepsake, deleteKeepsake } = repository;
 export const { editKeepsake } = createKeepsakeEditor(db!, storage!, userId);
-export { createLiveShare, listPasswordShares, openPasswordShare, revokePasswordShare, subscribeLiveShare } from './shareRepository';
+export { getOrCreateLiveShare, listPasswordShares, openPasswordShare, revokePasswordShare, subscribeLiveShare } from './shareRepository';
 
 let latestItems: Keepsake[] | null = null;
 let latestCategories: Category[] | null = null;

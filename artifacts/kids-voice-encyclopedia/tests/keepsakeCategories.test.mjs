@@ -72,6 +72,7 @@ if (!vm.SourceTextModule) {
       './keepsakeEditor': { createKeepsakeEditor: () => ({ editKeepsake: () => { throw new Error('Not a metadata-only operation'); } }) },
       './shareRepository': {
         configureShareRepository: () => {},
+        getOrCreateLiveShare: async () => ({ ownerUid: 'test-owner', shareId: 'a'.repeat(64) }),
         createLiveShare: async () => {},
         listPasswordShares: async () => [],
         openPasswordShare: async () => {},
