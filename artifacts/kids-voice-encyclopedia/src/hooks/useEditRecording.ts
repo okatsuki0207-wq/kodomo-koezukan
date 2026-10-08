@@ -12,37 +12,6 @@ function pickMime(): string | undefined {
 
 export const canRecord = () => typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined';
 
-function playRecordingStartCue(context: AudioContext) {
-  return new Promise<void>((resolve) => {
-    let timeout: number | undefined;
-    const done = () => {
-      if (timeout !== undefined) window.clearTimeout(timeout);
-      resolve();
-    };
-    try {
-      const now = context.currentTime;
-      const tone = context.createOscillator();
-      const volume = context.createGain();
-      tone.type = 'sine';
-      tone.frequency.setValueAtTime(1046.5, now);
-      tone.frequency.setValueAtTime(1568, now + 0.055);
-      volume.gain.setValueAtTime(0.0001, now);
-      volume.gain.exponentialRampToValueAtTime(0.08, now + 0.01);
-      volume.gain.setValueAtTime(0.08, now + 0.075);
-      volume.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
-      tone.onended = done;
-      tone.connect(volume);
-      volume.connect(context.destination);
-      tone.start(now);
-      tone.stop(now + 0.15);
-      timeout = window.setTimeout(done, 250);
-    } catch {
-      // The visual start cue and recording must continue if sound synthesis fails.
-      done();
-    }
-  });
-}
-
 /** 新規・編集共通。合図の終了後に録音し、結果のBlobだけを返す。古いセッションは破棄。 */
 export function useEditRecording(onResult: (blob: Blob) => void) {
   const [recording, setRecording] = useState(false);
@@ -216,9 +185,8 @@ export function useEditRecording(onResult: (blob: Blob) => void) {
           tick();
       } catch { /* level meter is optional */ }
       recorder.current = rec;
-      // Play a short cue, then start immediately so it is not captured in the
-      // child's recording.
-      await playRecordingStartCue(ctx);
+      // Start on the guide's ended event. The MediaRecorder is not active while
+      // the guide plays, so the prompt cannot be included in the child's voice.
       if (mine !== session.current) return;
       rec.start();
       setStarting(false);

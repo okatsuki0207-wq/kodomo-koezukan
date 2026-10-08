@@ -4,7 +4,6 @@ import {
   BookOpen,
   Camera,
   Check,
-  ChevronDown,
   CircleHelp,
   Image as ImageIcon,
   Mic,
@@ -16,6 +15,7 @@ import {
   Share2,
   Scissors,
   Settings,
+  Square,
   Trash2,
   X,
 } from 'lucide-react';
@@ -605,96 +605,85 @@ function App() {
 
       {createOpen && !photoEditorSource && (
         <div className="overlay" role="presentation" inert={newCatInCreate} onMouseDown={(event) => { if (event.target === event.currentTarget) closeCreate(); }}>
-          <DetailDialogShell className="dialog" label="新しいキロクをつくる" returnSelector='[data-testid="button-create-card"]' onClose={closeCreate}>
-            <div className="dialog-head">
-              <div><h2 id="create-title" className="dialog-title">新しいキロクをつくる</h2><p className="dialog-lede">お気に入りの写真と声をいっしょに残します。</p></div>
+          <DetailDialogShell className="dialog create-dialog" label="新しいキロクをつくる" returnSelector='[data-testid="button-create-card"]' onClose={closeCreate}>
+            <div className="dialog-head create-dialog-head">
+              <div><h2 id="create-title" className="dialog-title">新しいキロクをつくる</h2></div>
               <button type="button" className="icon-button" disabled={busy} onClick={closeCreate} aria-label="閉じる" data-testid="button-close-create"><X size={19} /></button>
             </div>
-            <div className="form-block">
-              <label className="field-label" htmlFor="keepsake-item-name">なまえ</label>
-              <p className="field-hint">写真のものの名前を入力してください。</p>
-              <input id="keepsake-item-name" className="title-input" disabled={busy || draftLoading} value={itemName} onChange={(event) => setItemName(event.currentTarget.value)} placeholder="りんご、ライオン、赤バス など" maxLength={48} data-testid="input-item-name" />
-            </div>
-            <div className="form-block">
-              <CategorySelect id="create-category" categories={categories} value={cardCategory} onChange={setCardCategory} disabled={busy || draftLoading} testId="select-card-category" onNew={() => setNewCatInCreate(true)} />
-            </div>
-            <div className="form-block">
-              <span className="field-label">写真</span>
-              <input ref={photoInput} className="sr-only" type="file" accept="image/*" disabled={busy || draftLoading || recording || rec.starting || processingVoice} onChange={onPhotoChange} aria-label="写真を選ぶ" data-testid="input-card-photo" />
-              <div className="photo-composition">
-                <button type="button" className={`photo-picker${photo ? ' has-photo' : ''}`} disabled={busy || draftLoading || recording || rec.starting || processingVoice} onClick={() => photoInput.current?.click()} data-testid="button-select-photo">
-                  {photo && <img src={photo} alt="選んだ写真" />}
-                  {!photo && <span className="picker-content">
-                    <Camera size={23} />
-                    <strong>写真をえらぶ・撮る</strong>
-                    <span>写真ライブラリから選ぶか、カメラで撮影できます</span>
-                  </span>}
-                </button>
-                {photo && <button type="button" className="photo-change" aria-label="写真を変更" disabled={busy || draftLoading || recording || rec.starting || processingVoice} onClick={() => photoInput.current?.click()}>写真を変更</button>}
+            <div className="create-fields">
+              <div className="form-block create-name-field">
+                <label className="field-label" htmlFor="keepsake-item-name">なまえ</label>
+                <input id="keepsake-item-name" className="title-input" disabled={busy || draftLoading} value={itemName} onChange={(event) => setItemName(event.currentTarget.value)} placeholder="なまえ" maxLength={48} data-testid="input-item-name" />
+              </div>
+              <div className="form-block create-category-field">
+                <CategorySelect id="create-category" categories={categories} value={cardCategory} onChange={setCardCategory} disabled={busy || draftLoading} testId="select-card-category" onNew={() => setNewCatInCreate(true)} />
               </div>
             </div>
-            <div className="form-block">
-              <div className="record-panel">
-                <div className="record-top">
-                  <div className="record-title"><Mic size={16} /> 声をのこす <span className="record-status" role="status" aria-live="polite">{rec.guiding ? 'これはなーに？' : recording ? `録音中 ${formatTime(recordSeconds)}` : voice ? '録音できました' : 'あとからでも大丈夫'}</span></div>
-                  {recording && <div className="recording-wave" aria-label="録音中"><i /><i /><i /><i /><i /><i /><i /></div>}
-                </div>
-                <RecordingGuide
-                  name={itemName}
-                  photo={photo || undefined}
-                  phase={rec.guiding || rec.starting ? 'guide' : recording ? 'recording' : 'idle'}
-                  guideDurationMs={rec.guideDurationMs}
-                  guideProgress={rec.guideProgress}
-                  recordingStartSignal={recordingSession.current}
-                />
-                <div className="record-actions">
+            <div className="create-capture">
+              <input ref={photoInput} className="sr-only" type="file" accept="image/*" disabled={busy || draftLoading || recording || rec.starting || processingVoice} onChange={onPhotoChange} aria-label="写真を選ぶ" data-testid="input-card-photo" />
+              <div className="photo-composition create-photo-composition">
+                <button type="button" className={`photo-picker create-photo-picker${photo ? ' has-photo' : ''}`} aria-label={photo ? '写真を変更' : '写真を選ぶ・撮る'} title={photo ? '写真を変更' : '写真を選ぶ・撮る'} disabled={busy || draftLoading || recording || rec.starting || processingVoice} onClick={() => photoInput.current?.click()} data-testid="button-select-photo">
+                  {photo && <img src={photo} alt={(rec.guiding || rec.starting || recording) ? '' : '選んだ写真'} aria-hidden={Boolean(rec.guiding || rec.starting || recording)} />}
+                  {!photo && <Camera size={36} aria-hidden="true" />}
+                </button>
+                {photo && <button type="button" className="photo-change create-photo-change" aria-label="写真を変更" title="写真を変更" disabled={busy || draftLoading || recording || rec.starting || processingVoice} onClick={() => photoInput.current?.click()} data-testid="button-change-photo"><Camera size={17} /></button>}
+                {(rec.guiding || rec.starting || recording) && (
+                  <div className="create-recording-overlay">
+                    <RecordingGuide
+                      name={itemName}
+                      photo={photo || undefined}
+                      phase={rec.guiding || rec.starting ? 'guide' : 'recording'}
+                      guideDurationMs={rec.guideDurationMs}
+                      guideProgress={rec.guideProgress}
+                      recordingStartSignal={recordingSession.current}
+                    />
+                  </div>
+                )}
+              </div>
+              <div className="create-record-controls">
+                <div className="record-actions create-record-actions">
                   {recording ? (
-                    <button type="button" className="record-button danger" onClick={stopRecording} data-testid="button-stop-recording"><span className="recording-dot" /> 録音をとめる</button>
+                    <button type="button" className="record-button primary create-icon-button recording-active" onClick={stopRecording} aria-label="録音をとめる" title="録音をとめる" data-testid="button-stop-recording"><span className="recording-dot" /><Square size={21} /></button>
                   ) : (
-                    <button type="button" className="record-button primary" disabled={processingVoice || busy || draftLoading || rec.micStatus === 'preparing' || rec.starting || !photo} onClick={startRecording} data-testid="button-start-recording"><Mic size={15} /> {rec.micStatus === 'preparing' || rec.starting ? '録音の準備中…' : processingVoice ? '音声を準備しています…' : voice ? 'もう一度録音' : '録音する'}</button>
+                    <button type="button" className="record-button primary create-icon-button" disabled={processingVoice || busy || draftLoading || rec.micStatus === 'preparing' || rec.starting || !photo} onClick={startRecording} aria-label={rec.micStatus === 'preparing' || rec.starting ? '録音の準備中' : processingVoice ? '音声を準備しています' : voice ? 'もう一度録音' : '録音する'} title={rec.micStatus === 'preparing' || rec.starting ? '録音の準備中' : processingVoice ? '音声を準備しています' : voice ? 'もう一度録音' : '録音する'} data-testid="button-start-recording"><Mic size={24} /></button>
                   )}
-                  {rec.starting && <button type="button" className="record-button" onClick={rec.cancel}>やめる</button>}
+                  {rec.starting && <button type="button" className="record-button create-icon-button secondary-icon-button" onClick={rec.cancel} aria-label="録音を中止" title="録音を中止"><X size={19} /></button>}
                   {voice && !recording && !processingVoice && !rec.starting && <>
-                    <button type="button" className="record-button" disabled={busy} onClick={() => playback.play(voice, 'voice-preview')} data-testid="button-preview-recording">{playing && playingUrl === voice ? <Pause size={15} /> : <Play size={15} />}{playing && playingUrl === voice ? 'とめる' : '声をきく'}</button>
-                    <button type="button" className="record-button" disabled={busy} onClick={() => { stopPlayback(); setVoice(null); setVoiceBlob(null); setTrimOpen(false); setNotice('録音を消しました。'); }} aria-label="録音を消す" data-testid="button-remove-recording"><RotateCcw size={15} /></button>
+                    <button type="button" className="record-button create-icon-button secondary-icon-button" disabled={busy} onClick={() => playback.play(voice, 'voice-preview')} aria-label={playing && playingUrl === voice ? '声をとめる' : '声をきく'} title={playing && playingUrl === voice ? '声をとめる' : '声をきく'} data-testid="button-preview-recording">{playing && playingUrl === voice ? <Pause size={20} /> : <Play size={20} />}</button>
+                    <button type="button" className="record-button create-icon-button secondary-icon-button" disabled={busy} onClick={() => { stopPlayback(); setVoice(null); setVoiceBlob(null); setTrimOpen(false); setNotice('録音を消しました。'); }} aria-label="録音を消す" title="録音を消す" data-testid="button-remove-recording"><RotateCcw size={19} /></button>
+                    <button type="button" className={`record-button create-icon-button secondary-icon-button${trimOpen ? ' is-selected' : ''}`} aria-expanded={trimOpen} aria-controls="new-keepsake-waveform" disabled={busy || draftLoading} onClick={() => setTrimOpen((open) => !open)} aria-label={trimOpen ? '波形編集を閉じる' : '波形を見てカット'} title={trimOpen ? '波形編集を閉じる' : '波形を見てカット'} data-testid="button-open-waveform-trim"><Scissors size={19} /></button>
                   </>}
                 </div>
-                {rec.micStatus === 'preparing' && <p className="field-hint mic-ready" role="status">マイクを確認しています。許可を聞かれたら「許可」を選んでください。</p>}
-                {voice && !recording && !processingVoice && !rec.starting && (
-                  <>
-                    <button type="button" className="record-button waveform-toggle" aria-expanded={trimOpen} aria-controls="new-keepsake-waveform" disabled={busy || draftLoading} onClick={() => setTrimOpen((open) => !open)} data-testid="button-open-waveform-trim">
-                      <Scissors size={15} /> 波形を見てカット <ChevronDown size={14} className={trimOpen ? 'waveform-chevron is-open' : 'waveform-chevron'} />
-                    </button>
-                    {trimOpen && <div className="new-waveform-panel" id="new-keepsake-waveform">
-                      <VoiceTrimEditor
-                        source={voiceBlob ?? voice}
-                        disabled={busy}
-                        onBeforePreview={stopPlayback}
-                        onApply={(trimmed) => {
-                          stopPlayback();
-                          setVoice(URL.createObjectURL(trimmed));
-                          setVoiceBlob(trimmed);
-                          setTrimOpen(false);
-                          setNotice('声のカットを反映しました。');
-                        }}
-                      />
-                    </div>}
-                  </>
+                <p className="create-record-status" role="status" aria-live="polite">
+                  {rec.guiding ? 'これはなーに？' : rec.starting ? '準備中' : recording ? `録音中 ${formatTime(recordSeconds)}` : voice ? '録音できました' : '声をのこそう'}
+                </p>
+                {rec.micStatus === 'preparing' && <p className="create-mic-hint" role="status">マイクを確認しています</p>}
+                {voice && !recording && !processingVoice && !rec.starting && trimOpen && (
+                  <div className="new-waveform-panel create-waveform-panel" id="new-keepsake-waveform">
+                    <VoiceTrimEditor
+                      source={voiceBlob ?? voice}
+                      disabled={busy}
+                      onBeforePreview={stopPlayback}
+                      onApply={(trimmed) => {
+                        stopPlayback();
+                        setVoice(URL.createObjectURL(trimmed));
+                        setVoiceBlob(trimmed);
+                        setTrimOpen(false);
+                        setNotice('声のカットを反映しました。');
+                      }}
+                    />
+                  </div>
                 )}
-                <p className="field-hint">※録音した声は、後から図鑑カード長押しで編集できます</p>
               </div>
-              {rec.error && <div className="notice" role="status" data-testid="status-microphone">{<CircleHelp size={16} />}{rec.error}</div>}
-              {rec.micStatus === 'ready' && !recording && !rec.starting && !processingVoice && <p className="field-hint mic-ready">マイクの準備ができました。</p>}
-              {notice && !rec.error && <div className="notice neutral" role="status"><Check size={15} />{notice}</div>}
-              {(!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') && <div className="notice" role="status" data-testid="status-unsupported-browser"><CircleHelp size={16} />このブラウザでは録音できません。録音以外のカード機能はお使いいただけます。</div>}
-              {recording && <p className="sr-only" aria-live="polite">録音中です。録音時間 {formatTime(recordSeconds)}</p>}
-              {processingVoice && <p className="notice neutral" role="status">音声を準備しています。録音後は冒頭の無音をカットします…</p>}
-              <p className="field-hint">{!photo ? '先に写真をえらぼう。' : '「これはなーに？」が終わったら話してね。'}録音は最大60秒。</p>
             </div>
+            {rec.error && <div className="notice create-inline-notice" role="status" data-testid="status-microphone"><CircleHelp size={16} />{rec.error}</div>}
+            {notice && !rec.error && <div className="notice neutral create-inline-notice" role="status"><Check size={15} />{notice}</div>}
+            {(!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') && <div className="notice create-inline-notice" role="status" data-testid="status-unsupported-browser"><CircleHelp size={16} />このブラウザでは録音できません。</div>}
+            {processingVoice && <p className="create-processing" role="status">録音の無音部分を整えています…</p>}
             {error && <p className="form-error" role="alert" data-testid="status-form-error">{error}</p>}
-            <div className="dialog-actions">
-              <button type="button" className="cancel-button" disabled={busy} onClick={closeCreate} data-testid="button-cancel-create">やめる</button>
-              <button type="button" className="save-button" onClick={saveCard} disabled={recording || rec.micStatus === 'preparing' || rec.starting || processingVoice || draftLoading || busy || !isFirebaseConfigured || loading} data-testid="button-save-card"><Check size={16} /> {busy ? 'キロクを残しています…' : 'キロクする'}</button>
+            <div className="dialog-actions create-dialog-actions">
+              <button type="button" className="cancel-button create-icon-button secondary-icon-button" disabled={busy} onClick={closeCreate} aria-label="やめる" title="やめる" data-testid="button-cancel-create"><X size={19} /></button>
+              <button type="button" className="save-button create-icon-button" onClick={saveCard} disabled={recording || rec.micStatus === 'preparing' || rec.starting || processingVoice || draftLoading || busy || !isFirebaseConfigured || loading} aria-label={busy ? 'キロクを保存しています' : 'キロクする'} title={busy ? 'キロクを保存しています' : 'キロクする'} data-testid="button-save-card"><Check size={21} /></button>
             </div>
           </DetailDialogShell>
         </div>

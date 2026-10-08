@@ -35,9 +35,9 @@ export function recordingCue(
   const usingPreloaded = !createAudio && url === GUIDE_URL && preloadedGuideAudio !== null;
   const audio = createAudio ? createAudio(url) : usingPreloaded ? preloadedGuideAudio : new Audio(url);
   try { audio.preload = 'auto'; } catch { /* playback remains the source of truth */ }
-  // A small rate increase makes the guide brighter without replacing its voice.
-  // Disable pitch preservation where supported so the voice actually sounds higher.
-  try { audio.playbackRate = 1.12; } catch { /* use the browser's default rate */ }
+  // A slightly faster rate shortens the prompt and raises its pitch without
+  // replacing the original character voice.
+  try { audio.playbackRate = 1.2; } catch { /* use the browser's default rate */ }
   try {
     audio.preservesPitch = false;
     const prefixed = audio as HTMLAudioElement & { webkitPreservesPitch?: boolean };

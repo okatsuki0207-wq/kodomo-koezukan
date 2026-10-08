@@ -209,7 +209,7 @@ export default function VoiceTrimEditor({ source, refreshSource, disabled, onApp
       <p className="vte-help">波形の左のハンドルで前を、右のハンドルで後ろを切ります。親の声などが入った部分を外せます。</p>
       {loading && <div className="vte-load" aria-label="読み込み中" />}
       {error && <div className="vte-msg err" role="alert" data-testid="status-trim-error">{error}
-        {!audio && <button type="button" className="vte-btn" disabled={disabled || loading} onClick={() => setReload((n) => n + 1)} data-testid="button-reload-voice">再読み込み</button>}
+        {!audio && <button type="button" className="vte-btn" aria-label="声を再読み込み" title="声を再読み込み" disabled={disabled || loading} onClick={() => setReload((n) => n + 1)} data-testid="button-reload-voice"><RotateCcw size={18} /></button>}
       </div>}
       {audio && (
         <>
@@ -235,17 +235,17 @@ export default function VoiceTrimEditor({ source, refreshSource, disabled, onApp
             <span>終了 <b data-testid="text-trim-end">{fmt(range[1])}</b></span>
           </div>
           <div className="vte-actions">
-            <button type="button" className="vte-btn" onClick={preview} disabled={disabled} data-testid="button-preview-audio-trim">
-              {playing ? <Square size={15} /> : <Play size={15} />}{playing ? '止める' : '範囲を聞く'}
+            <button type="button" className="vte-btn" aria-label={playing ? '再生をとめる' : '選んだ範囲を聞く'} title={playing ? '再生をとめる' : '選んだ範囲を聞く'} onClick={preview} disabled={disabled} data-testid="button-preview-audio-trim">
+              {playing ? <Square size={19} /> : <Play size={19} />}
             </button>
-            <button type="button" className="vte-btn" onClick={reset} disabled={disabled || !pending} data-testid="button-reset-audio-trim">
-              <RotateCcw size={15} />元の範囲
+            <button type="button" className="vte-btn" aria-label="元の範囲に戻す" title="元の範囲に戻す" onClick={reset} disabled={disabled || !pending} data-testid="button-reset-audio-trim">
+              <RotateCcw size={19} />
             </button>
-            <button type="button" className="vte-btn primary" onClick={apply} disabled={disabled || !pending || applying} data-testid="button-apply-audio-trim">
-              <Check size={15} />この範囲で確定
+            <button type="button" className="vte-btn primary" aria-label={applying ? '範囲を反映中' : 'この範囲を反映'} title={applying ? '範囲を反映中' : 'この範囲を反映'} onClick={apply} disabled={disabled || !pending || applying} data-testid="button-apply-audio-trim">
+              <Check size={19} />
             </button>
           </div>
-          {pending && <p className="vte-msg" role="status">範囲を変えました。「この範囲で確定」を押すと反映されます。</p>}
+          {pending && <p className="vte-msg" role="status">範囲を変えました。右のチェックを押すと反映されます。</p>}
         </>
       )}
     </div>

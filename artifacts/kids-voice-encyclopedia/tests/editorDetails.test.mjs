@@ -49,7 +49,7 @@ test('guide voice begins from tap and recording can proceed immediately after en
   const audio = new GuideAudio();
   const cue = recordingCue('/test-guide.mp3', () => audio);
   assert.equal(audio.played, 1);
-  assert.equal(audio.playbackRate, 1.12);
+  assert.equal(audio.playbackRate, 1.2);
   assert.equal(audio.preservesPitch, false);
   let finished = false;
   cue.finished.then(() => { finished = true; });
@@ -59,6 +59,13 @@ test('guide voice begins from tap and recording can proceed immediately after en
   await cue.finished;
   assert.equal(finished, true);
   assert.equal(audio.onended, null);
+});
+test('recording begins after the guide ends without an extra synthesized sound', async () => {
+  const hook = await readFile(new URL('../src/hooks/useEditRecording.ts', import.meta.url), 'utf8');
+  const guideCompletion = hook.indexOf('const guideError = await guideReady;');
+  const recorderStart = hook.indexOf('rec.start();', guideCompletion);
+  assert.ok(guideCompletion >= 0 && recorderStart > guideCompletion);
+  assert.doesNotMatch(hook, /playRecordingStartCue|createOscillator/);
 });
 test('guide playback supports browsers where play() starts audio but returns no Promise', async () => {
   const audio = new GuideAudio();

@@ -159,9 +159,9 @@ export default function PhotoEditor({ source, onCancel, onApply }: Props) {
         </header>
 
         <div className="photo-editor-tabs" role="tablist" aria-label="写真の加工方法">
-          <button type="button" role="tab" aria-selected={mode === 'shape'} onClick={() => chooseMode('shape')} disabled={Boolean(processing)} data-testid="tab-photo-shape"><Circle size={16} /> 型抜き（丸・四角）</button>
-          <button type="button" role="tab" aria-selected={mode === 'freehand'} onClick={() => chooseMode('freehand')} disabled={Boolean(processing)} data-testid="tab-photo-freehand"><PenLine size={16} /> なぞって切り抜く</button>
-          <button type="button" role="tab" aria-selected={mode === 'ai'} onClick={() => chooseMode('ai')} disabled={Boolean(processing)} data-testid="tab-photo-ai"><Sparkles size={16} /> AIで切り抜く</button>
+          <button type="button" role="tab" aria-label="型抜き（丸・四角）" title="型抜き（丸・四角）" aria-selected={mode === 'shape'} onClick={() => chooseMode('shape')} disabled={Boolean(processing)} data-testid="tab-photo-shape"><Circle size={18} /></button>
+          <button type="button" role="tab" aria-label="なぞって切り抜く" title="なぞって切り抜く" aria-selected={mode === 'freehand'} onClick={() => chooseMode('freehand')} disabled={Boolean(processing)} data-testid="tab-photo-freehand"><PenLine size={18} /></button>
+          <button type="button" role="tab" aria-label="AIで背景を切り抜く" title="AIで背景を切り抜く" aria-selected={mode === 'ai'} onClick={() => chooseMode('ai')} disabled={Boolean(processing)} data-testid="tab-photo-ai"><Sparkles size={18} /></button>
         </div>
 
         <div className={`photo-editor-stage${stageClass}`} ref={stageRef} {...((mode === 'shape' || mode === 'ai') && !processedImage ? crop.stageProps : {})} data-testid="photo-editor-stage">
@@ -225,8 +225,8 @@ export default function PhotoEditor({ source, onCancel, onApply }: Props) {
           <div className="photo-editor-controls">
             <p className="photo-editor-hint">加工した画像を確認してください。</p>
             <div className="photo-editor-actions">
-              <button type="button" className="photo-editor-secondary" onClick={() => setProcessedImage('')} data-testid="button-redo-photo"><RotateCcw size={16} /> やり直す</button>
-              <button type="button" className="photo-editor-apply" onClick={() => onApply(processedImage)} data-testid="button-apply-photo"><Check size={17} /> この画像で図鑑に登録</button>
+              <button type="button" className="photo-editor-secondary" aria-label="やり直す" title="やり直す" onClick={() => setProcessedImage('')} data-testid="button-redo-photo"><RotateCcw size={19} /></button>
+              <button type="button" className="photo-editor-apply" aria-label="この画像で図鑑に登録" title="この画像で図鑑に登録" onClick={() => onApply(processedImage)} data-testid="button-apply-photo"><Check size={19} /></button>
             </div>
           </div>
         ) : (
@@ -234,26 +234,26 @@ export default function PhotoEditor({ source, onCancel, onApply }: Props) {
             {mode === 'shape' && (
               <>
                 <div className="photo-editor-shapes" role="group" aria-label="切り抜く形">
-                  <button type="button" aria-pressed={circle} onClick={() => setShape('circle')} data-testid="button-crop-circle"><Circle size={17} /> 丸型</button>
-                  <button type="button" aria-pressed={!circle} onClick={() => setShape('square')} data-testid="button-crop-square"><Square size={17} /> 四角形</button>
+                  <button type="button" aria-label="丸型" title="丸型" aria-pressed={circle} onClick={() => setShape('circle')} data-testid="button-crop-circle"><Circle size={19} /></button>
+                  <button type="button" aria-label="四角形" title="四角形" aria-pressed={!circle} onClick={() => setShape('square')} data-testid="button-crop-square"><Square size={19} /></button>
                 </div>
                 <p className="photo-editor-hint">枠の中をドラッグで枠を移動、外側で写真を移動。2本指のピンチやマウスホイールで拡大縮小、枠の角{circle ? '' : 'や辺'}で大きさを変えられます。</p>
-                <button type="button" className="photo-editor-primary" onClick={runShapeCrop} disabled={!crop.ready || f.width <= 0} data-testid="button-run-shape-crop">この形で切り抜く</button>
+                <button type="button" className="photo-editor-primary" aria-label="この形で切り抜く" title="この形で切り抜く" onClick={runShapeCrop} disabled={!crop.ready || f.width <= 0} data-testid="button-run-shape-crop"><Check size={19} /></button>
               </>
             )}
             {mode === 'freehand' && (
               <>
                 <p className="photo-editor-hint">ドラッグ中はペンの線だけが表示されます。指を離すと、始点と終点をなめらかにつないで内側を切り抜きます。</p>
                 <div className="photo-editor-actions">
-                  <button type="button" className="photo-editor-secondary" onClick={() => { freehand.clear(); setError(''); }} disabled={freehand.points.length === 0} data-testid="button-clear-photo-trace"><RotateCcw size={16} /> なぞり直す</button>
-                  <button type="button" className="photo-editor-primary" onClick={runFreehandCrop} disabled={!loaded || freehand.drawing || freehand.points.length < 3} data-testid="button-run-freehand-crop">なぞった範囲を切り抜く</button>
+                  <button type="button" className="photo-editor-secondary" aria-label="なぞり直す" title="なぞり直す" onClick={() => { freehand.clear(); setError(''); }} disabled={freehand.points.length === 0} data-testid="button-clear-photo-trace"><RotateCcw size={19} /></button>
+                  <button type="button" className="photo-editor-primary" aria-label="なぞった範囲を切り抜く" title="なぞった範囲を切り抜く" onClick={runFreehandCrop} disabled={!loaded || freehand.drawing || freehand.points.length < 3} data-testid="button-run-freehand-crop"><Check size={19} /></button>
                 </div>
               </>
             )}
             {mode === 'ai' && (
               <>
                 <p className="photo-editor-hint">① 四角い枠を対象のすぐ外側に合わせます（角や辺をドラッグ）。② 枠の中だけをAIで背景削除します。透明な余白も詰めて仕上げます。処理は端末内で行います。</p>
-                <button type="button" className="photo-editor-primary" onClick={() => void runAi()} disabled={!loaded || !crop.ready || f.width <= 0 || Boolean(processing)} data-testid="button-run-photo-ai"><Sparkles size={17} /> この範囲をAIで切り抜く</button>
+                <button type="button" className="photo-editor-primary" aria-label="この範囲をAIで背景カット" title="この範囲をAIで背景カット" onClick={() => void runAi()} disabled={!loaded || !crop.ready || f.width <= 0 || Boolean(processing)} data-testid="button-run-photo-ai"><Sparkles size={20} /></button>
               </>
             )}
             {error && <p className="photo-editor-error" role="alert" data-testid="status-photo-editor-error">{error}</p>}
