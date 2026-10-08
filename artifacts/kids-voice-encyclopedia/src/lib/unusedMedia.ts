@@ -65,14 +65,15 @@ export function createUnusedMediaService(
   storage: FirebaseStorage,
   userId: () => Promise<string>,
   operations: Partial<typeof sdk> = {},
+  bookId: () => Promise<string> = userId,
 ) {
   const io = { ...sdk, ...operations };
   const bucket = ref(storage).bucket;
   // Prevent forged UI input and require a read-only scan in this service/session first.
   const approvals = new Map<string, UnusedFile>();
 
-  async function serverReferences(uid: string) {
-    const snapshot = await io.getDocsFromServer(collection(db, 'users', uid, 'keepsakes'));
+  async function serverReferences(ownerBookId: string) {
+    const snapshot = await io.getDocsFromServer(collection(db, 'books', ownerBookId, 'cards'));
     const result = new Set<string>();
     for (const card of snapshot.docs) for (const path of references(card.data())) result.add(path);
     return result;
@@ -92,10 +93,10 @@ export function createUnusedMediaService(
 
   async function inspectUnusedMedia(): Promise<UnusedMediaReport> {
     approvals.clear();
-    const uid = await userId();
+    const [uid, ownerBookId] = await Promise.all([userId(), bookId()]);
     // Always server reads. Any unavailable/denied read fails the entire report closed.
     const [referenced, attempts, metadata] = await Promise.all([
-      serverReferences(uid),
+      serverReferences(ownerBookId),
       io.getDocsFromServer(collection(db, 'users', uid, 'saveAttempts')),
       allFiles(ref(storage, `users/${uid}/keepsakes`)),
     ]);
@@ -128,14 +129,14 @@ export function createUnusedMediaService(
   }
 
   async function deleteUnusedMedia(path: string, confirmed: boolean): Promise<void> {
-    const uid = await userId();
+    const [uid, ownerBookId] = await Promise.all([userId(), bookId()]);
     const candidate = approvals.get(path);
     const id = identity(path, uid);
     if (!confirmed || !candidate || !id || candidate.bucket !== bucket) {
       throw new Error('最新の確認一覧で対象を選び、個別に削除を確認してください。');
     }
     approvals.delete(path);
-    if ((await serverReferences(uid)).has(path)) throw new Error('このファイルはカードから参照されています。削除しません。');
+    if ((await serverReferences(ownerBookId)).has(path)) throw new Error('このファイルはカードから参照されています。削除しません。');
     const file = ref(storage, path);
     const metadata = await io.getMetadata(file);
     const updatedAt = Date.parse(metadata.updated);
@@ -148,7 +149,7 @@ export function createUnusedMediaService(
     await io.runTransaction(db, async (transaction) => {
       const attemptRecord = doc(db, 'users', uid, 'saveAttempts', id.attemptId);
       const [attempt, card] = await Promise.all([
-        transaction.get(attemptRecord), transaction.get(doc(db, 'users', uid, 'keepsakes', id.cardId)),
+        transaction.get(attemptRecord), transaction.get(doc(db, 'books', ownerBookId, 'cards', id.cardId)),
       ]);
       const value = attempt.data();
       if (value?.cardId !== id.cardId || value.bucket !== bucket ||
@@ -165,7 +166,7 @@ export function createUnusedMediaService(
     });
     // No automatic retries/bulk deletion. A partial failure keeps the permanent fence.
     // A new scan + explicit confirmation allows the user to retry the remaining file.
-    if ((await serverReferences(uid)).has(path)) throw new Error('ファイルの参照が見つかりました。削除しません。');
+    if ((await serverReferences(ownerBookId)).has(path)) throw new Error('ファイルの参照が見つかりました。削除しません。');
     await io.deleteObject(file);
   }
 

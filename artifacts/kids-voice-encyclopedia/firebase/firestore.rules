@@ -6,114 +6,95 @@ service cloud.firestore {
         && url.matches('https://firebasestorage.googleapis.com/v0/b/[^/]+/o/[^/]+([?].*)?')
         && url.split('/')[7].split('[?]')[0] == path.replace('/', '%2F');
     }
-    match /users/{uid}/keepsakes/{id} {
+
+    // A private, immutable pointer lets each signed-in owner find their one canonical book.
+    match /users/{uid}/library/{libraryId} {
       function owner() { return request.auth != null && request.auth.uid == uid; }
-      function mediaPath(path, kind) {
-        let prefix = 'users/' + uid + '/keepsakes/' + id + '/';
-        return path is string && path.matches(prefix + '([a-zA-Z0-9-]+/)?' + kind);
-      }
-      function attemptAvailable(path) {
-        // Legacy media remains readable. Permanent cleanup fences cannot be reused.
-        let parts = path.split('/');
-        return parts.size() == 5 ||
-          (parts.size() == 6 &&
-            (!existsAfter(/databases/$(database)/documents/users/$(uid)/saveAttempts/$(parts[4])) ||
-              (getAfter(/databases/$(database)/documents/users/$(uid)/saveAttempts/$(parts[4])).data.state != 'blocked'
-                && getAfter(/databases/$(database)/documents/users/$(uid)/saveAttempts/$(parts[4])).data.cardId == id)));
-      }
-      function uploadedVoice(v) {
-        let parts = v.path.split('/');
-        let attempt = getAfter(/databases/$(database)/documents/users/$(uid)/saveAttempts/$(parts[4])).data;
-        // Validate expensive URL/path binding once when the upload finishes.
-        // Each card checks that immutable binding and its permanent cleanup fence.
-        return parts.size() == 6 && parts[5] == 'voice'
-          && attempt.cardId == id && attempt.state != 'blocked'
-          && attempt.get('media', {}) == {'url': v.url, 'path': v.path};
-      }
-      function uploadedPhoto(url, path) {
-        let parts = path.split('/');
-        let attempt = getAfter(/databases/$(database)/documents/users/$(uid)/saveAttempts/$(parts[4])).data;
-        return parts.size() == 6 && parts[5] == 'photo'
-          && attempt.cardId == id && attempt.state != 'blocked'
-          && attempt.get('media', {}) == {'url': url, 'path': path};
-      }
-      function categoryValid(data) {
-        return !('categoryId' in data) || data.categoryId == null ||
-          (data.categoryId is string &&
-            (data.categoryId in ['default-toys', 'default-animals', 'default-artworks'] ||
-              exists(/databases/$(database)/documents/users/$(uid)/categories/$(data.categoryId))));
-      }
-      function nameValid(data) {
-        return data.itemName is string && data.itemName.size() > 0 && data.itemName.size() <= 48;
-      }
-      function voiceValid(v, old) {
-        return v is map && v.keys().hasOnly(['id', 'url', 'path'])
-          && v.id is string && v.id.matches('[a-zA-Z0-9-]{1,64}')
-          && v.url is string && (v.path == null || v.path is string)
-          && (v in old.get('voices', []) ||
-            (v.url == old.get('voice', null) && v.path == old.get('voicePath', null)) ||
-            (v.path is string && uploadedVoice(v)));
-      }
-      function voiceAtValid(data, old, i) {
-        return data.voices.size() <= i || voiceValid(data.voices[i], old);
-      }
-      function voicesValid(data, old) {
-        return !('voices' in data) || (data.voices is list && data.voices.size() <= 5
-          && voiceAtValid(data, old, 0) && voiceAtValid(data, old, 1)
-          && voiceAtValid(data, old, 2) && voiceAtValid(data, old, 3) && voiceAtValid(data, old, 4)
-          && ((data.voices.size() == 0 && data.voice == null && data.get('voicePath', null) == null) ||
-            (data.voices.size() > 0 && data.voice == data.voices[0].url && data.get('voicePath', null) == data.voices[0].path)));
-      }
-      function completeCardValid(data, old) {
-        return data.keys().hasAll(['itemName', 'photo', 'voice', 'createdAt'])
-          && data.keys().hasOnly(['itemName', 'photo', 'voice', 'photoPath', 'voicePath', 'createdAt', 'categoryId', 'voices'])
-          && nameValid(data) && categoryValid(data) && data.photo is string && data.photo.size() > 0
-          && ((data.photo == old.get('photo', null) && data.get('photoPath', null) == old.get('photoPath', null)) ||
-            (('photo' in old)
-              ? (data.get('photoPath', null) is string && uploadedPhoto(data.photo, data.photoPath))
-              : (mediaPath(data.get('photoPath', null), 'photo') && mediaUrl(data.photo, data.photoPath) && attemptAvailable(data.photoPath))))
-          && (('voices' in data) || (data.voice == old.get('voice', null) && data.get('voicePath', null) == old.get('voicePath', null)) ||
-            (data.voice == null && data.get('voicePath', null) == null) ||
-            (data.get('voicePath', null) is string && mediaPath(data.voicePath, 'voice')
-              && mediaUrl(data.voice, data.voicePath) && attemptAvailable(data.voicePath)))
-          && voicesValid(data, old)
-          && data.createdAt is timestamp;
-      }
-      function metadataOnlyUpdate() {
-        // 旧カードのファイル情報が古い形式でも、既存メディアを変えずに分類できる。
-        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['itemName', 'categoryId'])
-          && nameValid(request.resource.data) && categoryValid(request.resource.data);
-      }
-      allow read, delete: if owner();
-      allow create: if owner() && completeCardValid(request.resource.data, {});
-      allow update: if owner() && (metadataOnlyUpdate() ||
-        (request.resource.data.createdAt == resource.data.createdAt && completeCardValid(request.resource.data, resource.data)));
+      allow get, list: if owner();
+      allow create: if owner() && libraryId == 'primary'
+        && request.resource.data.keys().hasOnly(['bookId', 'createdAt'])
+        && request.resource.data.bookId is string
+        && request.resource.data.bookId.matches('[a-f0-9]{64}')
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
     }
-    match /users/{uid}/saveAttempts/{attempt} {
+
+    // Legacy source data is retained as a private, read-only migration archive.
+    match /users/{uid}/keepsakes/{cardId} {
+      allow get, list: if request.auth != null && request.auth.uid == uid;
+      allow create, update, delete: if false;
+    }
+    match /users/{uid}/categories/{categoryId} {
+      allow get, list: if request.auth != null && request.auth.uid == uid;
+      allow create, update, delete: if false;
+    }
+    match /users/{uid}/settings/{settingId} {
+      allow get, list: if request.auth != null && request.auth.uid == uid;
+      allow create, update, delete: if false;
+    }
+
+    // Old projection documents are owner-only and can only be removed after a verified migration.
+    match /users/{uid}/shares/{shareId} {
+      function owner() { return request.auth != null && request.auth.uid == uid; }
+      allow get, list: if owner();
+      allow create: if false;
+      allow update: if owner() && resource.data.active == true
+        && request.resource.data.active == false
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active']);
+      allow delete: if owner() && resource.data.active == false;
+      match /cards/{cardId} {
+        allow get, list, delete: if request.auth != null && request.auth.uid == uid;
+        allow create, update: if false;
+      }
+      match /categories/{categoryId} {
+        allow get, list, delete: if request.auth != null && request.auth.uid == uid;
+        allow create, update: if false;
+      }
+      match /settings/{settingId} {
+        allow get, list, delete: if request.auth != null && request.auth.uid == uid;
+        allow create, update: if false;
+      }
+    }
+
+    match /users/{uid}/mediaEdits/{editId} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create: if request.auth != null && request.auth.uid == uid
+        && editId.matches('[a-zA-Z0-9-]{1,80}')
+        && request.resource.data.keys().hasOnly(['cardId', 'createdAt'])
+        && request.resource.data.cardId is string && request.resource.data.cardId.size() > 0
+        && !request.resource.data.cardId.matches('.*/.*')
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /users/{uid}/saveAttempts/{attemptId} {
       function owner() { return request.auth != null && request.auth.uid == uid; }
       function finishedMediaValid(data) {
-        let prefix = 'users/' + uid + '/keepsakes/' + resource.data.cardId + '/' + attempt + '/';
+        let prefix = 'users/' + uid + '/keepsakes/' + resource.data.cardId + '/' + attemptId + '/';
         return !('media' in data) || (data.media is map
           && data.media.keys().hasOnly(['url', 'path'])
           && (data.media.path == prefix + 'photo' || data.media.path == prefix + 'voice')
           && mediaUrl(data.media.url, data.media.path));
       }
+      function voiceUsesAttempt(data, prefix, i) {
+        return data.get('voices', []).size() > i && data.voices[i].path is string
+          && data.voices[i].path.matches(prefix);
+      }
       function cardDoesNotUseAttempt() {
-        let card = /databases/$(database)/documents/users/$(uid)/keepsakes/$(resource.data.cardId);
-        let prefix = 'users/' + uid + '/keepsakes/' + resource.data.cardId + '/' + attempt + '/.*';
-        return !exists(card) ||
+        let pointer = /databases/$(database)/documents/users/$(uid)/library/primary;
+        let bookId = get(pointer).data.bookId;
+        let card = /databases/$(database)/documents/books/$(bookId)/cards/$(resource.data.cardId);
+        let prefix = 'users/' + uid + '/keepsakes/' + resource.data.cardId + '/' + attemptId + '/.*';
+        return exists(pointer) && (!exists(card) ||
           (!get(card).data.get('photoPath', '').matches(prefix)
             && (get(card).data.get('voicePath', null) == null || !get(card).data.voicePath.matches(prefix))
             && !voiceUsesAttempt(get(card).data, prefix, 0) && !voiceUsesAttempt(get(card).data, prefix, 1)
             && !voiceUsesAttempt(get(card).data, prefix, 2) && !voiceUsesAttempt(get(card).data, prefix, 3)
-            && !voiceUsesAttempt(get(card).data, prefix, 4));
-      }
-      function voiceUsesAttempt(data, prefix, i) {
-        return data.get('voices', []).size() > i && data.voices[i].path is string && data.voices[i].path.matches(prefix);
+            && !voiceUsesAttempt(get(card).data, prefix, 4)));
       }
       allow read: if owner();
       allow create: if owner()
-        && attempt.matches('[a-zA-Z0-9-]+')
+        && attemptId.matches('[a-zA-Z0-9-]+')
         && request.resource.data.keys().hasOnly(['cardId', 'bucket', 'state', 'startedAt'])
         && request.resource.data.cardId is string
         && request.resource.data.cardId.size() > 0
@@ -131,131 +112,175 @@ service cloud.firestore {
           && resource.data.finishedAt <= request.time - duration.value(7, 'd')
           && cardDoesNotUseAttempt())
       );
-      // Never remove a fence or reactivate a completed attempt.
-    }
-    match /users/{uid}/mediaEdits/{edit} {
-      allow read: if request.auth != null && request.auth.uid == uid;
-      allow create: if request.auth != null && request.auth.uid == uid
-        && edit.matches('[a-zA-Z0-9-]{1,80}')
-        && request.resource.data.keys().hasOnly(['cardId', 'createdAt'])
-        && request.resource.data.cardId is string && request.resource.data.cardId.size() > 0
-        && !request.resource.data.cardId.matches('.*/.*') && request.resource.data.createdAt == request.time;
-      allow update, delete: if false;
-    }
-    match /users/{uid}/categories/{id} {
-      function owner() { return request.auth != null && request.auth.uid == uid; }
-      allow read: if owner();
-      allow create: if owner()
-        && id.matches('custom-[a-f0-9]{64}')
-        && request.resource.data.keys().hasAll(['name', 'createdAt'])
-        && request.resource.data.keys().hasOnly(['name', 'createdAt'])
-        && request.resource.data.name is string
-        && request.resource.data.name.size() > 0
-        && request.resource.data.name.size() <= 24
-        && request.resource.data.createdAt is timestamp;
-    }
-    match /users/{uid}/settings/{settingId} {
-      function owner() { return request.auth != null && request.auth.uid == uid; }
-      function validGallerySettings(data) {
-        return data.keys().hasAll(['displayMode', 'shuffleSeed', 'updatedAt'])
-          && data.keys().hasOnly(['displayMode', 'shuffleSeed', 'updatedAt'])
-          && data.displayMode in ['ordered', 'shuffle']
-          && data.shuffleSeed is int
-          && data.shuffleSeed >= 0
-          && data.shuffleSeed <= 4294967295
-          && data.updatedAt == request.time;
-      }
-      allow read: if owner();
-      allow create, update: if owner()
-        && settingId == 'gallery'
-        && validGallerySettings(request.resource.data);
       allow delete: if false;
     }
-    match /users/{uid}/shares/{shareId} {
-      function owner() { return request.auth != null && request.auth.uid == uid; }
-      function validEncryptedShare(data) {
-        return data.keys().hasAll(['active', 'version', 'kdf', 'iterations', 'salt', 'manifestIv', 'manifest', 'createdAt'])
-          && data.keys().hasOnly(['active', 'version', 'kdf', 'iterations', 'salt', 'manifestIv', 'manifest', 'createdAt'])
-          && data.active == true
-          && data.version == 1
-          && data.kdf == 'PBKDF2-SHA256'
-          && data.iterations == 600000
-          && data.salt is string && data.salt.matches('[A-Za-z0-9+/]{22}==')
-          && data.manifestIv is string && data.manifestIv.matches('[A-Za-z0-9+/]{16}')
-          && data.manifest is string && data.manifest.size() <= 960000
-          && data.createdAt == request.time;
-      }
-      function validLiveShare(data) {
-        return data.keys().hasAll(['active', 'version', 'mode', 'createdAt'])
-          && data.keys().hasOnly(['active', 'version', 'mode', 'createdAt'])
-          && data.active == true && data.version == 2 && data.mode == 'live'
-          && data.createdAt == request.time;
-      }
-      // A random 256-bit share ID is the access capability during the private
-      // prototype. Owners alone can enumerate, create, stop or delete shares.
-      allow get: if owner() || resource.data.active == true;
-      allow list: if owner();
-      allow create: if owner()
-        && shareId.matches('[a-f0-9]{64}')
-        && (validEncryptedShare(request.resource.data) || validLiveShare(request.resource.data));
-      allow update: if owner()
-        && resource.data.active == true
-        && request.resource.data.active == false
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active']);
-      allow delete: if owner() && resource.data.active == false;
 
-      function activeLiveShare() {
-        let share = /databases/$(database)/documents/users/$(uid)/shares/$(shareId);
-        return shareId.matches('[a-f0-9]{64}')
-          && exists(share)
-          && get(share).data.active == true
-          && get(share).data.version == 2
-          && get(share).data.mode == 'live';
+    match /books/{bookId} {
+      function validBookId() { return bookId.matches('[a-f0-9]{64}'); }
+      function bookExists() {
+        return exists(/databases/$(database)/documents/books/$(bookId));
       }
+      function owner() {
+        return request.auth != null && resource.data.ownerUid == request.auth.uid;
+      }
+      function publicBook() {
+        return resource.data.shareEnabled == true && resource.data.migrationState == 'ready';
+      }
+      function validBook(data) {
+        return data.keys().hasAll(['ownerUid', 'shareEnabled', 'migrationState', 'schemaVersion', 'createdAt', 'updatedAt'])
+          && data.keys().hasOnly(['ownerUid', 'shareEnabled', 'migrationState', 'schemaVersion', 'createdAt', 'updatedAt', 'readyAt'])
+          && data.ownerUid is string && request.auth != null && data.ownerUid == request.auth.uid
+          && data.shareEnabled is bool && data.migrationState in ['copying', 'ready']
+          && data.schemaVersion == 1 && data.createdAt is timestamp
+          && data.updatedAt == request.time
+          && (!('readyAt' in data) || data.readyAt is timestamp);
+      }
+      allow get: if validBookId()
+        && ((request.auth != null && (!bookExists() || owner())) || publicBook());
+      allow list: if false;
+      allow create: if validBookId() && validBook(request.resource.data)
+        && request.resource.data.migrationState == 'copying'
+        && request.resource.data.shareEnabled == false
+        && request.resource.data.createdAt == request.time;
+      allow update: if validBookId() && owner()
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.schemaVersion == resource.data.schemaVersion
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['shareEnabled', 'migrationState', 'updatedAt', 'readyAt'])
+        && request.resource.data.shareEnabled is bool
+        && request.resource.data.migrationState in ['copying', 'ready']
+        && request.resource.data.updatedAt == request.time
+        && (!('readyAt' in request.resource.data) || request.resource.data.readyAt is timestamp);
+      allow delete: if false;
+
       match /cards/{cardId} {
-        function validProjection(data) {
-          return data.keys().hasAll(['itemName', 'photo', 'photoPath', 'voice', 'voicePath', 'voices', 'categoryId', 'createdAt'])
-            && data.keys().hasOnly(['itemName', 'photo', 'photoPath', 'voice', 'voicePath', 'voices', 'categoryId', 'createdAt'])
-            && data.itemName is string && data.itemName.size() > 0 && data.itemName.size() <= 48
-            && data.photo is string && data.photo.size() <= 2048
-            && (data.photoPath == null || (data.photoPath is string
-              && data.photoPath.matches('users/' + uid + '/keepsakes/' + cardId + '/.*')))
-            && (data.voice == null || (data.voice is string && data.voice.size() <= 2048))
-            && (data.voicePath == null || (data.voicePath is string
-              && data.voicePath.matches('users/' + uid + '/keepsakes/' + cardId + '/.*')))
-            && data.voices is list && data.voices.size() <= 5
-            && (data.categoryId == null || data.categoryId is string)
-            && data.createdAt is number;
+        function parent() {
+          return get(/databases/$(database)/documents/books/$(bookId)).data;
         }
-        allow read: if owner() || activeLiveShare();
-        allow create, update: if owner() && validProjection(request.resource.data);
+        function owner() { return request.auth != null && request.auth.uid == parent().ownerUid; }
+        function publicBook() { return parent().shareEnabled == true && parent().migrationState == 'ready'; }
+        function mediaPath(path, kind) {
+          let prefix = 'users/' + request.auth.uid + '/keepsakes/' + cardId + '/';
+          return path is string && path.matches(prefix + '([a-zA-Z0-9-]+/)?' + kind);
+        }
+        function attemptAvailable(path) {
+          let parts = path.split('/');
+          let attempt = /databases/$(database)/documents/users/$(request.auth.uid)/saveAttempts/$(parts[4]);
+          return parts.size() == 5 ||
+            (parts.size() == 6 &&
+              (!existsAfter(attempt) ||
+                (getAfter(attempt).data.state != 'blocked'
+                  && getAfter(attempt).data.cardId == cardId)));
+        }
+        function uploadedVoice(voice) {
+          let parts = voice.path.split('/');
+          let attempt = getAfter(/databases/$(database)/documents/users/$(request.auth.uid)/saveAttempts/$(parts[4])).data;
+          return parts.size() == 6 && parts[5] == 'voice'
+            && attempt.cardId == cardId && attempt.state != 'blocked'
+            && attempt.get('media', {}) == {'url': voice.url, 'path': voice.path};
+        }
+        function uploadedPhoto(url, path) {
+          let parts = path.split('/');
+          let attempt = getAfter(/databases/$(database)/documents/users/$(request.auth.uid)/saveAttempts/$(parts[4])).data;
+          return parts.size() == 6 && parts[5] == 'photo'
+            && attempt.cardId == cardId && attempt.state != 'blocked'
+            && attempt.get('media', {}) == {'url': url, 'path': path};
+        }
+        function categoryValid(data) {
+          return !('categoryId' in data) || data.categoryId == null ||
+            (data.categoryId is string
+              && (data.categoryId in ['default-toys', 'default-animals', 'default-artworks']
+                || exists(/databases/$(database)/documents/books/$(bookId)/categories/$(data.categoryId))));
+        }
+        function nameValid(data) {
+          return data.itemName is string && data.itemName.size() > 0 && data.itemName.size() <= 48;
+        }
+        function voiceValid(voice, old) {
+          return voice is map && voice.keys().hasOnly(['id', 'url', 'path'])
+            && voice.id is string && voice.id.matches('[a-zA-Z0-9-]{1,64}')
+            && voice.url is string && (voice.path == null || voice.path is string)
+            && (voice in old.get('voices', [])
+              || (voice.url == old.get('voice', null) && voice.path == old.get('voicePath', null))
+              || (voice.path is string && uploadedVoice(voice)));
+        }
+        function voiceAtValid(data, old, index) {
+          return data.voices.size() <= index || voiceValid(data.voices[index], old);
+        }
+        function voicesValid(data, old) {
+          return !('voices' in data) || (data.voices is list && data.voices.size() <= 5
+            && voiceAtValid(data, old, 0) && voiceAtValid(data, old, 1)
+            && voiceAtValid(data, old, 2) && voiceAtValid(data, old, 3) && voiceAtValid(data, old, 4)
+            && ((data.voices.size() == 0 && data.voice == null && data.get('voicePath', null) == null)
+              || (data.voices.size() > 0 && data.voice == data.voices[0].url && data.get('voicePath', null) == data.voices[0].path)));
+        }
+        function completeCardValid(data, old) {
+          return data.keys().hasAll(['itemName', 'photo', 'voice', 'createdAt'])
+            && data.keys().hasOnly(['itemName', 'photo', 'voice', 'photoPath', 'voicePath', 'createdAt', 'categoryId', 'voices'])
+            && nameValid(data) && categoryValid(data) && data.photo is string && data.photo.size() > 0
+            && ((data.photo == old.get('photo', null) && data.get('photoPath', null) == old.get('photoPath', null))
+              || (('photo' in old) && data.get('photoPath', null) is string && uploadedPhoto(data.photo, data.photoPath))
+              || (!('photo' in old) && data.get('photoPath', null) is string
+                && mediaPath(data.photoPath, 'photo') && mediaUrl(data.photo, data.photoPath)
+                && attemptAvailable(data.photoPath)))
+            && (('voices' in data) || (data.voice == old.get('voice', null) && data.get('voicePath', null) == old.get('voicePath', null))
+              || (data.voice == null && data.get('voicePath', null) == null)
+              || (data.get('voicePath', null) is string && mediaPath(data.voicePath, 'voice')
+                && mediaUrl(data.voice, data.voicePath) && attemptAvailable(data.voicePath)))
+            && voicesValid(data, old) && data.createdAt is timestamp;
+        }
+        function metadataOnlyUpdate() {
+          return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['itemName', 'categoryId'])
+            && nameValid(request.resource.data) && categoryValid(request.resource.data);
+        }
+        allow get, list: if owner() || publicBook();
+        allow create: if owner() && completeCardValid(request.resource.data, {});
+        allow update: if owner() && (metadataOnlyUpdate()
+          || (request.resource.data.createdAt == resource.data.createdAt
+            && completeCardValid(request.resource.data, resource.data)));
         allow delete: if owner();
       }
+
       match /categories/{categoryId} {
-        allow read: if owner() || activeLiveShare();
-        allow create, update: if owner()
-          && request.resource.data.keys().hasAll(['name', 'createdAt'])
-          && request.resource.data.keys().hasOnly(['name', 'createdAt'])
-          && request.resource.data.name is string
-          && request.resource.data.name.size() > 0
-          && request.resource.data.name.size() <= 24
-          && request.resource.data.createdAt is number;
+        function parent() { return get(/databases/$(database)/documents/books/$(bookId)).data; }
+        function owner() { return request.auth != null && request.auth.uid == parent().ownerUid; }
+        function publicBook() { return parent().shareEnabled == true && parent().migrationState == 'ready'; }
+        function validCategory(data) {
+          return data.keys().hasAll(['name', 'createdAt'])
+            && data.keys().hasOnly(['name', 'createdAt'])
+            && data.name is string && data.name.size() > 0 && data.name.size() <= 24
+            && data.createdAt is timestamp;
+        }
+        allow get, list: if owner() || publicBook();
+        allow create: if owner() && categoryId.matches('custom-[a-f0-9]{64}') && validCategory(request.resource.data);
+        allow update: if owner() && validCategory(request.resource.data)
+          && request.resource.data.createdAt == resource.data.createdAt;
         allow delete: if owner();
       }
+
       match /settings/{settingId} {
-        function validGalleryProjection(data) {
-          return data.keys().hasAll(['displayMode', 'shuffleSeed'])
-            && data.keys().hasOnly(['displayMode', 'shuffleSeed'])
+        function parent() { return get(/databases/$(database)/documents/books/$(bookId)).data; }
+        function owner() { return request.auth != null && request.auth.uid == parent().ownerUid; }
+        function publicBook() { return parent().shareEnabled == true && parent().migrationState == 'ready'; }
+        function validMigratedGallerySettings(data) {
+          return data.keys().hasAll(['displayMode', 'shuffleSeed', 'updatedAt'])
+            && data.keys().hasOnly(['displayMode', 'shuffleSeed', 'updatedAt'])
             && data.displayMode in ['ordered', 'shuffle']
-            && data.shuffleSeed is int
-            && data.shuffleSeed >= 0
-            && data.shuffleSeed <= 4294967295;
+            && data.shuffleSeed is int && data.shuffleSeed >= 0 && data.shuffleSeed <= 4294967295
+            && data.updatedAt is timestamp;
         }
-        allow read: if owner() || activeLiveShare();
-        allow create, update: if owner()
-          && settingId == 'gallery'
-          && validGalleryProjection(request.resource.data);
-        allow delete: if owner();
+        function validGallerySettings(data) {
+          return data.keys().hasAll(['displayMode', 'shuffleSeed', 'updatedAt'])
+            && data.keys().hasOnly(['displayMode', 'shuffleSeed', 'updatedAt'])
+            && data.displayMode in ['ordered', 'shuffle']
+            && data.shuffleSeed is int && data.shuffleSeed >= 0 && data.shuffleSeed <= 4294967295
+            && data.updatedAt == request.time;
+        }
+        allow get, list: if owner() || publicBook();
+        allow create, update: if owner() && settingId == 'gallery'
+          && (validGallerySettings(request.resource.data)
+            || (parent().migrationState == 'copying' && validMigratedGallerySettings(request.resource.data)));
+        allow delete: if false;
       }
     }
   }

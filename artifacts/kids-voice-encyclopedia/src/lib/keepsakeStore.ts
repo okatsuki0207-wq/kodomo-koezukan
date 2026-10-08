@@ -7,7 +7,10 @@ import { storageFailureMessage } from './storageDiagnostics';
 import { createKeepsakeRepository, FirebaseTimeoutError, type Keepsake } from './keepsakeRepository';
 import { createKeepsakeEditor } from './keepsakeEditor';
 import { createUnusedMediaService } from './unusedMedia';
-import { configureShareRepository, syncLiveShareProjections } from './shareRepository';
+import {
+  configureBookRepository, getOwnerBookContext, getOwnerBookShareState,
+  setOwnerBookSharing, subscribePublicBook, type SharedBook,
+} from './bookRepository';
 export type { Keepsake } from './keepsakeRepository';
 import { categoryIdForName, DEFAULT_CATEGORIES, keepsakeMetadata, validateCategoryId, validateCategoryName, type Category } from './categories';
 import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, type GallerySettings } from './gallerySettings';
@@ -23,6 +26,7 @@ if (storage) {
   storage.maxUploadRetryTime = 25_000;
 }
 let ready: Promise<string> | null = null;
+const currentBookId = async () => (await getOwnerBookContext()).bookId;
 
 function deadline<T>(operation: Promise<T>, milliseconds = 30_000): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -42,47 +46,18 @@ async function userId(): Promise<string> {
   return deadline(ready, 20_000);
 }
 
-if (db && storage) configureShareRepository(db, storage, userId);
+if (db) configureBookRepository(db, userId);
 
-const repository = createKeepsakeRepository(db!, storage!, userId);
+const repository = createKeepsakeRepository(db!, storage!, userId, currentBookId);
 export const { saveKeepsake, deleteKeepsake } = repository;
-export const { editKeepsake } = createKeepsakeEditor(db!, storage!, userId);
-export { getOrCreateLiveShare, listPasswordShares, openPasswordShare, revokePasswordShare, subscribeLiveShare } from './shareRepository';
-
-let latestItems: Keepsake[] | null = null;
-let latestCategories: Category[] | null = null;
-let latestGallerySettings: GallerySettings | null = null;
-let shareSyncTimer: number | undefined;
-let shareSyncQueue: Promise<void> = Promise.resolve();
-let lastSuccessfulShareSync: string | null = null;
-function scheduleLiveShareSync() {
-  if (!latestItems || !latestCategories || !latestGallerySettings || !db || !storage || shareSyncTimer !== undefined) return;
-  shareSyncTimer = window.setTimeout(() => {
-    shareSyncTimer = undefined;
-    const items = latestItems;
-    const categories = latestCategories;
-    const settings = latestGallerySettings;
-    if (!items || !categories || !settings) return;
-    const signature = JSON.stringify([items, categories, settings]);
-    shareSyncQueue = shareSyncQueue
-      .then(async () => {
-        if (signature === lastSuccessfulShareSync) return;
-        await syncLiveShareProjections(items, categories, settings);
-        lastSuccessfulShareSync = signature;
-      })
-      .catch(() => { /* Keep owner editing available if a share projection sync is temporarily unavailable. */ });
-  }, 200);
-}
+export const { editKeepsake } = createKeepsakeEditor(db!, storage!, userId, currentBookId);
+export { getOwnerBookShareState, setOwnerBookSharing, subscribePublicBook, type SharedBook } from './bookRepository';
 
 export async function subscribeKeepsakes(
   onChange: (items: Keepsake[]) => void,
   onError: (error: unknown) => void,
 ) {
-  return repository.subscribeKeepsakes((items) => {
-    latestItems = items;
-    scheduleLiveShareSync();
-    onChange(items);
-  }, onError);
+  return repository.subscribeKeepsakes(onChange, onError);
 }
 /** Read-only link refresh for saved voices; never access another user's paths. */
 export async function refreshVoiceDownloadUrl(path: string): Promise<string> {
@@ -103,16 +78,16 @@ export async function deleteUnusedMedia(path: string, confirmed: boolean) {
 }
 let cleanupService: ReturnType<typeof createUnusedMediaService> | undefined;
 function unusedMedia() {
-  return cleanupService ??= createUnusedMediaService(db!, storage!, userId);
+  return cleanupService ??= createUnusedMediaService(db!, storage!, userId, {}, currentBookId);
 }
 
-/** カテゴリも匿名認証UID配下で分離。既定のページはクラウド書き込み不要。 */
+/** カテゴリも正本図鑑ID配下で分離。既定のページはクラウド書き込み不要。 */
 export async function subscribeCategories(
   onChange: (categories: Category[]) => void,
   onError: (error: unknown) => void,
 ): Promise<() => void> {
-  const uid = await userId();
-  return onSnapshot(query(collection(db!, 'users', uid, 'categories'), orderBy('createdAt', 'asc')), (snapshot) => {
+  const { bookId } = await getOwnerBookContext();
+  return onSnapshot(query(collection(db!, 'books', bookId, 'categories'), orderBy('createdAt', 'asc')), (snapshot) => {
     const next = [
       ...DEFAULT_CATEGORIES,
       ...snapshot.docs.map((record) => ({
@@ -120,8 +95,6 @@ export async function subscribeCategories(
         createdAt: record.data().createdAt?.toMillis?.() ?? 0,
       })),
     ];
-    latestCategories = next;
-    scheduleLiveShareSync();
     onChange(next);
   }, onError);
 }
@@ -130,31 +103,27 @@ export async function subscribeGallerySettings(
   onChange: (settings: GallerySettings) => void,
   onError: (error: unknown) => void,
 ): Promise<() => void> {
-  const uid = await userId();
-  return onSnapshot(doc(db!, 'users', uid, 'settings', 'gallery'), (snapshot) => {
+  const { bookId } = await getOwnerBookContext();
+  return onSnapshot(doc(db!, 'books', bookId, 'settings', 'gallery'), (snapshot) => {
     const settings = normalizeGallerySettings(snapshot.exists() ? snapshot.data() : DEFAULT_GALLERY_SETTINGS);
-    latestGallerySettings = settings;
-    scheduleLiveShareSync();
     onChange(settings);
   }, onError);
 }
 
 export async function saveGallerySettings(value: GallerySettings): Promise<void> {
-  const uid = await userId();
+  const { bookId } = await getOwnerBookContext();
   const settings = normalizeGallerySettings(value);
-  await deadline(setDoc(doc(db!, 'users', uid, 'settings', 'gallery'), {
+  await deadline(setDoc(doc(db!, 'books', bookId, 'settings', 'gallery'), {
     ...settings,
     updatedAt: serverTimestamp(),
   }));
-  latestGallerySettings = settings;
-  scheduleLiveShareSync();
 }
 
 export async function createCategory(name: string): Promise<Category> {
   const clean = validateCategoryName(name);
   const id = await categoryIdForName(clean);
-  const uid = await userId();
-  const record = doc(db!, 'users', uid, 'categories', id);
+  const { bookId } = await getOwnerBookContext();
+  const record = doc(db!, 'books', bookId, 'categories', id);
   return deadline(runTransaction(db!, async (transaction) => {
     const existing = await transaction.get(record);
     if (existing.exists()) return { id, name: String(existing.data().name) };
@@ -166,15 +135,15 @@ export async function createCategory(name: string): Promise<Category> {
 /** 分類・名前だけの編集。ファイルの再アップロード・置換・削除は行わない。 */
 export async function updateKeepsakeMetadata(id: string, itemName: string, categoryId: string | null): Promise<void> {
   const patch = keepsakeMetadata(itemName, categoryId);
-  const uid = await userId();
-  await deadline(updateDoc(doc(db!, 'users', uid, 'keepsakes', id), patch));
+  const { bookId } = await getOwnerBookContext();
+  await deadline(updateDoc(doc(db!, 'books', bookId, 'cards', id), patch));
 }
 
 /** A category-only change must not overwrite a name edited in another session. */
 export async function updateKeepsakeCategory(id: string, categoryId: string | null): Promise<void> {
   validateCategoryId(categoryId);
-  const uid = await userId();
-  await deadline(updateDoc(doc(db!, 'users', uid, 'keepsakes', id), { categoryId }));
+  const { bookId } = await getOwnerBookContext();
+  await deadline(updateDoc(doc(db!, 'books', bookId, 'cards', id), { categoryId }));
 }
 
 export function firebaseError(error: unknown): string {

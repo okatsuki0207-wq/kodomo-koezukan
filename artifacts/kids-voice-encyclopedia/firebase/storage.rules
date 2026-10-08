@@ -37,9 +37,10 @@ service firebase.storage {
     }
     match /users/{uid}/shares/{shareId}/assets/{assetId} {
       function owner() { return request.auth != null && request.auth.uid == uid; }
-      // Share objects are AES-GCM ciphertext only. The owner's original media
-      // remains private under /keepsakes and is never exposed by this rule.
-      allow get: if shareId.matches('[a-f0-9]{64}') && assetId.matches('[a-f0-9]{32}');
+      // Retired encrypted-share assets are no longer served publicly.
+      allow get: if owner()
+        && shareId.matches('[a-f0-9]{64}')
+        && assetId.matches('[a-f0-9]{32}');
       allow list: if owner()
         && shareId.matches('[a-f0-9]{64}')
         && assetId.matches('[a-f0-9]{32}');

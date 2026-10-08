@@ -7,10 +7,13 @@ import { ref, uploadBytes, getDownloadURL, getMetadata, getBytes, deleteObject, 
 import { createKeepsakeRepository } from '../src/lib/keepsakeRepository.ts';
 import { createUnusedMediaService, MEDIA_RETENTION_MS } from '../src/lib/unusedMedia.ts';
 import { createKeepsakeEditor } from '../src/lib/keepsakeEditor.ts';
-import { configureShareRepository, createLiveShare, getOrCreateLiveShare, syncLiveShareProjections, subscribeLiveShare } from '../src/lib/shareRepository.ts';
+import { configureBookRepository, getOwnerBookContext, setOwnerBookSharing, subscribePublicBook } from '../src/lib/bookRepository.ts';
 
 const projectId = 'demo-keepsakes-test';
 const storageOrigin = 'http://127.0.0.1:9197';
+const BOOK_ALICE = 'a'.repeat(64);
+const BOOK_BOB = 'b'.repeat(64);
+const bookIdFor = (uid) => uid === 'bob' ? BOOK_BOB : BOOK_ALICE;
 // Hard fail before opening a client if someone runs this file outside the isolated runner.
 assert.equal(process.env.GCLOUD_PROJECT, projectId);
 assert.equal(process.env.FIRESTORE_EMULATOR_HOST, '127.0.0.1:8087');
@@ -60,7 +63,17 @@ beforeEach(async () => {
     for (const bucket of [`${projectId}.appspot.com`, `${projectId}-old.appspot.com`]) {
       await clearDirectory(context.storage(bucket).ref());
     }
+    const database = context.firestore();
+    const now = Timestamp.now();
+    for (const [uid, bookId] of [['alice', BOOK_ALICE], ['bob', BOOK_BOB]]) {
+      await setDoc(doc(database, 'books', bookId), {
+        ownerUid: uid, shareEnabled: false, migrationState: 'ready', schemaVersion: 1,
+        createdAt: now, updatedAt: now,
+      });
+      await setDoc(doc(database, 'users', uid, 'library', 'primary'), { bookId, createdAt: now });
+    }
   });
+  configureBookRepository(alice.db, async () => 'alice');
 });
 after(async () => { await env?.cleanup(); });
 
@@ -70,7 +83,7 @@ after(async () => { await env?.cleanup(); });
 const canonicalUrl = async (file) => (await getDownloadURL(file)).replace(storageOrigin, 'https://firebasestorage.googleapis.com');
 const nodeUpload = async (file, blob, metadata) => uploadBytes(file, new Uint8Array(await blob.arrayBuffer()), metadata);
 const repository = (client = alice, uid = 'alice', faults = {}, timeout = 5000) =>
-  createKeepsakeRepository(client.db, client.storage, async () => uid,
+  createKeepsakeRepository(client.db, client.storage, async () => uid, async () => bookIdFor(uid),
     {
       uploadBytes: nodeUpload, getDownloadURL: canonicalUrl,
       ref: (storage, path) => ref(storage, path.replace('https://firebasestorage.googleapis.com', storageOrigin)),
@@ -80,7 +93,7 @@ const repository = (client = alice, uid = 'alice', faults = {}, timeout = 5000) 
     }, timeout);
 
 const editor = (client = alice, uid = 'alice', faults = {}, timeout = 5000) =>
-  createKeepsakeEditor(client.db, client.storage, async () => uid, {
+  createKeepsakeEditor(client.db, client.storage, async () => uid, async () => bookIdFor(uid), {
     uploadBytes: nodeUpload, getDownloadURL: canonicalUrl,
     ref: (storage, path) => ref(storage, path?.replace('https://firebasestorage.googleapis.com', storageOrigin)),
     diagnoseStorageError: async (error) => error, ...faults,
@@ -89,7 +102,7 @@ const editor = (client = alice, uid = 'alice', faults = {}, timeout = 5000) =>
 test('media editing atomically replaces photo/voice, adds clips, preserves dates and old bytes; receipt retry is idempotent', async () => {
   const repo = repository();
   await repo.saveKeepsake(item('edited'));
-  const original = (await getDocFromServer(doc(alice.db, 'users/alice/keepsakes/edited'))).data();
+  const original = (await getDocFromServer(doc(alice.db, 'books', BOOK_ALICE, 'cards', 'edited'))).data();
   const base = { ...item('edited'), ...original };
   const api = editor();
   const changed = await api.editKeepsake(base, {
@@ -106,7 +119,7 @@ test('media editing atomically replaces photo/voice, adds clips, preserves dates
   assert.deepEqual(Buffer.from(await getBytes(ref(alice.storage, original.photoPath))), photoBytes);
   const retry = await api.editKeepsake(base, { voices: [{ id: 'extra', source: source(voiceBytes, 'audio/wav') }] }, 'edit-one');
   assert.deepEqual(retry.voices, changed.voices);
-  const restored = (await getDocFromServer(doc(alice.db, 'users/alice/keepsakes/edited'))).data();
+  const restored = (await getDocFromServer(doc(alice.db, 'books', BOOK_ALICE, 'cards', 'edited'))).data();
   assert.deepEqual(restored.voices, changed.voices);
   assert.equal(restored.createdAt.toMillis(), original.createdAt.toMillis());
   await repo.deleteKeepsake(changed);
@@ -115,7 +128,7 @@ test('media editing atomically replaces photo/voice, adds clips, preserves dates
 
 test('voice-less card accepts added audio, metadata edits upload nothing, maximum five is enforced', async () => {
   await repository().saveKeepsake(item('silent-edit', false));
-  const stored = (await getDocFromServer(doc(alice.db, 'users/alice/keepsakes/silent-edit'))).data();
+  const stored = (await getDocFromServer(doc(alice.db, 'books', BOOK_ALICE, 'cards', 'silent-edit'))).data();
   const base = { ...item('silent-edit', false), ...stored };
   const named = await editor(alice, 'alice', { uploadBytes: () => { throw new Error('unexpected upload'); } })
     .editKeepsake(base, { itemName: '新しい名前' }, 'name-only');
@@ -123,7 +136,7 @@ test('voice-less card accepts added audio, metadata edits upload nothing, maximu
   assert.equal(named.voice, null);
   const categoryId = `custom-${'a'.repeat(64)}`;
   await env.withSecurityRulesDisabled(async (ctx) => {
-    await setDoc(doc(ctx.firestore(), `users/alice/categories/${categoryId}`), { name: 'テスト分類', createdAt: Timestamp.now() });
+    await setDoc(doc(ctx.firestore(), 'books', BOOK_ALICE, 'categories', categoryId), { name: 'テスト分類', createdAt: Timestamp.now() });
   });
   // Six-file edits fail before any upload. Worst supported edit: a new photo,
   // four new voices and a custom category
@@ -135,23 +148,23 @@ test('voice-less card accepts added audio, metadata edits upload nothing, maximu
   const voiced = await editor().editKeepsake(four, { voices: [{ id: 'clip-4', source: source(voiceBytes, 'audio/wav') }] }, 'add-last');
   assert.equal(voiced.voices.length, 5);
   await assert.rejects(editor().editKeepsake(voiced, { voices: [{ id: 'sixth', source: source(voiceBytes, 'audio/wav') }] }, 'add-six'), /5件/);
-  assert.equal((await getDocFromServer(doc(alice.db, 'users/alice/keepsakes/silent-edit'))).data().voices.length, 5);
+  assert.equal((await getDocFromServer(doc(alice.db, 'books', BOOK_ALICE, 'cards', 'silent-edit'))).data().voices.length, 5);
 });
 
 test('failed upload or missing card cannot replace existing data or remove original media', async () => {
   await repository().saveKeepsake(item('fail-edit'));
-  const stored = (await getDocFromServer(doc(alice.db, 'users/alice/keepsakes/fail-edit'))).data();
+  const stored = (await getDocFromServer(doc(alice.db, 'books', BOOK_ALICE, 'cards', 'fail-edit'))).data();
   const base = { ...item('fail-edit'), ...stored };
   await assert.rejects(editor(alice, 'alice', { uploadBytes: async () => { throw new Error('injected upload failure'); } })
     .editKeepsake(base, { photo: source(photoBytes, 'image/png') }, 'fail-edit'), /upload failure/);
-  assert.deepEqual((await getDocFromServer(doc(alice.db, 'users/alice/keepsakes/fail-edit'))).data(), stored);
+  assert.deepEqual((await getDocFromServer(doc(alice.db, 'books', BOOK_ALICE, 'cards', 'fail-edit'))).data(), stored);
   assert.deepEqual(Buffer.from(await getBytes(ref(alice.storage, stored.voicePath))), voiceBytes);
   await assert.rejects(editor().editKeepsake({ ...base, id: 'missing' }, { photo: source(photoBytes, 'image/png') }, 'missing-edit'), /削除/);
 });
 
 test('lost edit acknowledgement retains committed bytes and retry cannot duplicate added voices', async () => {
   await repository().saveKeepsake(item('unknown-edit'));
-  const stored = (await getDocFromServer(doc(alice.db, 'users/alice/keepsakes/unknown-edit'))).data();
+  const stored = (await getDocFromServer(doc(alice.db, 'books', BOOK_ALICE, 'cards', 'unknown-edit'))).data();
   const base = { ...item('unknown-edit'), ...stored };
   const faulty = editor(alice, 'alice', { runTransaction: async (...args) => {
     await runTransaction(...args); throw Object.assign(new Error('lost ack'), { code: 'unavailable' });
@@ -164,34 +177,34 @@ test('lost edit acknowledgement retains committed bytes and retry cannot duplica
 
 test('concurrent replacements conflict without overwriting the winner; concurrent additions merge', async () => {
   await repository().saveKeepsake(item('race-edit'));
-  const base = { ...item('race-edit'), ...(await getDocFromServer(doc(alice.db, 'users/alice/keepsakes/race-edit'))).data() };
+  const base = { ...item('race-edit'), ...(await getDocFromServer(doc(alice.db, 'books', BOOK_ALICE, 'cards', 'race-edit'))).data() };
   const replacements = await Promise.allSettled(['replace-one', 'replace-two'].map((id) =>
     editor().editKeepsake(base, { photo: source(photoBytes, 'image/png') }, id)));
   assert.equal(replacements.filter((r) => r.status === 'fulfilled').length, 1);
   assert.equal(replacements.filter((r) => r.status === 'rejected').length, 1);
   await Promise.all(['audio-one', 'audio-two'].map((id) =>
     editor().editKeepsake(base, { voices: [{ id, source: source(voiceBytes, 'audio/wav') }] }, id)));
-  const data = (await getDocFromServer(doc(alice.db, 'users/alice/keepsakes/race-edit'))).data();
+  const data = (await getDocFromServer(doc(alice.db, 'books', BOOK_ALICE, 'cards', 'race-edit'))).data();
   assert.equal(data.voices.length, 3);
   assert.equal(new Set(data.voices.map((v) => v.id)).size, 3);
 });
 
 test('additional audio is protected from orphan cleanup and foreign UID writes; creation date and immutable receipts are fenced', async () => {
   await repository().saveKeepsake(item('protected-edit'));
-  const base = { ...item('protected-edit'), ...(await getDocFromServer(doc(alice.db, 'users/alice/keepsakes/protected-edit'))).data() };
+  const base = { ...item('protected-edit'), ...(await getDocFromServer(doc(alice.db, 'books', BOOK_ALICE, 'cards', 'protected-edit'))).data() };
   const changed = await editor().editKeepsake(base, { voices: [{ id: 'additional', source: source(voiceBytes, 'audio/wav') }] }, 'protected-one');
   const attempt = changed.voices[1].path.split('/')[4];
   await env.withSecurityRulesDisabled(async (ctx) => {
     await updateDoc(doc(ctx.firestore(), `users/alice/saveAttempts/${attempt}`), { finishedAt: Timestamp.fromMillis(Date.now() - MEDIA_RETENTION_MS * 2) });
   });
   await assertFails(updateDoc(doc(alice.db, `users/alice/saveAttempts/${attempt}`), { state: 'blocked' }));
-  await assertFails(updateDoc(doc(bob.db, 'users/alice/keepsakes/protected-edit'), { voices: [] }));
-  await assertFails(updateDoc(doc(alice.db, 'users/alice/keepsakes/protected-edit'), { createdAt: Timestamp.now() }));
+  await assertFails(updateDoc(doc(bob.db, 'books', BOOK_ALICE, 'cards', 'protected-edit'), { voices: [] }));
+  await assertFails(updateDoc(doc(alice.db, 'books', BOOK_ALICE, 'cards', 'protected-edit'), { createdAt: Timestamp.now() }));
   await assertFails(deleteDoc(doc(alice.db, 'users/alice/mediaEdits/protected-one')));
-  const report = await createUnusedMediaService(alice.db, alice.storage, async () => 'alice').inspectUnusedMedia();
+  const report = await createUnusedMediaService(alice.db, alice.storage, async () => 'alice', {}, async () => BOOK_ALICE).inspectUnusedMedia();
   assert.equal(report.files.find((f) => f.path === changed.voices[1].path).status, 'referenced');
 });
-const record = (id, client = alice, uid = 'alice') => doc(client.db, 'users', uid, 'keepsakes', id);
+const record = (id, client = alice, uid = 'alice') => doc(client.db, 'books', bookIdFor(uid), 'cards', id);
 async function stored(id) {
   const snapshot = await getDocFromServer(record(id));
   assert.equal(snapshot.exists(), true);
@@ -271,7 +284,7 @@ test('categorized saves and metadata edits preserve unique media paths and creat
   const previous = await stored('categorized');
   assert.equal(previous.categoryId, 'default-toys');
   const categoryId = `custom-${'b'.repeat(64)}`;
-  await setDoc(doc(alice.db, 'users', 'alice', 'categories', categoryId), {
+  await setDoc(doc(alice.db, 'books', BOOK_ALICE, 'categories', categoryId), {
     name: 'テストのページ', createdAt: Timestamp.now(),
   });
   await updateDoc(record('categorized'), { itemName: '変更後', categoryId });
@@ -397,7 +410,7 @@ test('double save in one session is coalesced', async () => {
   });
   await Promise.all([repo.saveKeepsake(item('double')), repo.saveKeepsake(item('double'))]);
   assert.equal(uploads, 2);
-  assert.equal((await getDocs(collection(alice.db, 'users', 'alice', 'keepsakes'))).size, 1);
+  assert.equal((await getDocs(collection(alice.db, 'books', BOOK_ALICE, 'cards'))).size, 1);
   const value = await stored('double');
   await unchanged('double', value);
 });
@@ -452,7 +465,7 @@ test('different UID and unauthenticated clients cannot read, list, write, get UR
   for (const attacker of [bob, anonymous]) {
     const reference = record('private', attacker);
     await assertFails(getDocFromServer(reference));
-    await assertFails(getDocs(collection(attacker.db, 'users', 'alice', 'keepsakes')));
+    await assertFails(getDocs(collection(attacker.db, 'books', BOOK_ALICE, 'cards')));
     await assertFails(setDoc(reference, { ...document, createdAt: Timestamp.now() }));
     await assertFails(deleteDoc(reference));
     for (const path of [value.photoPath, value.voicePath]) {
@@ -510,6 +523,7 @@ const oldDate = () => new Date(Date.now() - MEDIA_RETENTION_MS - 60_000).toISOSt
 const cleanup = (faults = {}, client = alice, uid = 'alice') => createUnusedMediaService(
   client.db, client.storage, async () => uid,
   { getMetadata: async (file) => ({ ...await getMetadata(file), updated: oldDate() }), ...faults },
+  async () => bookIdFor(uid),
 );
 const attemptDoc = (attempt, client = alice) => doc(client.db, 'users', 'alice', 'saveAttempts', attempt);
 async function orphan(cardId, attemptId, state = 'finished', kind = 'photo') {
@@ -544,7 +558,7 @@ test('read-only inventory protects references, active outcomes, legacy attempts 
   assert.equal(status(flat), 'legacy');
   assert.equal(JSON.stringify(inventory).includes('token='), false);
   for (const file of inventory.files) await assertSucceeds(getMetadata(ref(alice.storage, file.path)));
-  const fresh = createUnusedMediaService(alice.db, alice.storage, async () => 'alice');
+  const fresh = createUnusedMediaService(alice.db, alice.storage, async () => 'alice', {}, async () => BOOK_ALICE);
   assert.equal((await fresh.inspectUnusedMedia()).files.find((file) => file.path === eligible).status, 'waiting');
   const service = cleanup();
   await service.inspectUnusedMedia();
@@ -613,7 +627,7 @@ test('cleanup rechecks server references and transaction state rather than trust
   const race = cleanup({
     getDocsFromServer: async (reference) => {
       const result = await import('firebase/firestore').then(({ getDocsFromServer }) => getDocsFromServer(reference));
-      if (reference.path.endsWith('/keepsakes') && ++readCount === 2) {
+      if (reference.path.endsWith('/cards') && ++readCount === 2) {
         await setDoc(record('transaction-reference'), {
           itemName: '同時確定', photo: await canonicalUrl(ref(alice.storage, another)), photoPath: another,
           voice: null, voicePath: null, createdAt: Timestamp.now(),
@@ -653,7 +667,7 @@ test('old bucket URL-only references protect matching paths; old buckets are nev
   const oldStorage = env.authenticatedContext('alice').storage('demo-keepsakes-test-old.appspot.com');
   await uploadBytes(ref(oldStorage, path), photoBytes, { contentType: 'image/png' });
   await env.withSecurityRulesDisabled(async (context) => {
-    await setDoc(doc(context.firestore(), 'users', 'alice', 'keepsakes', 'old-url-only'), {
+    await setDoc(doc(context.firestore(), 'books', BOOK_ALICE, 'cards', 'old-url-only'), {
       itemName: '旧バケット', photo: await canonicalUrl(ref(oldStorage, path)), voice: null, createdAt: Timestamp.now(),
     });
   });
@@ -688,7 +702,7 @@ test('inventory/attempt records remain private and malformed legacy references f
     await assertFails(getDocFromServer(attemptDoc('privacy-attempt', attacker)));
   }
   await env.withSecurityRulesDisabled(async (context) => {
-    await setDoc(doc(context.firestore(), 'users', 'alice', 'keepsakes', 'malformed'), { photo: 'not a download URL' });
+    await setDoc(doc(context.firestore(), 'books', BOOK_ALICE, 'cards', 'malformed'), { photo: 'not a download URL' });
   });
   // Storage ref accepts plain paths, so invalid URL-shaped references must also be rejected.
   const service = cleanup();
@@ -696,158 +710,91 @@ test('inventory/attempt records remain private and malformed legacy references f
   await assertSucceeds(getMetadata(ref(alice.storage, path)));
 });
 
-test('password-share rules expose only active encrypted share reads; owners alone can create, list, revoke and delete', async () => {
-  const shareId = 'd'.repeat(64);
-  const assetId = 'e'.repeat(32);
-  const shareDoc = doc(alice.db, 'users', 'alice', 'shares', shareId);
-  const encrypted = {
-    active: true,
-    version: 1,
-    kdf: 'PBKDF2-SHA256',
-    iterations: 600000,
-    salt: `${'A'.repeat(22)}==`,
-    manifestIv: 'B'.repeat(16),
-    manifest: 'C'.repeat(256),
-    createdAt: serverTimestamp(),
-  };
-  await assertSucceeds(setDoc(shareDoc, encrypted));
-  await assertSucceeds(getDocFromServer(doc(bob.db, 'users', 'alice', 'shares', shareId)));
-  await assertSucceeds(getDocFromServer(doc(anonymous.db, 'users', 'alice', 'shares', shareId)));
-  await assertSucceeds(getDocs(collection(alice.db, 'users', 'alice', 'shares')));
-  await assertFails(getDocs(collection(bob.db, 'users', 'alice', 'shares')));
-  await assertFails(setDoc(doc(bob.db, 'users', 'alice', 'shares', 'f'.repeat(64)), encrypted));
-  await assertFails(updateDoc(doc(bob.db, 'users', 'alice', 'shares', shareId), { active: false }));
-  await assertFails(deleteDoc(doc(bob.db, 'users', 'alice', 'shares', shareId)));
-  await assertFails(setDoc(doc(alice.db, 'users', 'alice', 'shares', 'bad-id'), encrypted));
-  await assertFails(setDoc(doc(alice.db, 'users', 'alice', 'shares', 'a'.repeat(64)), {
-    ...encrypted, password: 'plaintext-never-stored',
-  }));
+test('canonical book share is read-only, same-ID and streams the latest Firestore cards', async () => {
+  await repository().saveKeepsake(item('book-live'));
+  const shareId = await setOwnerBookSharing(true);
+  assert.equal(shareId, BOOK_ALICE);
+  await assertSucceeds(getDocFromServer(doc(anonymous.db, 'books', BOOK_ALICE)));
+  assert.equal((await getDocs(collection(bob.db, 'books', BOOK_ALICE, 'cards'))).size, 1);
+  await assertFails(updateDoc(record('book-live', bob), { itemName: '閲覧者の変更' }));
+  await assertFails(deleteDoc(record('book-live', anonymous)));
 
-  const path = `users/alice/shares/${shareId}/assets/${assetId}`;
-  const ownerAsset = ref(alice.storage, path);
-  const publicAsset = ref(bob.storage, path);
-  const bytes = Buffer.from('synthetic encrypted bytes');
-  await assertSucceeds(uploadBytes(ownerAsset, bytes, { contentType: 'application/octet-stream' }));
-  assert.deepEqual(Buffer.from(await getBytes(publicAsset)), bytes);
-  await assertSucceeds(getBytes(ref(anonymous.storage, path)));
-  await assertSucceeds(list(ref(alice.storage, `users/alice/shares/${shareId}`)));
-  await assertFails(list(ref(bob.storage, `users/alice/shares/${shareId}`)));
-  await assertFails(uploadBytes(ref(bob.storage, `users/alice/shares/${shareId}/assets/${assetId}`), bytes, { contentType: 'application/octet-stream' }));
-  await assertFails(uploadBytes(ref(alice.storage, `users/alice/shares/${shareId}/assets/${'f'.repeat(32)}`), bytes, { contentType: 'image/png' }));
-
-  await assertSucceeds(updateDoc(shareDoc, { active: false }));
-  await assertFails(getDocFromServer(doc(bob.db, 'users', 'alice', 'shares', shareId)));
-  await assertFails(getDocFromServer(doc(anonymous.db, 'users', 'alice', 'shares', shareId)));
-  await assertSucceeds(deleteObject(ownerAsset));
-  await assert.rejects(getBytes(publicAsset), (error) => error.code === 'storage/object-not-found');
-  await assertSucceeds(deleteDoc(shareDoc));
-});
-
-test('live share IDs expose only their read-only Firestore projection and keep owner media private', async () => {
-  const shareId = 'a'.repeat(64);
-  const shareRef = doc(alice.db, 'users', 'alice', 'shares', shareId);
-  const cardRef = doc(alice.db, 'users', 'alice', 'shares', shareId, 'cards', 'card-1');
-  const categoryRef = doc(alice.db, 'users', 'alice', 'shares', shareId, 'categories', 'default-toys');
-  const projectedSettingsRef = doc(alice.db, 'users', 'alice', 'shares', shareId, 'settings', 'gallery');
-  const ownerSettingsRef = doc(alice.db, 'users', 'alice', 'settings', 'gallery');
-  const ownerSettings = {
-    displayMode: 'shuffle',
-    shuffleSeed: 42,
-    updatedAt: serverTimestamp(),
-  };
-  await assertSucceeds(setDoc(ownerSettingsRef, ownerSettings));
-  await assertSucceeds(getDocFromServer(ownerSettingsRef));
-  await assertFails(getDocFromServer(doc(bob.db, 'users', 'alice', 'settings', 'gallery')));
-  await assertFails(setDoc(doc(bob.db, 'users', 'alice', 'settings', 'gallery'), ownerSettings));
-
-  const photoPath = 'users/alice/keepsakes/card-1/test-attempt/photo';
-  const card = {
-    itemName: 'テスト', photo: 'https://firebasestorage.googleapis.com/example',
-    photoPath, voice: null, voicePath: null, voices: [],
-    categoryId: 'default-toys', createdAt: Date.now(),
-  };
-  await assertSucceeds(setDoc(shareRef, { active: true, version: 2, mode: 'live', createdAt: serverTimestamp() }));
-  await assertSucceeds(setDoc(cardRef, card));
-  await assertSucceeds(setDoc(categoryRef, { name: 'おもちゃ', createdAt: Date.now() }));
-  const projectedSettings = {
-    displayMode: 'ordered',
-    shuffleSeed: 9,
-  };
-  await assertSucceeds(setDoc(projectedSettingsRef, projectedSettings));
-
-  await assertSucceeds(getDocFromServer(doc(anonymous.db, 'users', 'alice', 'shares', shareId)));
-  await assertSucceeds(getDocFromServer(doc(anonymous.db, 'users', 'alice', 'shares', shareId, 'cards', 'card-1')));
-  await assertSucceeds(getDocFromServer(doc(bob.db, 'users', 'alice', 'shares', shareId, 'settings', 'gallery')));
-  await assertFails(setDoc(doc(bob.db, 'users', 'alice', 'shares', shareId, 'settings', 'gallery'), projectedSettings));
-  await assertSucceeds(getDocs(collection(bob.db, 'users', 'alice', 'shares', shareId, 'cards')));
-  await assertSucceeds(getDocs(collection(anonymous.db, 'users', 'alice', 'shares', shareId, 'categories')));
-  await assertFails(getDocFromServer(doc(bob.db, 'users', 'alice', 'keepsakes', 'card-1')));
-  await assertFails(getDocs(collection(anonymous.db, 'users', 'alice', 'keepsakes')));
-  await assertFails(getDocs(collection(bob.db, 'users', 'alice', 'shares', 'b'.repeat(64), 'cards')));
-  await assertFails(setDoc(doc(bob.db, 'users', 'alice', 'shares', shareId, 'cards', 'intruder'), card));
-
-  const privateMedia = ref(alice.storage, photoPath);
-  await assertSucceeds(uploadBytes(privateMedia, photoBytes, { contentType: 'image/png' }));
-  await assertFails(getBytes(ref(anonymous.storage, photoPath)));
-  await assertSucceeds(updateDoc(shareRef, { active: false }));
-  await assertFails(getDocs(collection(anonymous.db, 'users', 'alice', 'shares', shareId, 'cards')));
-  await assertFails(getDocFromServer(doc(bob.db, 'users', 'alice', 'shares', shareId, 'settings', 'gallery')));
-  await assertSucceeds(getDocs(collection(alice.db, 'users', 'alice', 'shares', shareId, 'cards')));
-  await assertSucceeds(deleteDoc(cardRef));
-  await assertSucceeds(deleteDoc(categoryRef));
-  await assertSucceeds(deleteDoc(projectedSettingsRef));
-  await assertSucceeds(deleteDoc(shareRef));
-});
-
-test('live share repository publishes without Storage copies and streams owner changes to a viewer', async () => {
-  configureShareRepository(alice.db, alice.storage, async () => 'alice');
-  const original = {
-    id: 'live-card',
-    itemName: '最初のキロク',
-    photo: 'https://firebasestorage.googleapis.com/v0/b/demo/o/photo?alt=media&token=demo',
-    photoPath: 'users/alice/keepsakes/live-card/photo',
-    voice: 'https://firebasestorage.googleapis.com/v0/b/demo/o/voice?alt=media&token=demo',
-    voicePath: 'users/alice/keepsakes/live-card/voice',
-    createdAt: 500,
-    categoryId: 'default-toys',
-  };
-  const categories = [{ id: 'default-toys', name: 'おもちゃ', createdAt: 100 }];
-  const share = await createLiveShare([original], categories);
+  configureBookRepository(bob.db, async () => 'bob');
   let firstResolve;
   let updateResolve;
-  let firstSeen = false;
-  const firstBook = new Promise((resolve) => { firstResolve = resolve; });
-  const updatedBook = new Promise((resolve) => { updateResolve = resolve; });
-  const stop = await subscribeLiveShare(share, (book) => {
-    if (!firstSeen && book.items.length === 1 && book.categories.length === 1) {
-      firstSeen = true;
+  const first = new Promise((resolve) => { firstResolve = resolve; });
+  const updated = new Promise((resolve) => { updateResolve = resolve; });
+  let sawFirst = false;
+  const stop = await subscribePublicBook(BOOK_ALICE, (book) => {
+    if (!sawFirst && book.items.some((card) => card.id === 'book-live')) {
+      sawFirst = true;
       firstResolve(book);
     }
-    if (book.items.some((item) => item.itemName === '更新後のキロク') && book.settings.displayMode === 'shuffle') updateResolve(book);
+    if (book.items.some((card) => card.itemName === '新しい内容')) updateResolve(book);
   }, (error) => { throw error; });
-  assert.ok(stop);
-  const first = await Promise.race([
-    firstBook,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('initial live snapshot timed out')), 4000)),
+  const initial = await Promise.race([
+    first,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('initial book snapshot timed out')), 4000)),
   ]);
-  assert.equal(first.items[0].itemName, '最初のキロク');
-  assert.equal(first.categories[0].name, 'おもちゃ');
-
-  const reused = await getOrCreateLiveShare([{ ...original, itemName: '最新の内容' }], categories);
-  assert.deepEqual(reused, share);
-  const storedShares = await getDocs(collection(alice.db, 'users', 'alice', 'shares'));
-  assert.equal(storedShares.size, 1, 'reopening share settings must reuse the existing share document');
-
-  await syncLiveShareProjections([{ ...original, itemName: '更新後のキロク' }], categories, {
-    displayMode: 'shuffle',
-    shuffleSeed: 123,
-  });
-  const updated = await Promise.race([
-    updatedBook,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('updated live snapshot timed out')), 4000)),
+  assert.equal(initial.items[0].itemName, 'テスト');
+  await updateDoc(record('book-live'), { itemName: '新しい内容' });
+  const changed = await Promise.race([
+    updated,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('book update snapshot timed out')), 4000)),
   ]);
-  assert.equal(updated.items[0].itemName, '更新後のキロク');
-  assert.equal(updated.settings.displayMode, 'shuffle');
-  assert.equal(updated.settings.shuffleSeed, 123);
+  assert.equal(changed.items[0].itemName, '新しい内容');
   stop();
+
+  configureBookRepository(alice.db, async () => 'alice');
+  await setOwnerBookSharing(false);
+  await assertFails(getDocFromServer(doc(anonymous.db, 'books', BOOK_ALICE)));
+});
+
+test('migration copies and verifies old owner data without moving Storage media, then retires live projections', async () => {
+  const nextBookId = 'c'.repeat(64);
+  const categoryId = `custom-${'d'.repeat(64)}`;
+  const sourceCard = doc(alice.db, 'users', 'alice', 'keepsakes', 'old-card');
+  const photoPath = 'users/alice/keepsakes/old-card/photo';
+  const voicePath = 'users/alice/keepsakes/old-card/voice';
+  const photoRef = ref(alice.storage, photoPath);
+  const voiceRef = ref(alice.storage, voicePath);
+  await assertSucceeds(uploadBytes(photoRef, photoBytes, { contentType: 'image/png' }));
+  await assertSucceeds(uploadBytes(voiceRef, voiceBytes, { contentType: 'audio/wav' }));
+  const photoUrl = await canonicalUrl(photoRef);
+  const voiceUrl = await canonicalUrl(voiceRef);
+  await env.withSecurityRulesDisabled(async (context) => {
+    const database = context.firestore();
+    await deleteDoc(doc(database, 'users', 'alice', 'library', 'primary'));
+    await deleteDoc(doc(database, 'books', BOOK_ALICE));
+    await setDoc(doc(database, 'users', 'alice', 'categories', categoryId), {
+      name: 'おもちゃ', createdAt: Timestamp.now(),
+    });
+    await setDoc(doc(database, 'users', 'alice', 'settings', 'gallery'), {
+      displayMode: 'shuffle', shuffleSeed: 12, updatedAt: Timestamp.now(),
+    });
+    await setDoc(doc(database, 'users', 'alice', 'keepsakes', 'old-card'), {
+      itemName: '前からあるキロク', photo: photoUrl, photoPath,
+      voice: voiceUrl, voicePath, categoryId, createdAt: Timestamp.now(),
+    });
+    await setDoc(doc(database, 'users', 'alice', 'shares', nextBookId), {
+      active: true, version: 2, mode: 'live', createdAt: Timestamp.now(),
+    });
+    await setDoc(doc(database, 'users', 'alice', 'shares', nextBookId, 'cards', 'old-card'), {
+      itemName: '複製データ', photo: photoUrl, photoPath,
+      voice: voiceUrl, voicePath, categoryId, createdAt: Date.now(),
+    });
+  });
+
+  configureBookRepository(alice.db, async () => 'alice');
+  const context = await getOwnerBookContext();
+  assert.equal(context.bookId, nextBookId, 'reuse the existing active live URL identifier');
+  const migrated = await getDocFromServer(doc(alice.db, 'books', nextBookId, 'cards', 'old-card'));
+  assert.equal(migrated.data().itemName, '前からあるキロク');
+  assert.equal(migrated.data().photoPath, photoPath);
+  assert.equal(migrated.data().voicePath, voicePath);
+  assert.equal((await getDocFromServer(sourceCard)).exists(), true, 'legacy owner source remains as a recovery copy');
+  assert.equal((await getDocs(collection(alice.db, 'users', 'alice', 'shares', nextBookId, 'cards'))).size, 0);
+  assert.equal((await getMetadata(photoRef)).size, photoBytes.length, 'photo object was not moved');
+  assert.equal((await getMetadata(voiceRef)).size, voiceBytes.length, 'voice object was not moved');
+  assert.equal((await getDocFromServer(doc(alice.db, 'books', nextBookId))).data().shareEnabled, true);
 });

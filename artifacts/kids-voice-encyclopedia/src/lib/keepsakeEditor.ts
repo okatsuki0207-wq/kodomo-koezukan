@@ -10,10 +10,10 @@ const sdk = { getDoc: getDocFromServer, runTransaction, uploadBytes, getDownload
 
 /** Replacements never overwrite object bytes; receipts make ambiguous retries idempotent. */
 export function createKeepsakeEditor(db: Firestore, storage: FirebaseStorage, userId: () => Promise<string>,
-  operations: Partial<typeof sdk> = {}, timeoutMs = 30_000) {
+  bookId: () => Promise<string>, operations: Partial<typeof sdk> = {}, timeoutMs = 30_000) {
   const io = { ...sdk, ...operations };
   const pending = new Map<string, Promise<Keepsake>>();
-  async function edit(base: Keepsake, changes: KeepsakeEdit, editId: string, uid: string): Promise<Keepsake> {
+  async function edit(base: Keepsake, changes: KeepsakeEdit, editId: string, uid: string, ownerBookId: string): Promise<Keepsake> {
     if (!/^[a-zA-Z0-9-]{1,80}$/.test(editId) || !base.id || base.id.includes('/')) throw new Error('編集情報を確認できません。画面を開き直してください。');
     const additions = changes.voices ?? [];
     if (additions.length + (changes.photo !== undefined ? 1 : 0) > MAX_EDIT_FILES) {
@@ -23,7 +23,7 @@ export function createKeepsakeEditor(db: Firestore, storage: FirebaseStorage, us
       additions.some((v) => !/^[a-zA-Z0-9-]{1,64}$/.test(v.id))) throw new Error('音声の編集情報を確認してください。');
     if (changes.itemName !== undefined) keepsakeMetadata(changes.itemName);
     if (changes.categoryId !== undefined) validateCategoryId(changes.categoryId);
-    const record = doc(db, 'users', uid, 'keepsakes', base.id);
+    const record = doc(db, 'books', ownerBookId, 'cards', base.id);
     const receipt = doc(db, 'users', uid, 'mediaEdits', editId);
     const initial = await deadline(io.getDoc(record), timeoutMs);
     if (!initial.exists()) throw new EditConflict('このカードは削除されています。編集画面を閉じて一覧を確認してください。');
@@ -137,9 +137,10 @@ export function createKeepsakeEditor(db: Firestore, storage: FirebaseStorage, us
   }
   return {
     async editKeepsake(base: Keepsake, changes: KeepsakeEdit, editId: string) {
-      const uid = await userId(), key = `${uid}/${base.id}/${editId}`;
+      const [uid, ownerBookId] = await Promise.all([userId(), bookId()]);
+      const key = `${ownerBookId}/${base.id}/${editId}`;
       if (pending.has(key)) return pending.get(key)!;
-      const operation = edit(base, changes, editId, uid).finally(() => pending.delete(key));
+      const operation = edit(base, changes, editId, uid, ownerBookId).finally(() => pending.delete(key));
       pending.set(key, operation);
       return operation;
     },

@@ -70,15 +70,12 @@ if (!vm.SourceTextModule) {
       './storageDiagnostics': { diagnoseStorageError: async (error) => error, storageFailureMessage: () => null },
       './unusedMedia': { createUnusedMediaService: () => { throw new Error('Metadata edits must not inspect or delete unused media'); } },
       './keepsakeEditor': { createKeepsakeEditor: () => ({ editKeepsake: () => { throw new Error('Not a metadata-only operation'); } }) },
-      './shareRepository': {
-        configureShareRepository: () => {},
-        getOrCreateLiveShare: async () => ({ ownerUid: 'test-owner', shareId: 'a'.repeat(64) }),
-        createLiveShare: async () => {},
-        listPasswordShares: async () => [],
-        openPasswordShare: async () => {},
-        revokePasswordShare: async () => {},
-        subscribeLiveShare: async () => () => {},
-        syncLiveShareProjections: async () => {},
+      './bookRepository': {
+        configureBookRepository: () => {},
+        getOwnerBookContext: async () => ({ ownerUid: uid, bookId: 'test-book' }),
+        getOwnerBookShareState: async () => ({ ownerUid: uid, bookId: 'test-book', enabled: false }),
+        setOwnerBookSharing: async () => 'test-book',
+        subscribePublicBook: async () => () => {},
       },
       './gallerySettings': {
         DEFAULT_GALLERY_SETTINGS: { displayMode: 'ordered', shuffleSeed: 0 },
@@ -129,7 +126,7 @@ if (!vm.SourceTextModule) {
     const second = await api.createCategory('のりもの');
     assert.equal(first.id, second.id);
     assert.equal(first.name, 'のりもの');
-    assert.ok(records.has(`users/${uid}/categories/${first.id}`));
+    assert.ok(records.has(`books/test-book/categories/${first.id}`));
     assert.equal(calls.filter(([operation]) => operation === 'transaction.set').length, 1);
     assert.deepEqual(Object.keys(records.values().next().value).sort(), ['createdAt', 'name']);
   });
@@ -139,14 +136,14 @@ if (!vm.SourceTextModule) {
     let categories;
     const stop = await api.subscribeCategories((value) => { categories = value; }, assert.fail);
     assert.equal(categories.length, 3);
-    assert.equal(calls[0][1][0], `users/${uid}/categories`);
+    assert.equal(calls[0][1][0], 'books/test-book/categories');
     stop();
     assert.equal(calls.at(-1)[0], 'unsubscribe');
   });
 
   test('editing category/name uses updateDoc without replacing or deleting media', async () => {
     const { api, records, calls, uid } = await fixture();
-    const path = `users/${uid}/keepsakes/card`;
+    const path = 'books/test-book/cards/card';
     const original = { itemName: '以前', photo: 'photo-url', voice: 'voice-url', photoPath: 'photo-path', voicePath: 'voice-path', createdAt: 123 };
     records.set(path, original);
     await api.updateKeepsakeMetadata('card', '  新しい名前  ', 'default-animals');
@@ -169,7 +166,7 @@ if (!vm.SourceTextModule) {
 
   test('category-only edit preserves the current name, URLs and timestamps and only writes categoryId', async () => {
     const { api, records, calls, uid } = await fixture();
-    const path = `users/${uid}/keepsakes/card`;
+    const path = 'books/test-book/cards/card';
     const latest = { itemName: '別の端末で直した名前', photo: 'photo-url', voice: 'voice-url', createdAt: 123 };
     records.set(path, latest);
     await api.updateKeepsakeCategory('card', 'default-animals');
@@ -184,9 +181,9 @@ if (!vm.SourceTextModule) {
     const { api, records, uid } = await fixture();
     const item = { id: 'new-card', itemName: 'おもちゃ', photo: 'blob:test', voice: null, createdAt: 100, categoryId: 'default-toys' };
     await api.saveKeepsake(item);
-    assert.equal(records.get(`users/${uid}/keepsakes/new-card`).categoryId, 'default-toys');
+    assert.equal(records.get('books/test-book/cards/new-card').categoryId, 'default-toys');
     await api.saveKeepsake({ ...item, id: 'legacy-card', categoryId: null }, true);
-    const legacy = records.get(`users/${uid}/keepsakes/legacy-card`);
+    const legacy = records.get('books/test-book/cards/legacy-card');
     assert.equal('categoryId' in legacy, false);
     assert.equal(legacy.createdAt.getTime(), 100);
   });

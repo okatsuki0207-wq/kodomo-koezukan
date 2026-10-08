@@ -36,13 +36,11 @@ import DetailDialogShell from './components/DetailDialogShell';
 import StartScreen from './components/StartScreen';
 import ShareDialog from './components/ShareDialog';
 import SettingsDialog from './components/SettingsDialog';
-import SharePasswordGate from './components/SharePasswordGate';
 import ModeLockDialog from './components/ModeLockDialog';
 import { useCategories } from './hooks/useCategories';
 import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, sortGalleryItems, type GallerySettings } from './lib/gallerySettings';
-import { deleteKeepsake, editKeepsake, firebaseError, saveGallerySettings, saveKeepsake, subscribeGallerySettings, subscribeKeepsakes, subscribeLiveShare, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
-import type { SharedBook, ShareId } from './lib/shareRepository';
-import { decodeShareToken } from './lib/shareCrypto';
+import { deleteKeepsake, editKeepsake, firebaseError, saveGallerySettings, saveKeepsake, subscribeGallerySettings, subscribeKeepsakes, subscribePublicBook, updateKeepsakeCategory, type Keepsake, type SharedBook } from './lib/keepsakeStore';
+import { decodeLegacyShareId, isBookId } from './lib/bookIdentity';
 import { getVoices, type VoiceAsset } from './lib/voiceAssets';
 import { trimLeadingSilence } from './lib/audioTrim';
 import { preloadRecordingGuide } from './lib/recordingCue';
@@ -59,17 +57,21 @@ function formatDate(timestamp: number) {
   return new Intl.DateTimeFormat('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }).format(timestamp);
 }
 
-function readShareRoute(): { token: ShareId | null } | null {
-  if (typeof window === 'undefined' || !window.location.hash.startsWith('#share=')) return null;
-  const rawToken = window.location.hash.slice('#share='.length);
-  return { token: decodeShareToken(rawToken) };
+function readShareRoute(): { bookId: string | null } | null {
+  if (typeof window === 'undefined') return null;
+  const route = window.location.pathname.match(/\/view\/([^/]+)\/?$/u);
+  if (route) return { bookId: isBookId(route[1]) ? route[1] : null };
+  if (window.location.hash.startsWith('#share=')) {
+    return { bookId: decodeLegacyShareId(window.location.hash.slice('#share='.length)) };
+  }
+  return null;
 }
 
 function App() {
   const [items, setItems] = useState<Keepsake[]>([]);
   const [shareRoute] = useState(readShareRoute);
   const [sharedBook, setSharedBook] = useState<SharedBook | null>(null);
-  const [shareMode, setShareMode] = useState<'loading' | 'live' | 'legacy' | 'error'>('loading');
+  const [shareMode, setShareMode] = useState<'loading' | 'live' | 'error'>('loading');
   const [shareAccessError, setShareAccessError] = useState('');
   const [localReadOnly, setLocalReadOnly] = useState(false);
   const [unlockOpen, setUnlockOpen] = useState(false);
@@ -276,13 +278,13 @@ function App() {
     let unsubscribe: (() => void) | null = null;
     setShareMode('loading');
     setShareAccessError('');
-    if (!shareRoute.token) {
+    if (!shareRoute.bookId) {
       setShareAccessError('共有リンクが正しくありません。リンクを送ってくれた人に確認してください。');
       setShareMode('error');
       return;
     }
-    void subscribeLiveShare(
-      shareRoute.token,
+    void subscribePublicBook(
+      shareRoute.bookId,
       (book) => {
         if (!cancelled) {
           setSharedBook(book);
@@ -297,11 +299,11 @@ function App() {
         }
       },
     ).then((stop) => {
-      if (cancelled) stop?.();
-      else if (stop) {
+      if (cancelled) stop();
+      else {
         unsubscribe = stop;
         setShareMode('live');
-      } else setShareMode('legacy');
+      }
     }).catch((caught) => {
       if (cancelled) return;
       setShareAccessError(caught instanceof Error ? caught.message : '共有リンクを開けませんでした。');
@@ -590,12 +592,6 @@ function App() {
     setSettingsOpen(false);
     setUnlockOpen(true);
   };
-  const acceptSharedBook = (book: SharedBook) => {
-    setSelectedCategory(null);
-    setSharedBook(book);
-    setView('library');
-  };
-
   return (
     <div className="app-shell">
       <header className="topbar" inert={createOpen || !!detail || categoryOpen || shareOpen || settingsOpen || unlockOpen}>
@@ -618,7 +614,7 @@ function App() {
               : <p className="share-error" role="alert">{shareAccessError}</p>}
           </section>
         </main>
-      ) : shareRoute && shareMode === 'legacy' && !sharedBook ? <SharePasswordGate token={shareRoute.token} onUnlocked={acceptSharedBook} /> : view === 'start' && !readOnly ? (
+      ) : view === 'start' && !readOnly ? (
         <main className="start-main" inert={createOpen || !!detail || categoryOpen || shareOpen || settingsOpen || unlockOpen}>
           <StartScreen onRecord={openCreate} onOpenEncyclopedia={() => { createDraftSession.current++; setView('library'); }} />
         </main>
@@ -857,7 +853,7 @@ function App() {
           }}
         />
       )}
-      {shareOpen && !readOnly && <ShareDialog items={items} categories={categories} settings={gallerySettings} onClose={() => setShareOpen(false)} />}
+      {shareOpen && !readOnly && <ShareDialog onClose={() => setShareOpen(false)} />}
       {settingsOpen && !shareRoute && <SettingsDialog
         settings={gallerySettings}
         readOnly={readOnly}

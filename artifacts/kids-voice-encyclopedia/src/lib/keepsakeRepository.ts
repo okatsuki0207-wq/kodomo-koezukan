@@ -34,6 +34,7 @@ export function createKeepsakeRepository(
   db: Firestore,
   storage: FirebaseStorage,
   userId: () => Promise<string>,
+  bookId: () => Promise<string>,
   operations: Partial<typeof sdk> = {},
   timeoutMs = 30_000,
 ) {
@@ -49,8 +50,8 @@ export function createKeepsakeRepository(
     }
   }
 
-  async function save(item: Keepsake, migrating: boolean, uid: string) {
-    const record = doc(db, 'users', uid, 'keepsakes', item.id);
+  async function save(item: Keepsake, migrating: boolean, uid: string, ownerBookId: string) {
+    const record = doc(db, 'books', ownerBookId, 'cards', item.id);
     // A retry is not an edit. Never overwrite a committed card, even after a lost acknowledgement.
     if ((await deadline(io.getDoc(record), timeoutMs)).exists()) return;
     const metadata = keepsakeMetadata(item.itemName, item.categoryId ?? null);
@@ -125,16 +126,16 @@ export function createKeepsakeRepository(
   }
 
   async function saveKeepsake(item: Keepsake, migrating = false): Promise<void> {
-    const uid = await userId();
-    const key = `${uid}/${item.id}`;
+    const [uid, ownerBookId] = await Promise.all([userId(), bookId()]);
+    const key = `${ownerBookId}/${item.id}`;
     if (pending.has(key)) return pending.get(key)!;
-    const operation = save(item, migrating, uid).finally(() => pending.delete(key));
+    const operation = save(item, migrating, uid, ownerBookId).finally(() => pending.delete(key));
     pending.set(key, operation);
     return operation;
   }
 
   async function deleteKeepsake(item: Keepsake): Promise<void> {
-    const uid = await userId();
+    const [uid, ownerBookId] = await Promise.all([userId(), bookId()]);
     // Validate the supplied snapshot before resolving the current server version.
     // A stale but valid snapshot may be refreshed; a mismatched URL is never trusted.
     for (const [path, url] of [[item.photoPath, item.photo], ...getVoices(item).map((v) => [v.path, v.url])]) {
@@ -142,7 +143,8 @@ export function createKeepsakeRepository(
         throw new Error('ファイルの保存パスが一致しません。削除していません。');
       }
     }
-    const latest = await deadline(io.getDoc(doc(db, 'users', uid, 'keepsakes', item.id)), timeoutMs);
+    const record = doc(db, 'books', ownerBookId, 'cards', item.id);
+    const latest = await deadline(io.getDoc(record), timeoutMs);
     const current = latest.exists() ? keepsakeFromData(item.id, latest.data()!) : item;
     const files = [[current.photoPath, current.photo], ...getVoices(current).map((v) => [v.path, v.url])];
     const removed = new Set<string>();
@@ -151,12 +153,12 @@ export function createKeepsakeRepository(
       if (path?.startsWith(`users/${uid}/keepsakes/${item.id}/`)) await removeFile(path, url ?? undefined);
       removed.add(path);
     }
-    await deadline(io.deleteDoc(doc(db, 'users', uid, 'keepsakes', item.id)), timeoutMs);
+    await deadline(io.deleteDoc(record), timeoutMs);
   }
 
   async function subscribeKeepsakes(onChange: (items: Keepsake[]) => void, onError: (error: unknown) => void) {
-    const uid = await userId();
-    return onSnapshot(query(collection(db, 'users', uid, 'keepsakes'), orderBy('createdAt', 'desc')), (snapshot) => {
+    const ownerBookId = await bookId();
+    return onSnapshot(query(collection(db, 'books', ownerBookId, 'cards'), orderBy('createdAt', 'desc')), (snapshot) => {
       onChange(snapshot.docs.map((record) => keepsakeFromData(record.id, record.data())));
     }, onError);
   }
