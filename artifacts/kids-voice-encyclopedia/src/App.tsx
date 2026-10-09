@@ -38,6 +38,7 @@ import SettingsDialog from './components/SettingsDialog';
 import { useCategories } from './hooks/useCategories';
 import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, sortGalleryItems, type GallerySettings } from './lib/gallerySettings';
 import { COMPACT_GALLERY_PAGE_SIZE, clampGalleryPage, galleryPageCount, galleryPageItems, galleryPageSize, gallerySwipeDelta } from './lib/galleryPagination';
+import { playPageTurnSound } from './lib/pageTurnSound';
 import { deleteKeepsake, editKeepsake, firebaseError, saveGallerySettings, saveKeepsake, subscribeGallerySettings, subscribeKeepsakes, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
 import { getVoices, type VoiceAsset } from './lib/voiceAssets';
 import { trimLeadingSilence } from './lib/audioTrim';
@@ -179,10 +180,11 @@ function App() {
     if (pageTurnTimer.current !== null) window.clearTimeout(pageTurnTimer.current);
     setPageTurnDirection(delta > 0 ? 'next' : 'previous');
     setGridPage(nextPage);
+    playPageTurnSound();
     pageTurnTimer.current = window.setTimeout(() => {
       setPageTurnDirection(null);
       pageTurnTimer.current = null;
-    }, 420);
+    }, 540);
   };
   const handleGalleryTouchStart = (event: TouchEvent<HTMLDivElement>) => {
     if (event.touches.length !== 1) {

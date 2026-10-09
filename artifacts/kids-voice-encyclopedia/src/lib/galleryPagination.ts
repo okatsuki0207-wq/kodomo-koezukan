@@ -1,5 +1,5 @@
-export const STANDARD_GALLERY_PAGE_SIZE = 18;
-export const COMPACT_GALLERY_PAGE_SIZE = 15;
+export const STANDARD_GALLERY_PAGE_SIZE = 15;
+export const COMPACT_GALLERY_PAGE_SIZE = 12;
 export const COMPACT_GALLERY_MAX_HEIGHT = 760;
 
 export function galleryPageSize(viewportHeight: number): number {
@@ -41,10 +41,10 @@ export function gallerySwipeDelta(
   startY: number,
   endX: number,
   endY: number,
-  threshold = 44,
+  threshold = 72,
 ): -1 | 0 | 1 {
   const deltaX = endX - startX;
   const deltaY = endY - startY;
-  if (Math.abs(deltaX) < threshold || Math.abs(deltaX) <= Math.abs(deltaY) * 1.2) return 0;
+  if (Math.abs(deltaX) < threshold || Math.abs(deltaX) <= Math.abs(deltaY) * 1.3) return 0;
   return deltaX < 0 ? 1 : -1;
 }
