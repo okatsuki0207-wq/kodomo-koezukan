@@ -37,7 +37,7 @@ import StartScreen from './components/StartScreen';
 import SettingsDialog from './components/SettingsDialog';
 import { useCategories } from './hooks/useCategories';
 import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, sortGalleryItems, type GallerySettings } from './lib/gallerySettings';
-import { clampGalleryPage, galleryPageCount, galleryPageItems, galleryPageSize, gallerySwipeDelta } from './lib/galleryPagination';
+import { COMPACT_GALLERY_PAGE_SIZE, clampGalleryPage, galleryPageCount, galleryPageItems, galleryPageSize, gallerySwipeDelta } from './lib/galleryPagination';
 import { deleteKeepsake, editKeepsake, firebaseError, saveGallerySettings, saveKeepsake, subscribeGallerySettings, subscribeKeepsakes, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
 import { getVoices, type VoiceAsset } from './lib/voiceAssets';
 import { trimLeadingSilence } from './lib/audioTrim';
@@ -102,8 +102,10 @@ function App() {
   const [processingVoice, setProcessingVoice] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [gridPage, setGridPage] = useState(0);
+  const [pageTurnDirection, setPageTurnDirection] = useState<'next' | 'previous' | null>(null);
   const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight);
   const galleryTouchStart = useRef<{ x: number; y: number } | null>(null);
+  const pageTurnTimer = useRef<number | null>(null);
   const [cardCategory, setCardCategory] = useState<string | null>(null);
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [newCatInCreate, setNewCatInCreate] = useState(false);
@@ -155,13 +157,33 @@ function App() {
   }, []);
   const visibleItems = sortGalleryItems(items, gallerySettings, selectedCategory);
   const pageSize = galleryPageSize(viewportHeight);
-  const pageCount = galleryPageCount(visibleItems.length, pageSize);
+  const showAddCard = !readOnlyMode;
+  const pageCount = galleryPageCount(visibleItems.length, pageSize, showAddCard);
   const currentPage = clampGalleryPage(gridPage, pageCount);
-  const pageItems = galleryPageItems(visibleItems, currentPage, pageSize);
+  const pageItems = galleryPageItems(visibleItems, currentPage, pageSize, showAddCard);
   useEffect(() => {
     setGridPage(0);
     galleryTouchStart.current = null;
-  }, [selectedCategory, pageSize]);
+    setPageTurnDirection(null);
+    if (pageTurnTimer.current !== null) {
+      window.clearTimeout(pageTurnTimer.current);
+      pageTurnTimer.current = null;
+    }
+  }, [selectedCategory, pageSize, readOnlyMode]);
+  useEffect(() => () => {
+    if (pageTurnTimer.current !== null) window.clearTimeout(pageTurnTimer.current);
+  }, []);
+  const turnGalleryPage = (delta: -1 | 1) => {
+    const nextPage = clampGalleryPage(currentPage + delta, pageCount);
+    if (nextPage === currentPage) return;
+    if (pageTurnTimer.current !== null) window.clearTimeout(pageTurnTimer.current);
+    setPageTurnDirection(delta > 0 ? 'next' : 'previous');
+    setGridPage(nextPage);
+    pageTurnTimer.current = window.setTimeout(() => {
+      setPageTurnDirection(null);
+      pageTurnTimer.current = null;
+    }, 420);
+  };
   const handleGalleryTouchStart = (event: TouchEvent<HTMLDivElement>) => {
     if (event.touches.length !== 1) {
       galleryTouchStart.current = null;
@@ -176,7 +198,7 @@ function App() {
     galleryTouchStart.current = null;
     if (!start || !touch) return;
     const delta = gallerySwipeDelta(start.x, start.y, touch.clientX, touch.clientY);
-    if (delta !== 0) setGridPage((page) => clampGalleryPage(page + delta, pageCount));
+    if (delta !== 0) turnGalleryPage(delta);
   };
   const categoryName = (id: string | null | undefined) => categories.find((c) => c.id === id)?.name;
   const recordingSession = useRef(0);
@@ -601,9 +623,6 @@ function App() {
             <button type="button" className="header-settings-button" onClick={() => { void shareEncyclopedia(); }} aria-label="ずかんを共有" title="ずかんを共有" data-testid="button-share"><Share2 size={17} /></button>
           </div>
         </div>
-        {view === 'library' && !readOnlyMode && (
-          <button type="button" className="header-create" onClick={openCreate} data-testid="button-create-card"><Plus size={19} /><span>キロクする</span></button>
-        )}
       </header>
       {shareFeedback && <p className="share-feedback" role="status" data-testid="status-share-feedback">{shareFeedback}</p>}
 
@@ -622,19 +641,17 @@ function App() {
           disabled={busy}
         />
         <div id="category-panel" role="tabpanel" aria-labelledby={`category-tab-${selectedCategory ?? 'all'}`}>
-        {loading ? <p className="notice neutral" role="status">Firebase から図鑑を読み込んでいます…</p> : items.length === 0 && selectedCategory === null ? (
+        {loading ? <p className="notice neutral" role="status">Firebase から図鑑を読み込んでいます…</p> : visibleItems.length === 0 && readOnlyMode && selectedCategory === null ? (
           <section className="empty-state" data-testid="empty-keepsakes">
             <div className="empty-illustration"><RecordingCharacter pose="sit" /></div>
             <h2 className="empty-title">まだ、まっさらなページ</h2>
-            <p className="empty-copy">いちばん最初のキロクを残してみよう。<br />写真といっしょに、声も大切にしまえます。</p>
-            {!readOnlyMode && <button type="button" className="empty-action" onClick={openCreate} data-testid="button-empty-create">はじめのキロクを残す</button>}
+            <p className="empty-copy">まだキロクがありません。<br />新しいキロクが増えるのを待っています。</p>
           </section>
-        ) : visibleItems.length === 0 ? (
+        ) : visibleItems.length === 0 && readOnlyMode ? (
           <section className="empty-state category-empty" data-testid="empty-category">
             <div className="empty-illustration"><RecordingCharacter pose="sit" /></div>
             <h2 className="empty-title">{categoryName(selectedCategory) ?? 'このカテゴリ'}は、まだ空っぽ</h2>
-            <p className="empty-copy">このページはまだ空っぽ。<br />新しいキロクを残すか、ほかのキロクのページを変えられます。</p>
-            {!readOnlyMode && <button type="button" className="empty-action" onClick={openCreate} data-testid="button-category-empty-create">このページにキロクする</button>}
+            <p className="empty-copy">このページはまだ空っぽです。<br />キロクが増えるのを待っています。</p>
           </section>
         ) : (
           <>
@@ -646,10 +663,26 @@ function App() {
               data-testid="gallery-page-viewport"
             >
               <section
-                className={`sticker-collage${pageSize === 12 ? ' is-compact' : ''}`}
+                key={`${currentPage}-${pageTurnDirection ?? 'idle'}`}
+                className={`sticker-collage${pageSize === COMPACT_GALLERY_PAGE_SIZE ? ' is-compact' : ''}${pageTurnDirection ? ` page-turn-${pageTurnDirection}` : ''}`}
                 aria-label="わが家のキロク"
                 data-testid="grid-keepsakes"
+                data-page-index={currentPage}
               >
+                {showAddCard && currentPage === 0 && (
+                  <article className="sticker-item sticker-add-item" data-testid="card-add-keepsake">
+                    <button
+                      type="button"
+                      className="sticker-add-card"
+                      onClick={openCreate}
+                      aria-label="新しいキロクを追加"
+                      data-testid="button-add-card-tile"
+                    >
+                      <span className="sticker-add-media"><Plus size={30} strokeWidth={1.8} /></span>
+                      <span className="sticker-add-name">キロクする</span>
+                    </button>
+                  </article>
+                )}
                 {pageItems.map((item) => (
                   <article
                     key={item.id}
@@ -694,18 +727,18 @@ function App() {
                 <button
                   type="button"
                   className="gallery-page-button"
-                  onClick={() => setGridPage((page) => clampGalleryPage(page - 1, pageCount))}
+                  onClick={() => turnGalleryPage(-1)}
                   disabled={currentPage === 0}
                   aria-label="前のページ"
                   data-testid="button-gallery-previous"
                 >
                   <ChevronLeft size={18} />
                 </button>
-                <span aria-live="polite" data-testid="gallery-page-count">{currentPage + 1} / {pageCount}</span>
+                <span aria-live="polite" data-testid="gallery-page-count">{`p. ${currentPage + 1}`}</span>
                 <button
                   type="button"
                   className="gallery-page-button"
-                  onClick={() => setGridPage((page) => clampGalleryPage(page + 1, pageCount))}
+                  onClick={() => turnGalleryPage(1)}
                   disabled={currentPage >= pageCount - 1}
                   aria-label="次のページ"
                   data-testid="button-gallery-next"
@@ -723,7 +756,7 @@ function App() {
 
       {createOpen && !photoEditorSource && (
         <div className="overlay" role="presentation" inert={newCatInCreate} onMouseDown={(event) => { if (event.target === event.currentTarget) closeCreate(); }}>
-          <DetailDialogShell className="dialog create-dialog" label="新しいキロクをつくる" returnSelector='[data-testid="button-create-card"]' onClose={closeCreate}>
+          <DetailDialogShell className="dialog create-dialog" label="新しいキロクをつくる" returnSelector='[data-testid="button-add-card-tile"], [data-testid="button-start-record"]' onClose={closeCreate}>
             <div className="dialog-head create-dialog-head">
               <div><h2 id="create-title" className="dialog-title">新しいキロクをつくる</h2></div>
               <button type="button" className="icon-button" disabled={busy} onClick={closeCreate} aria-label="閉じる" data-testid="button-close-create"><X size={19} /></button>
