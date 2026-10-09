@@ -39,7 +39,7 @@ import SettingsDialog from './components/SettingsDialog';
 import { useCategories } from './hooks/useCategories';
 import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, sortGalleryItems, type GallerySettings } from './lib/gallerySettings';
 import { COMPACT_GALLERY_PAGE_SIZE, clampGalleryPage, galleryPageCount, galleryPageItems, galleryPageSize, gallerySwipeDelta } from './lib/galleryPagination';
-import { playPageTurnSound } from './lib/pageTurnSound';
+import { playPageTurnSound, preloadPageTurnSound } from './lib/pageTurnSound';
 import { deleteKeepsake, editKeepsake, firebaseError, saveGallerySettings, saveKeepsake, subscribeGallerySettings, subscribeKeepsakes, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
 import { getVoices, type VoiceAsset } from './lib/voiceAssets';
 import { trimLeadingSilence } from './lib/audioTrim';
@@ -153,6 +153,9 @@ function App() {
       bookOpeningTimers.current = [];
     });
   };
+  useEffect(() => {
+    preloadPageTurnSound();
+  }, []);
   useEffect(() => {
     const markActive = () => {
       if (document.visibilityState === 'visible') persistAppView(view);

@@ -8,7 +8,7 @@ import {
   galleryPageSize,
   gallerySwipeDelta,
 } from '../src/lib/galleryPagination.ts';
-import { playPageTurnSound } from '../src/lib/pageTurnSound.ts';
+import { playPageTurnSound, preloadPageTurnSound } from '../src/lib/pageTurnSound.ts';
 
 test('gallery uses four rows on short screens and five rows on taller screens', () => {
   assert.equal(galleryPageSize(568), 12);
@@ -43,66 +43,47 @@ test('gallery recognizes horizontal swipes and ignores short or mostly vertical 
   assert.equal(gallerySwipeDelta(200, 100, 120, 190), 0);
 });
 
-test('successful page turns play a soft, crinkled paper rustle without electronic tones', async () => {
-  const parameters = () => ({
-    value: 0,
-    events: [],
-    setValueAtTime(value, time) { this.events.push(['set', value, time]); },
-    exponentialRampToValueAtTime(value, time) { this.events.push(['ramp', value, time]); },
-  });
-  const state = { source: null, filters: [], gains: [], buffer: null, buffers: [] };
-  const context = {
-    currentTime: 4,
-    sampleRate: 1000,
-    state: 'running',
-    destination: {},
-    createBuffer: (channels, length, sampleRate) => {
-      const data = Array.from({ length: channels }, () => new Float32Array(length));
-      const buffer = { numberOfChannels: channels, length, sampleRate, getChannelData: (channel) => data[channel], data };
-      state.buffers.push(buffer);
-      state.buffer = buffer;
-      return state.buffer;
-    },
-    createBufferSource: () => {
-      state.source = {
-        buffer: null,
-        connections: [],
-        connect(node) { this.connections.push(node); },
-        start(time) { this.startedAt = time; },
-        stop(time) { this.stoppedAt = time; },
-      };
-      return state.source;
-    },
-    createBiquadFilter: () => {
-      const filter = { type: '', Q: { value: 0 }, frequency: parameters(), connect: () => {} };
-      state.filters.push(filter);
-      return filter;
-    },
-    createGain: () => {
-      const gain = { gain: parameters(), connect: () => {} };
-      state.gains.push(gain);
-      return gain;
-    },
-  };
+test('page turns preload and play the user-supplied MP3 from its beginning', async () => {
+  const created = [];
+  class FakeAudio {
+    constructor(source) {
+      this.src = source;
+      this.preload = 'none';
+      this.volume = 1;
+      this.currentTime = 0;
+      this.loadCalls = 0;
+      this.pauseCalls = 0;
+      this.playCalls = 0;
+      created.push(this);
+    }
+    load() { this.loadCalls += 1; }
+    pause() { this.pauseCalls += 1; }
+    play() { this.playCalls += 1; return Promise.resolve(); }
+  }
+  const previousAudio = globalThis.Audio;
+  globalThis.Audio = FakeAudio;
+  try {
+    assert.equal(preloadPageTurnSound(), true);
+    const audio = created[0];
+    assert.equal(audio.src, '/assets/audio/page-turn.mp3');
+    assert.equal(audio.preload, 'auto');
+    assert.equal(audio.loadCalls, 1);
+    assert.equal(playPageTurnSound(), true);
+    assert.equal(audio.playCalls, 1);
+    audio.currentTime = 0.4;
+    assert.equal(playPageTurnSound(), true);
+    assert.equal(audio.currentTime, 0);
+    assert.equal(audio.pauseCalls, 2);
+    assert.equal(audio.playCalls, 2);
+  } finally {
+    if (previousAudio === undefined) delete globalThis.Audio;
+    else globalThis.Audio = previousAudio;
+  }
 
-  assert.equal(playPageTurnSound(context), true);
-  assert.equal(state.buffer.numberOfChannels, 2);
-  assert.equal(state.buffer.length, 560);
-  assert.equal(state.buffer.sampleRate, 1000);
-  assert.ok(state.buffer.data.every((channel) => channel.some((sample) => sample !== 0)));
-  assert.ok(state.buffer.data.every((channel) => Math.abs(channel[0]) < 0.0001 && Math.abs(channel.at(-1)) < 0.001));
-  assert.ok(state.buffer.data.every((channel) => channel.some((sample) => Math.abs(sample) > 0.01)));
-  assert.equal(state.source.startedAt, 4);
-  assert.ok(Math.abs(state.source.stoppedAt - 4.56) < 0.0001);
-  assert.deepEqual(state.filters.map((filter) => filter.type), ['lowpass', 'highpass']);
-  assert.ok(state.filters[0].frequency.events.some(([kind, frequency]) => kind === 'ramp' && frequency === 1450));
-  assert.ok(state.filters[1].frequency.events.some(([kind, frequency]) => kind === 'ramp' && frequency === 2100));
-  assert.ok(state.gains[0].gain.events.some(([kind, gain]) => kind === 'ramp' && gain === 0.25));
-  assert.ok(state.gains[1].gain.events.some(([kind, gain]) => kind === 'ramp' && gain === 0.09));
+  const audioAsset = await readFile(new URL('../public/assets/audio/page-turn.mp3', import.meta.url));
+  assert.ok(audioAsset.byteLength > 10_000);
   const sound = await readFile(new URL('../src/lib/pageTurnSound.ts', import.meta.url), 'utf8');
-  assert.doesNotMatch(sound, /createOscillator/);
-  assert.match(sound, /paperGrain/);
-  assert.match(sound, /foldCrinkles/);
+  assert.match(sound, /assets\/audio\/page-turn\.mp3/);
 });
 
 test('gallery cards render names as noninteractive labels and page through touch gestures', async () => {
@@ -112,6 +93,7 @@ test('gallery cards render names as noninteractive labels and page through touch
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const manifest = JSON.parse(await readFile(new URL('../public/manifest.webmanifest', import.meta.url), 'utf8'));
   assert.match(app, /pageItems\.map\(\(item\) =>/);
+  assert.match(app, /preloadPageTurnSound\(\)/);
   assert.match(app, /onTouchEnd=\{handleGalleryTouchEnd\}/);
   assert.match(app, /<span className="sticker-name"[^>]*data-testid=\{`label-card-name-/);
   assert.doesNotMatch(app, /<button[^>]*className="sticker-name"[^>]*onClick=/);

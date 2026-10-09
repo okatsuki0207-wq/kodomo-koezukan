@@ -31,15 +31,15 @@ test('the last main screen is restored, the first visit starts at the start scre
   ]);
 });
 
-test('the start screen uses the seated reading mascot and animates a book-opening transition', async () => {
+test('the start screen uses the zukan mascot artwork and removes the duplicate cushion/book overlays', async () => {
   const start = await readFile(new URL('../src/components/StartScreen.tsx', import.meta.url), 'utf8');
   const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
   const transition = await readFile(new URL('../src/components/BookOpeningTransition.tsx', import.meta.url), 'utf8');
   const styles = await readFile(new URL('../src/index.css', import.meta.url), 'utf8');
-  assert.match(start, /character\/voicel_sit\.png/);
+  assert.match(start, /character\/voicel_zukan\.png/);
   assert.match(start, /data-testid="start-voicel"/);
-  assert.match(start, /start-reading-cushion/);
-  assert.match(start, /start-reading-book/);
+  assert.doesNotMatch(start, /start-reading-(?:cushion|book)/);
+  assert.doesNotMatch(styles, /start-reading-(?:cushion|book)/);
   assert.match(app, /openLibraryWithTransition/);
   assert.match(app, /visibilitychange/);
   assert.match(app, /pageshow/);
