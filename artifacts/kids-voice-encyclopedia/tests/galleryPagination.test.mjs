@@ -56,12 +56,21 @@ test('page turns preload and play the latest supplied paper-turn MP3 from its be
       this.pauseCalls = 0;
       this.playCalls = 0;
       this.listeners = new Map();
+      this.rejectNextPlay = false;
+      this.error = null;
       created.push(this);
     }
     load() { this.loadCalls += 1; }
     pause() { this.pauseCalls += 1; }
     addEventListener(name, callback) { this.listeners.set(name, callback); }
-    play() { this.playCalls += 1; return Promise.resolve(); }
+    play() {
+      this.playCalls += 1;
+      if (this.rejectNextPlay) {
+        this.rejectNextPlay = false;
+        return Promise.reject(Object.assign(new Error('blocked'), { name: 'NotAllowedError' }));
+      }
+      return Promise.resolve();
+    }
   }
   const previousAudio = globalThis.Audio;
   globalThis.Audio = FakeAudio;
@@ -70,7 +79,7 @@ test('page turns preload and play the latest supplied paper-turn MP3 from its be
     const audio = created[0];
     assert.equal(audio.src, '/assets/audio/page-turn-paper.mp3');
     assert.equal(audio.preload, 'auto');
-    assert.equal(audio.volume, 0.65);
+    assert.equal(audio.volume, 0.25);
     assert.equal(audio.loadCalls, 1);
     assert.equal(unlockPageTurnSound(), true);
     assert.equal(audio.muted, true);
@@ -85,6 +94,13 @@ test('page turns preload and play the latest supplied paper-turn MP3 from its be
     assert.equal(audio.currentTime, 0);
     assert.equal(audio.pauseCalls, 3);
     assert.equal(audio.playCalls, 3);
+    audio.rejectNextPlay = true;
+    assert.equal(playPageTurnSound(), true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(unlockPageTurnSound(), true, 'a later user gesture can retry after autoplay rejection');
+    await Promise.resolve();
+    assert.equal(audio.muted, false);
+    audio.error = { code: 4 };
     audio.listeners.get('error')?.();
     assert.equal(playPageTurnSound(), false);
   } finally {
@@ -110,8 +126,8 @@ test('gallery cards render names as noninteractive labels and page through touch
   const phraseDialog = await readFile(new URL('../src/components/BookPassphraseDialog.tsx', import.meta.url), 'utf8');
   const opening = await readFile(new URL('../src/components/BookOpeningTransition.tsx', import.meta.url), 'utf8');
   const openingTiming = await readFile(new URL('../src/lib/bookOpening.ts', import.meta.url), 'utf8');
-  const installDialog = await readFile(new URL('../src/components/InstallAppDialog.tsx', import.meta.url), 'utf8');
   const companion = await readFile(new URL('../src/components/FloatingVoicele.tsx', import.meta.url), 'utf8');
+  const shareDialog = await readFile(new URL('../src/components/ShareLinkDialog.tsx', import.meta.url), 'utf8');
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const manifest = JSON.parse(await readFile(new URL('../public/manifest.webmanifest', import.meta.url), 'utf8'));
   assert.match(app, /pageItems\.map\(\(item\) =>/);
@@ -159,12 +175,12 @@ test('gallery cards render names as noninteractive labels and page through touch
   assert.match(turnHandler, /playPageTurnSound\(\)/);
   assert.ok(turnHandler.indexOf('playPageTurnSound()') < turnHandler.indexOf('setPageTurnDirection'),
     'the sound is requested before React schedules the page-turn frame');
-  assert.match(app, /const PAGE_TURN_ANIMATION_MS = 750/);
+  assert.match(app, /const PAGE_TURN_ANIMATION_MS = 1_000/);
   assert.match(turnHandler, /}, PAGE_TURN_ANIMATION_MS\)/);
-  assert.match(styles, /\.sticker-collage\.page-turn-next \{[^}]*animation:book-page-next 750ms/);
-  assert.match(styles, /\.sticker-collage\.page-turn-previous \{[^}]*animation:book-page-previous 750ms/);
-  assert.match(styles, /animation:book-sheet-next 750ms/);
-  assert.match(styles, /animation:book-sheet-previous 750ms/);
+  assert.match(styles, /\.sticker-collage\.page-turn-next \{[^}]*animation:book-page-next 1000ms/);
+  assert.match(styles, /\.sticker-collage\.page-turn-previous \{[^}]*animation:book-page-previous 1000ms/);
+  assert.match(styles, /animation:book-sheet-next 1000ms/);
+  assert.match(styles, /animation:book-sheet-previous 1000ms/);
   assert.match(app, /if \(!hasActivePassphraseBook\(\)\)[\s\S]*setBookPassphraseOpen\(true\)/);
   assert.match(app, /useState\(\(\) => view === 'library' && !hasActivePassphraseBook\(\)\)/);
   assert.match(app, /activateBookForPassphrase\(passphrase\)/);
@@ -175,12 +191,16 @@ test('gallery cards render names as noninteractive labels and page through touch
   assert.match(phraseDialog, /認証ではありません/);
   assert.match(html, /name="apple-mobile-web-app-capable" content="yes"/);
   assert.match(html, /rel="manifest" href="\/manifest\.webmanifest"/);
-  assert.match(app, /addEventListener\('beforeinstallprompt'/);
-  assert.match(app, /addEventListener\('appinstalled'/);
-  assert.match(app, /prompt\.prompt\(\)/);
-  assert.match(installDialog, /Safariの「共有」ボタン/);
-  assert.match(installDialog, /ずかんのリンクを共有する/);
-  assert.match(app, /openInstallExperience/);
+  assert.match(app, /document\.addEventListener\('pointerdown', unlockOnTrustedGesture, true\)/);
+  assert.match(app, /document\.addEventListener\('touchstart', unlockOnTrustedGesture, \{ capture: true, passive: true \}\)/);
+  assert.match(app, /onClick=\{\(\) => \{ void shareEncyclopedia\(\); \}\} aria-label="ずかんを共有"/);
+  assert.doesNotMatch(app, /beforeinstallprompt|openInstallExperience|InstallAppDialog/);
+  assert.doesNotMatch(styles, /pwa-install-dialog|pwa-install-steps/);
+  assert.match(app, /navigator\.share/);
+  assert.match(app, /setShareLinkDialogOpen\(true\)/);
+  assert.match(app, /<ShareLinkDialog[\s\S]*?url=\{window\.location\.href\}/);
+  assert.match(shareDialog, /リンクをコピー/);
+  assert.match(shareDialog, /value=\{url\}[\s\S]*?readOnly/);
   assert.match(app, /BOOK_OPENING_AFTER_SELECTION_KEY/);
   assert.match(opening, /assets\/video\/book-opening\.mp4/);
   assert.match(opening, /assets\/video\/book-opening-poster\.jpg/);
@@ -189,10 +209,16 @@ test('gallery cards render names as noninteractive labels and page through touch
   assert.match(openingTiming, /openingMs: 3_100/);
   assert.match(companion, /voicel_sit\.png/);
   assert.match(companion, /voicel_zukan\.png/);
-  assert.match(app, /<FloatingVoicele \/>/);
+  assert.match(companion, /useLayoutEffect[\s\S]*?\[revision\]/);
+  assert.match(companion, /filter\(\(image\) => image !== previous\.image\)/);
+  assert.match(companion, /filter\(\(position\) => position !== previous\.position\)/);
+  assert.match(app, /setCompanionRevision\(\(revision\) => revision \+ 1\)/);
+  assert.match(app, /<FloatingVoicele revision=\{companionRevision\} \/>/);
+  assert.match(styles, /\.app-shell-library \.book-companion \{[^}]*width:clamp\(64px,20vw,88px\);[^}]*height:clamp\(80px,25vw,110px\)/);
   assert.match(styles, /\.app-shell-library \.book-companion-layer \{[^}]*pointer-events:none/);
   assert.match(styles, /\.app-shell-library \.book-companion \{[^}]*animation:book-companion-float/);
-  assert.match(styles, /\.app-shell-library \.sticker-add-card \{[^}]*var\(--rainbow-line\)/);
+  assert.match(styles, /\.app-shell-library \.sticker-add-card \{[^}]*border:0;[^}]*background:transparent;[^}]*box-shadow:none/);
+  assert.match(styles, /\.app-shell-library \.sticker-add-media \{[^}]*border:0;[^}]*background:var\(--rainbow-line\);[^}]*box-shadow:none/);
   assert.equal(manifest.display, 'standalone');
   assert.deepEqual(manifest.display_override, ['fullscreen', 'standalone']);
   assert.equal(manifest.theme_color, '#f8f9fa');

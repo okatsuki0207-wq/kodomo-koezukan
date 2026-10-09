@@ -869,8 +869,8 @@ button:focus-visible {
 .app-shell-library .book-companion {
   position:absolute;
   left:0;
-  width:clamp(36px,9vw,48px);
-  height:clamp(44px,12vw,62px);
+  width:clamp(64px,20vw,88px);
+  height:clamp(80px,25vw,110px);
   object-fit:contain;
   opacity:.9;
   filter:drop-shadow(0 3px 4px rgba(64,53,41,.16));
@@ -1060,11 +1060,11 @@ button:focus-visible {
   align-items:stretch;
   gap:2px;
   padding:0;
-  border:1px solid transparent;
+  border:0;
   border-radius:18px;
-  background:linear-gradient(180deg,rgba(255,255,255,.88),rgba(255,255,255,.54)) padding-box,var(--rainbow-line) border-box;
+  background:transparent;
   color:#766b7d;
-  box-shadow:0 3px 10px rgba(120,100,130,.1);
+  box-shadow:none;
 }
 .app-shell-library .sticker-add-media {
   width:min(100%,clamp(64px,calc(20dvh - 60px),108px));
@@ -1073,16 +1073,15 @@ button:focus-visible {
   place-self:center;
   display:grid;
   place-items:center;
-  border:1.5px solid transparent;
+  border:0;
   border-radius:24%;
-  background:linear-gradient(#fff,#fff) padding-box,var(--rainbow-line) border-box;
-  color:#ad788d;
-  box-shadow:0 4px 12px rgba(173,120,141,.12);
-  transition:transform .18s,box-shadow .18s;
+  background:var(--rainbow-line);
+  color:#796980;
+  box-shadow:none;
+  transition:transform .18s;
 }
 .app-shell-library .sticker-add-card:hover .sticker-add-media {
-  transform:translateY(-2px);
-  box-shadow:0 6px 16px rgba(173,120,141,.2);
+  transform:scale(1.035);
 }
 .app-shell-library .sticker-add-name {
   grid-row:2;
@@ -1097,12 +1096,12 @@ button:focus-visible {
 }
 .app-shell-library .sticker-collage.page-turn-next {
   transform-origin:left center;
-  animation:book-page-next 750ms cubic-bezier(.22,.68,.18,1) both;
+  animation:book-page-next 1000ms cubic-bezier(.22,.68,.18,1) both;
   will-change:transform,opacity;
 }
 .app-shell-library .sticker-collage.page-turn-previous {
   transform-origin:right center;
-  animation:book-page-previous 750ms cubic-bezier(.22,.68,.18,1) both;
+  animation:book-page-previous 1000ms cubic-bezier(.22,.68,.18,1) both;
   will-change:transform,opacity;
 }
 .app-shell-library .sticker-collage.page-turn-next::before,
@@ -1124,7 +1123,7 @@ button:focus-visible {
     linear-gradient(90deg,rgba(255,255,255,0) 0 72%,rgba(119,99,70,.08) 84%,rgba(255,255,255,.94) 91%,rgba(201,185,159,.72) 95%,rgba(255,255,255,.22) 100%),
     linear-gradient(90deg,#ece5d9 0,#fffefa 7%,#fffefb 80%,#e6ddcf 100%);
   box-shadow:18px 0 28px rgba(83,68,49,.22),inset -3px 0 5px rgba(113,91,63,.17);
-  animation:book-sheet-next 750ms cubic-bezier(.26,.62,.2,1) both;
+  animation:book-sheet-next 1000ms cubic-bezier(.26,.62,.2,1) both;
 }
 .app-shell-library .sticker-collage.page-turn-previous::before {
   transform-origin:right center;
@@ -1132,7 +1131,7 @@ button:focus-visible {
     linear-gradient(270deg,rgba(255,255,255,0) 0 72%,rgba(119,99,70,.08) 84%,rgba(255,255,255,.94) 91%,rgba(201,185,159,.72) 95%,rgba(255,255,255,.22) 100%),
     linear-gradient(270deg,#ece5d9 0,#fffefa 7%,#fffefb 80%,#e6ddcf 100%);
   box-shadow:-18px 0 28px rgba(83,68,49,.22),inset 3px 0 5px rgba(113,91,63,.17);
-  animation:book-sheet-previous 750ms cubic-bezier(.26,.62,.2,1) both;
+  animation:book-sheet-previous 1000ms cubic-bezier(.26,.62,.2,1) both;
 }
 .app-shell-library .sticker-collage.page-turn-next .sticker-item.is-playing,
 .app-shell-library .sticker-collage.page-turn-previous .sticker-item.is-playing {
@@ -1239,68 +1238,65 @@ button:focus-visible {
   .start-character .rg-char { width:min(86%,218px); height:74%; bottom:19px; }
 }
 
-.pwa-install-dialog {
+@media (prefers-reduced-motion:reduce) {
+  .app-shell-library .book-companion { animation:none; }
+}
+
+.share-link-dialog {
   width:min(100%,520px);
   max-height:min(88dvh,720px);
 }
-.pwa-install-dialog .dialog-head {
+.share-link-dialog .dialog-head {
   align-items:flex-start;
   gap:14px;
 }
-.pwa-install-icon {
+.share-link-icon {
   width:48px;
   height:48px;
   margin-bottom:12px;
   display:grid;
   place-items:center;
-  border:1px solid transparent;
   border-radius:16px;
-  background:linear-gradient(#fff,#fff) padding-box,var(--rainbow-line) border-box;
-  color:#8d718e;
+  background:var(--rainbow-line);
+  color:#806e82;
 }
-.pwa-install-steps {
-  display:grid;
-  gap:10px;
-  margin:18px 0;
-  padding:0;
-  list-style:none;
+.share-link-label {
+  display:block;
+  margin:18px 0 7px;
+  color:#756879;
+  font-size:13px;
+  font-weight:700;
 }
-.pwa-install-steps li {
-  display:grid;
-  gap:4px;
-  padding:13px 15px;
-  border:1px solid #ece5de;
-  border-radius:15px;
+.share-link-input {
+  width:100%;
+  min-height:46px;
+  padding:0 12px;
+  border:1px solid #e9e1e8;
+  border-radius:12px;
   background:#fffdfa;
-  color:#665f58;
-  line-height:1.65;
+  color:#5e5661;
+  font:inherit;
+  font-size:13px;
+  user-select:all;
 }
-.pwa-install-steps li strong { color:#726177; }
-.pwa-installed-note {
-  margin:18px 0;
-  padding:15px;
-  border-radius:15px;
-  background:#f2f5ee;
-  color:#5e705d;
-  line-height:1.7;
+.share-link-copy-hint {
+  margin:8px 0 0;
+  color:#8b6e77;
+  font-size:13px;
 }
-.pwa-share-link-button {
+.share-link-copy-button {
   width:100%;
   min-height:48px;
+  margin-top:16px;
   display:flex;
   align-items:center;
   justify-content:center;
   gap:9px;
-  border:1px solid #ead8d6;
+  border:0;
   border-radius:999px;
-  background:#fff;
-  color:#94685e;
+  background:var(--rainbow-line);
+  color:#665d6c;
   font:inherit;
   font-weight:700;
 }
-.pwa-share-link-button:hover { background:#fff8f5; }
-.pwa-share-link-button:focus-visible { outline:3px solid #c4a7c2; outline-offset:2px; }
-
-@media (prefers-reduced-motion:reduce) {
-  .app-shell-library .book-companion { animation:none; }
-}
+.share-link-copy-button:focus-visible { outline:3px solid #c4a7c2; outline-offset:2px; }

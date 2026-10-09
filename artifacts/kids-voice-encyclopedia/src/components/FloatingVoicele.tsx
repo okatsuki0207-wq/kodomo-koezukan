@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 
 const VOICELE_IMAGES = [
   'voicel_welcome.png',
@@ -16,17 +16,36 @@ const VOICELE_IMAGES = [
 ] as const;
 
 const GUTTER_POSITIONS = ['upper', 'middle', 'lower'] as const;
+type GutterPosition = typeof GUTTER_POSITIONS[number];
+type VoiceleAppearance = { image: typeof VOICELE_IMAGES[number]; position: GutterPosition; delay: string };
 
-export default function FloatingVoicele() {
-  const [appearance] = useState(() => ({
-    image: VOICELE_IMAGES[Math.floor(Math.random() * VOICELE_IMAGES.length)],
-    position: GUTTER_POSITIONS[Math.floor(Math.random() * GUTTER_POSITIONS.length)],
+function randomChoice<T>(values: readonly T[]) {
+  return values[Math.floor(Math.random() * values.length)];
+}
+
+function chooseAppearance(previous?: VoiceleAppearance): VoiceleAppearance {
+  const images = previous ? VOICELE_IMAGES.filter((image) => image !== previous.image) : VOICELE_IMAGES;
+  const positions = previous ? GUTTER_POSITIONS.filter((position) => position !== previous.position) : GUTTER_POSITIONS;
+  return {
+    image: randomChoice(images),
+    position: randomChoice(positions),
     delay: `-${(Math.random() * 3).toFixed(2)}s`,
-  }));
+  };
+}
+
+export default function FloatingVoicele({ revision }: { revision: number }) {
+  const [appearance, setAppearance] = useState(() => chooseAppearance());
+  const previousRevision = useRef(revision);
+  useLayoutEffect(() => {
+    if (previousRevision.current === revision) return;
+    previousRevision.current = revision;
+    setAppearance((previous) => chooseAppearance(previous));
+  }, [revision]);
 
   return (
     <div className="book-companion-layer" aria-hidden="true" data-testid="book-companion-layer">
       <img
+        key={`${revision}-${appearance.image}-${appearance.position}`}
         className={`book-companion book-companion-${appearance.position}`}
         src={`${import.meta.env.BASE_URL}character/${appearance.image}`}
         alt=""

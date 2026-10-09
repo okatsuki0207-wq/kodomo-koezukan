@@ -17,7 +17,6 @@ import {
   Share2,
   Scissors,
   Settings,
-  Smartphone,
   Square,
   Trash2,
   X,
@@ -39,7 +38,7 @@ import BookOpeningTransition from './components/BookOpeningTransition';
 import SettingsDialog from './components/SettingsDialog';
 import BookPassphraseDialog from './components/BookPassphraseDialog';
 import FloatingVoicele from './components/FloatingVoicele';
-import InstallAppDialog from './components/InstallAppDialog';
+import ShareLinkDialog from './components/ShareLinkDialog';
 import { useCategories } from './hooks/useCategories';
 import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, sortGalleryItems, type GallerySettings } from './lib/gallerySettings';
 import { COMPACT_GALLERY_PAGE_SIZE, clampGalleryPage, galleryPageCount, galleryPageItems, galleryPageSize, gallerySwipeDelta } from './lib/galleryPagination';
@@ -62,14 +61,9 @@ function formatDate(timestamp: number) {
   return new Intl.DateTimeFormat('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }).format(timestamp);
 }
 
-const PAGE_TURN_ANIMATION_MS = 750;
+const PAGE_TURN_ANIMATION_MS = 1_000;
 const READ_ONLY_MODE_STORAGE_KEY = 'kids-voice-encyclopedia:read-only-mode';
 const BOOK_OPENING_AFTER_SELECTION_KEY = 'kids-voice-encyclopedia:open-book-after-selection';
-
-type DeferredInstallPromptEvent = Event & {
-  prompt: () => Promise<unknown>;
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
-};
 
 function loadReadOnlyMode() {
   try {
@@ -79,13 +73,6 @@ function loadReadOnlyMode() {
   }
 }
 
-function isStandaloneApp() {
-  const displayModeStandalone = typeof window.matchMedia === 'function'
-    && window.matchMedia('(display-mode: standalone)').matches;
-  const iosStandalone = (navigator as Navigator & { standalone?: boolean }).standalone === true;
-  return displayModeStandalone || iosStandalone;
-}
-
 function App() {
   const [items, setItems] = useState<Keepsake[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -93,9 +80,7 @@ function App() {
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [readOnlyMode, setReadOnlyMode] = useState(loadReadOnlyMode);
   const [shareFeedback, setShareFeedback] = useState('');
-  const [installDialogOpen, setInstallDialogOpen] = useState(false);
-  const [appInstalled, setAppInstalled] = useState(isStandaloneApp);
-  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<DeferredInstallPromptEvent | null>(null);
+  const [shareLinkDialogOpen, setShareLinkDialogOpen] = useState(false);
   const shareFeedbackTimer = useRef<number | null>(null);
   const [view, setView] = useState<AppView>(() => {
     let saved: string | null = null;
@@ -141,6 +126,7 @@ function App() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [gridPage, setGridPage] = useState(0);
   const [pageTurnDirection, setPageTurnDirection] = useState<'next' | 'previous' | null>(null);
+  const [companionRevision, setCompanionRevision] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight);
   const galleryTouchStart = useRef<{ x: number; y: number } | null>(null);
   const pageTurnTimer = useRef<number | null>(null);
@@ -218,21 +204,16 @@ function App() {
   };
   useEffect(() => {
     preloadPageTurnSound();
-  }, []);
-  useEffect(() => {
-    const captureInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setDeferredInstallPrompt(event as DeferredInstallPromptEvent);
+    const unlockOnTrustedGesture = () => {
+      unlockPageTurnSound();
     };
-    const markInstalled = () => {
-      setAppInstalled(true);
-      setDeferredInstallPrompt(null);
-    };
-    window.addEventListener('beforeinstallprompt', captureInstallPrompt);
-    window.addEventListener('appinstalled', markInstalled);
+    document.addEventListener('pointerdown', unlockOnTrustedGesture, true);
+    document.addEventListener('touchstart', unlockOnTrustedGesture, { capture: true, passive: true });
+    document.addEventListener('keydown', unlockOnTrustedGesture, true);
     return () => {
-      window.removeEventListener('beforeinstallprompt', captureInstallPrompt);
-      window.removeEventListener('appinstalled', markInstalled);
+      document.removeEventListener('pointerdown', unlockOnTrustedGesture, true);
+      document.removeEventListener('touchstart', unlockOnTrustedGesture, true);
+      document.removeEventListener('keydown', unlockOnTrustedGesture, true);
     };
   }, []);
   useEffect(() => {
@@ -357,6 +338,7 @@ function App() {
     playPageTurnSound();
     setPageTurnDirection(delta > 0 ? 'next' : 'previous');
     setGridPage(nextPage);
+    setCompanionRevision((revision) => revision + 1);
     pageTurnTimer.current = window.setTimeout(() => {
       setPageTurnDirection(null);
       pageTurnTimer.current = null;
@@ -769,55 +751,38 @@ function App() {
 
   const shareEncyclopedia = async () => {
     const url = window.location.href;
-    try {
-      if (typeof navigator.share === 'function') {
+    if (typeof navigator.share === 'function') {
+      try {
         await navigator.share({
           title: 'こどもの こえずかん',
           text: 'わが家のずかんを見てね。',
           url,
         });
         return;
+      } catch (caught) {
+        if (caught instanceof Error && caught.name === 'AbortError') return;
       }
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API is unavailable');
-      await navigator.clipboard.writeText(url);
-      showShareFeedback('共有リンクをコピーしました。');
-    } catch (caught) {
-      if (caught instanceof Error && caught.name === 'AbortError') return;
-      showShareFeedback('共有リンクをコピーできませんでした。');
     }
+    if (await copyEncyclopediaLink()) return;
+    setShareLinkDialogOpen(true);
   };
 
-  const openInstallExperience = async () => {
-    const prompt = deferredInstallPrompt;
-    if (appInstalled || !prompt) {
-      setInstallDialogOpen(true);
-      return;
-    }
-
+  const copyEncyclopediaLink = async () => {
     try {
-      // Call prompt() synchronously from the click handler to preserve the
-      // browser's required user activation.
-      const promptResult = prompt.prompt();
-      setDeferredInstallPrompt(null);
-      await promptResult;
-      const choice = await prompt.userChoice;
-      if (choice.outcome === 'accepted') setAppInstalled(true);
-      else setInstallDialogOpen(true);
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API is unavailable');
+      await navigator.clipboard.writeText(window.location.href);
+      setShareLinkDialogOpen(false);
+      showShareFeedback('共有リンクをコピーしました。');
+      return true;
     } catch {
-      setDeferredInstallPrompt(null);
-      setInstallDialogOpen(true);
+      return false;
     }
-  };
-
-  const shareFromInstallDialog = () => {
-    setInstallDialogOpen(false);
-    void shareEncyclopedia();
   };
 
   const formatTime = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   return (
     <div className={`app-shell${view === 'library' ? ' app-shell-library' : ''}${bookOpeningPhase !== 'idle' ? ' is-opening-book' : ''}`}>
-      <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen || bookPassphraseOpen || installDialogOpen}>
+      <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen || bookPassphraseOpen || shareLinkDialogOpen}>
         <div className="topbar-row">
           <button type="button" className="brand brand-home" onClick={() => navigate('start')} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
             <span className="brand-mark"><BookOpen size={20} strokeWidth={1.8} /></span>
@@ -825,14 +790,14 @@ function App() {
           </button>
           <div className="topbar-actions">
             <button type="button" className="header-settings-button" onClick={() => { stopPlayback(); setSettingsOpen(true); }} disabled={settingsLoading} aria-label="設定" title="設定" data-testid="button-settings"><Settings size={17} /></button>
-            <button type="button" className="header-settings-button" onClick={() => { void openInstallExperience(); }} aria-label="ホーム画面に追加" title="ホーム画面に追加" data-testid="button-share"><Smartphone size={17} /></button>
+            <button type="button" className="header-settings-button" onClick={() => { void shareEncyclopedia(); }} aria-label="ずかんを共有" title="ずかんを共有" data-testid="button-share"><Share2 size={17} /></button>
           </div>
         </div>
       </header>
       {shareFeedback && <p className="share-feedback" role="status" data-testid="status-share-feedback">{shareFeedback}</p>}
 
       {view === 'start' ? (
-        <main className="start-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || bookPassphraseOpen || installDialogOpen}>
+        <main className="start-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || bookPassphraseOpen || shareLinkDialogOpen}>
           <StartScreen
             onRecord={openCreate}
             showRecordAction={!readOnlyMode}
@@ -841,11 +806,18 @@ function App() {
           />
         </main>
       ) : (
-      <main className="page-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || bookPassphraseOpen || installDialogOpen}>
+      <main className="page-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || bookPassphraseOpen || shareLinkDialogOpen}>
         <CategoryBar
           categories={categories}
           selected={selectedCategory}
-          onSelect={(id) => { stopPlayback(); setRecordPromptId(null); setSelectedCategory(id); setGridPage(0); }}
+          onSelect={(id) => {
+            if (id === selectedCategory) return;
+            stopPlayback();
+            setRecordPromptId(null);
+            setSelectedCategory(id);
+            setGridPage(0);
+            setCompanionRevision((revision) => revision + 1);
+          }}
           onNew={() => { if (!readOnlyMode) setCategoryOpen(true); }}
           showNew={!readOnlyMode}
           disabled={busy}
@@ -966,7 +938,7 @@ function App() {
         )}
 
         </div>
-        <FloatingVoicele />
+        <FloatingVoicele revision={companionRevision} />
         </div>
       </main>
       )}
@@ -1159,10 +1131,10 @@ function App() {
         onClose={() => setBookPassphraseOpen(false)}
         onSelect={selectBookAndReload}
       />}
-      {installDialogOpen && <InstallAppDialog
-        isInstalled={appInstalled}
-        onShare={shareFromInstallDialog}
-        onClose={() => setInstallDialogOpen(false)}
+      {shareLinkDialogOpen && <ShareLinkDialog
+        url={window.location.href}
+        onCopy={copyEncyclopediaLink}
+        onClose={() => setShareLinkDialogOpen(false)}
       />}
       {bookOpeningPhase !== 'idle' && <BookOpeningTransition phase={bookOpeningPhase} onFinished={beginBookOpeningGlow} />}
     </div>
