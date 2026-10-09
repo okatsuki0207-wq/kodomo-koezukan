@@ -8,7 +8,7 @@ import {
   galleryPageSize,
   gallerySwipeDelta,
 } from '../src/lib/galleryPagination.ts';
-import { playPageTurnSound, preloadPageTurnSound } from '../src/lib/pageTurnSound.ts';
+import { playPageTurnSound, preloadPageTurnSound, unlockPageTurnSound } from '../src/lib/pageTurnSound.ts';
 
 test('gallery uses four rows on short screens and five rows on taller screens', () => {
   assert.equal(galleryPageSize(568), 12);
@@ -50,14 +50,17 @@ test('page turns preload and play the latest supplied paper-turn MP3 from its be
       this.src = source;
       this.preload = 'none';
       this.volume = 1;
+      this.muted = false;
       this.currentTime = 0;
       this.loadCalls = 0;
       this.pauseCalls = 0;
       this.playCalls = 0;
+      this.listeners = new Map();
       created.push(this);
     }
     load() { this.loadCalls += 1; }
     pause() { this.pauseCalls += 1; }
+    addEventListener(name, callback) { this.listeners.set(name, callback); }
     play() { this.playCalls += 1; return Promise.resolve(); }
   }
   const previousAudio = globalThis.Audio;
@@ -68,13 +71,21 @@ test('page turns preload and play the latest supplied paper-turn MP3 from its be
     assert.equal(audio.src, '/assets/audio/page-turn-paper.mp3');
     assert.equal(audio.preload, 'auto');
     assert.equal(audio.loadCalls, 1);
+    assert.equal(unlockPageTurnSound(), true);
+    assert.equal(audio.muted, true);
+    await Promise.resolve();
+    assert.equal(audio.muted, false);
+    assert.equal(audio.pauseCalls, 1);
+    assert.equal(audio.currentTime, 0);
     assert.equal(playPageTurnSound(), true);
-    assert.equal(audio.playCalls, 1);
+    assert.equal(audio.playCalls, 2);
     audio.currentTime = 0.4;
     assert.equal(playPageTurnSound(), true);
     assert.equal(audio.currentTime, 0);
-    assert.equal(audio.pauseCalls, 2);
-    assert.equal(audio.playCalls, 2);
+    assert.equal(audio.pauseCalls, 3);
+    assert.equal(audio.playCalls, 3);
+    audio.listeners.get('error')?.();
+    assert.equal(playPageTurnSound(), false);
   } finally {
     if (previousAudio === undefined) delete globalThis.Audio;
     else globalThis.Audio = previousAudio;
@@ -88,6 +99,7 @@ test('page turns preload and play the latest supplied paper-turn MP3 from its be
   );
   const sound = await readFile(new URL('../src/lib/pageTurnSound.ts', import.meta.url), 'utf8');
   assert.match(sound, /assets\/audio\/page-turn-paper\.mp3/);
+  assert.match(sound, /export function unlockPageTurnSound\(\)/);
 });
 
 test('gallery cards render names as noninteractive labels and page through touch gestures', async () => {
@@ -98,6 +110,7 @@ test('gallery cards render names as noninteractive labels and page through touch
   const manifest = JSON.parse(await readFile(new URL('../public/manifest.webmanifest', import.meta.url), 'utf8'));
   assert.match(app, /pageItems\.map\(\(item\) =>/);
   assert.match(app, /preloadPageTurnSound\(\)/);
+  assert.match(app, /const openLibraryWithTransition = \(\) => \{[\s\S]*?unlockPageTurnSound\(\)/);
   assert.match(app, /onTouchEnd=\{handleGalleryTouchEnd\}/);
   assert.match(app, /<span className="sticker-name"[^>]*data-testid=\{`label-card-name-/);
   assert.doesNotMatch(app, /<button[^>]*className="sticker-name"[^>]*onClick=/);
@@ -123,6 +136,8 @@ test('gallery cards render names as noninteractive labels and page through touch
   assert.match(styles, /@keyframes book-sheet-previous/);
   assert.match(styles, /rotateY\(-178deg\)/);
   assert.match(styles, /rotateY\(178deg\)/);
+  assert.match(styles, /\.page-turn-next \.sticker-item\.is-playing \.sticker-photo-button,[\s\S]*?animation:none;[\s\S]*?transition:none/);
+  assert.match(styles, /\.page-turn-next \.voice-notes,[\s\S]*?\.page-turn-previous \.voice-notes \{[\s\S]*?display:none/);
   assert.match(app, /setPageTurnDirection\(delta > 0 \? 'next' : 'previous'\)/);
   assert.match(styles, /\.book-left-page-peek/);
   assert.match(styles, /\.book-hardcover/);

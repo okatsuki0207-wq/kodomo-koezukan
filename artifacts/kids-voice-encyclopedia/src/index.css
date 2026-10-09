@@ -1123,6 +1123,21 @@ button:focus-visible {
   box-shadow:-18px 0 28px rgba(83,68,49,.22),inset 3px 0 5px rgba(113,91,63,.17);
   animation:book-sheet-previous .76s cubic-bezier(.26,.62,.2,1) both;
 }
+.app-shell-library .sticker-collage.page-turn-next .sticker-item.is-playing,
+.app-shell-library .sticker-collage.page-turn-previous .sticker-item.is-playing {
+  z-index:auto;
+}
+.app-shell-library .sticker-collage.page-turn-next .sticker-item.is-playing .sticker-photo-button,
+.app-shell-library .sticker-collage.page-turn-previous .sticker-item.is-playing .sticker-photo-button {
+  transform:none;
+  box-shadow:none;
+  animation:none;
+  transition:none;
+}
+.app-shell-library .sticker-collage.page-turn-next .voice-notes,
+.app-shell-library .sticker-collage.page-turn-previous .voice-notes {
+  display:none;
+}
 @keyframes book-page-next {
   0% { opacity:.56; transform:translateX(25px) rotateY(-13deg) scale(.975); }
   42% { opacity:.94; transform:translateX(8px) rotateY(-5deg) scale(.99); }

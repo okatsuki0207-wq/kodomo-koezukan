@@ -39,7 +39,7 @@ import SettingsDialog from './components/SettingsDialog';
 import { useCategories } from './hooks/useCategories';
 import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, sortGalleryItems, type GallerySettings } from './lib/gallerySettings';
 import { COMPACT_GALLERY_PAGE_SIZE, clampGalleryPage, galleryPageCount, galleryPageItems, galleryPageSize, gallerySwipeDelta } from './lib/galleryPagination';
-import { playPageTurnSound, preloadPageTurnSound } from './lib/pageTurnSound';
+import { playPageTurnSound, preloadPageTurnSound, unlockPageTurnSound } from './lib/pageTurnSound';
 import { deleteKeepsake, editKeepsake, firebaseError, saveGallerySettings, saveKeepsake, subscribeGallerySettings, subscribeKeepsakes, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
 import { getVoices, type VoiceAsset } from './lib/voiceAssets';
 import { trimLeadingSilence } from './lib/audioTrim';
@@ -130,6 +130,7 @@ function App() {
   };
   const openLibraryWithTransition = () => {
     if (bookOpeningActive.current) return;
+    unlockPageTurnSound();
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
       navigate('library');
       return;
