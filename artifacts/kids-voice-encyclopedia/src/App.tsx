@@ -34,6 +34,7 @@ import { useNewKeepsakeDraft } from './hooks/useNewKeepsakeDraft';
 import { VoicePlayback, VoiceShuffleBag } from './lib/voicePlayback';
 import DetailDialogShell from './components/DetailDialogShell';
 import StartScreen from './components/StartScreen';
+import BookOpeningTransition from './components/BookOpeningTransition';
 import SettingsDialog from './components/SettingsDialog';
 import { useCategories } from './hooks/useCategories';
 import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, sortGalleryItems, type GallerySettings } from './lib/gallerySettings';
@@ -44,7 +45,8 @@ import { getVoices, type VoiceAsset } from './lib/voiceAssets';
 import { trimLeadingSilence } from './lib/audioTrim';
 import { preloadRecordingGuide } from './lib/recordingCue';
 import { hasNewKeepsakeDraftContent, type NewKeepsakeDraftInput } from './lib/newKeepsakeDraft';
-import { APP_VIEW_STORAGE_KEY, persistAppView, restoreAppView, type AppView } from './lib/appViewState';
+import { APP_LAST_ACTIVE_STORAGE_KEY, APP_VIEW_RESUME_WINDOW_MS, APP_VIEW_STORAGE_KEY, persistAppView, restoreAppView, type AppView } from './lib/appViewState';
+import { BOOK_OPENING_TIMING, type BookOpeningPhase } from './lib/bookOpening';
 import { isFirebaseConfigured } from './firebaseConfig';
 import './index.css';
 
@@ -76,9 +78,17 @@ function App() {
   const shareFeedbackTimer = useRef<number | null>(null);
   const [view, setView] = useState<AppView>(() => {
     let saved: string | null = null;
-    try { saved = window.localStorage.getItem(APP_VIEW_STORAGE_KEY); } catch { /* private browsing can block storage */ }
-    return restoreAppView(window.location.pathname, saved);
+    let lastActiveAt: string | null = null;
+    try {
+      saved = window.localStorage.getItem(APP_VIEW_STORAGE_KEY);
+      lastActiveAt = window.localStorage.getItem(APP_LAST_ACTIVE_STORAGE_KEY);
+    } catch { /* private browsing can block storage */ }
+    return restoreAppView(window.location.pathname, saved, lastActiveAt);
   });
+  const [bookOpeningPhase, setBookOpeningPhase] = useState<BookOpeningPhase>('idle');
+  const bookOpeningActive = useRef(false);
+  const bookOpeningTimers = useRef<number[]>([]);
+  const hiddenAt = useRef<number | null>(null);
   const [recordPromptId, setRecordPromptId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [detail, setDetail] = useState<Keepsake | null>(null);
@@ -118,6 +128,72 @@ function App() {
     setView(next);
     persistAppView(next);
   };
+  const openLibraryWithTransition = () => {
+    if (bookOpeningActive.current) return;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      navigate('library');
+      return;
+    }
+    bookOpeningActive.current = true;
+    bookOpeningTimers.current = [];
+    setBookOpeningPhase('fade');
+    const schedule = (delay: number, callback: () => void) => {
+      bookOpeningTimers.current.push(window.setTimeout(callback, delay));
+    };
+    const { fadeOutMs, openingMs, glowMs, revealMs } = BOOK_OPENING_TIMING;
+    schedule(fadeOutMs, () => setBookOpeningPhase('opening'));
+    schedule(fadeOutMs + openingMs, () => setBookOpeningPhase('glow'));
+    schedule(fadeOutMs + openingMs + glowMs, () => {
+      navigate('library');
+      setBookOpeningPhase('reveal');
+    });
+    schedule(fadeOutMs + openingMs + glowMs + revealMs, () => {
+      setBookOpeningPhase('idle');
+      bookOpeningActive.current = false;
+      bookOpeningTimers.current = [];
+    });
+  };
+  useEffect(() => {
+    const markActive = () => {
+      if (document.visibilityState === 'visible') persistAppView(view);
+    };
+    const markPageHide = () => {
+      hiddenAt.current = Date.now();
+      persistAppView(view, undefined, hiddenAt.current);
+    };
+    const handleReturn = () => {
+      const returnedAt = Date.now();
+      const wentHiddenAt = hiddenAt.current;
+      hiddenAt.current = null;
+      if (wentHiddenAt !== null
+        && returnedAt - wentHiddenAt >= APP_VIEW_RESUME_WINDOW_MS
+        && restoreAppView(window.location.pathname, view, wentHiddenAt, returnedAt) === 'start') {
+        setView('start');
+        persistAppView('start', undefined, returnedAt);
+        return;
+      }
+      persistAppView(view, undefined, returnedAt);
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenAt.current = Date.now();
+        persistAppView(view, undefined, hiddenAt.current);
+        return;
+      }
+      handleReturn();
+    };
+    markActive();
+    const interval = window.setInterval(markActive, 60_000);
+    window.addEventListener('pagehide', markPageHide);
+    window.addEventListener('pageshow', handleReturn);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('pagehide', markPageHide);
+      window.removeEventListener('pageshow', handleReturn);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [view]);
   useEffect(() => {
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
@@ -173,6 +249,11 @@ function App() {
   }, [selectedCategory, pageSize, readOnlyMode]);
   useEffect(() => () => {
     if (pageTurnTimer.current !== null) window.clearTimeout(pageTurnTimer.current);
+  }, []);
+  useEffect(() => () => {
+    for (const timer of bookOpeningTimers.current) window.clearTimeout(timer);
+    bookOpeningTimers.current = [];
+    bookOpeningActive.current = false;
   }, []);
   const turnGalleryPage = (delta: -1 | 1) => {
     const nextPage = clampGalleryPage(currentPage + delta, pageCount);
@@ -613,7 +694,7 @@ function App() {
 
   const formatTime = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   return (
-    <div className={`app-shell${view === 'library' ? ' app-shell-library' : ''}`}>
+    <div className={`app-shell${view === 'library' ? ' app-shell-library' : ''}${bookOpeningPhase !== 'idle' ? ' is-opening-book' : ''}`}>
       <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen}>
         <div className="topbar-row">
           <button type="button" className="brand brand-home" onClick={() => navigate('start')} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
@@ -630,7 +711,12 @@ function App() {
 
       {view === 'start' ? (
         <main className="start-main" inert={createOpen || !!detail || categoryOpen || settingsOpen}>
-          <StartScreen onRecord={openCreate} showRecordAction={!readOnlyMode} onOpenEncyclopedia={() => { createDraftSession.current++; navigate('library'); }} />
+          <StartScreen
+            onRecord={openCreate}
+            showRecordAction={!readOnlyMode}
+            onOpenEncyclopedia={() => { createDraftSession.current++; openLibraryWithTransition(); }}
+            isTransitioning={bookOpeningPhase !== 'idle'}
+          />
         </main>
       ) : (
       <main className="page-main" inert={createOpen || !!detail || categoryOpen || settingsOpen}>
@@ -642,6 +728,11 @@ function App() {
           showNew={!readOnlyMode}
           disabled={busy}
         />
+        <div className="book-spread-stage">
+        <div className="book-hardcover" aria-hidden="true" />
+        <div className="book-left-page-peek" aria-hidden="true">
+          <span className="book-left-page-lines" />
+        </div>
         <div id="category-panel" role="tabpanel" aria-labelledby={`category-tab-${selectedCategory ?? 'all'}`}>
         {loading ? <p className="notice neutral" role="status">Firebase から図鑑を読み込んでいます…</p> : visibleItems.length === 0 && readOnlyMode && selectedCategory === null ? (
           <section className="empty-state" data-testid="empty-keepsakes">
@@ -752,6 +843,7 @@ function App() {
           </>
         )}
 
+        </div>
         </div>
       </main>
       )}
@@ -933,6 +1025,7 @@ function App() {
           }
         }}
       />}
+      {bookOpeningPhase !== 'idle' && <BookOpeningTransition phase={bookOpeningPhase} />}
     </div>
   );
 }

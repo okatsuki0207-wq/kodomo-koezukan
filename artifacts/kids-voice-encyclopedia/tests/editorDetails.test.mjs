@@ -16,12 +16,39 @@ const { primeMicrophonePermission } = await load('microphonePermission');
 
 test('the last main screen is restored, the first visit starts at the start screen, and viewer routes open the library', () => {
   assert.equal(appViewState.restoreAppView('/', null), 'start');
-  assert.equal(appViewState.restoreAppView('/', 'library'), 'library');
-  assert.equal(appViewState.restoreAppView('/', 'start'), 'start');
-  assert.equal(appViewState.restoreAppView('/view/book-123', 'start'), 'library');
+  assert.equal(appViewState.restoreAppView('/', 'library', null, 100_000), 'start');
+  assert.equal(appViewState.restoreAppView('/', 'library', 100_001, 100_000), 'start');
+  assert.equal(appViewState.restoreAppView('/', 'library', 'not-a-timestamp', 100_001), 'start');
+  assert.equal(appViewState.restoreAppView('/', 'library', 100_000, 100_000 + appViewState.APP_VIEW_RESUME_WINDOW_MS - 1), 'library');
+  assert.equal(appViewState.restoreAppView('/', 'library', String(100_000), 100_000 + appViewState.APP_VIEW_RESUME_WINDOW_MS), 'start');
+  assert.equal(appViewState.restoreAppView('/', 'start', 100_000, 100_001), 'start');
+  assert.equal(appViewState.restoreAppView('/view/book-123', 'start', 0, 100_000), 'library');
   const writes = [];
-  appViewState.persistAppView('library', { setItem: (...args) => writes.push(args) });
-  assert.deepEqual(writes, [[appViewState.APP_VIEW_STORAGE_KEY, 'library']]);
+  appViewState.persistAppView('library', { setItem: (...args) => writes.push(args) }, 42_000);
+  assert.deepEqual(writes, [
+    [appViewState.APP_VIEW_STORAGE_KEY, 'library'],
+    [appViewState.APP_LAST_ACTIVE_STORAGE_KEY, '42000'],
+  ]);
+});
+
+test('the start screen uses the seated reading mascot and animates a book-opening transition', async () => {
+  const start = await readFile(new URL('../src/components/StartScreen.tsx', import.meta.url), 'utf8');
+  const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const transition = await readFile(new URL('../src/components/BookOpeningTransition.tsx', import.meta.url), 'utf8');
+  const styles = await readFile(new URL('../src/index.css', import.meta.url), 'utf8');
+  assert.match(start, /RecordingCharacter pose="sit"/);
+  assert.match(start, /start-reading-cushion/);
+  assert.match(start, /start-reading-book/);
+  assert.match(app, /openLibraryWithTransition/);
+  assert.match(app, /visibilitychange/);
+  assert.match(app, /pageshow/);
+  assert.match(app, /setInterval\(markActive, 60_000\)/);
+  assert.match(app, /returnedAt - wentHiddenAt >= APP_VIEW_RESUME_WINDOW_MS/);
+  assert.match(app, /setBookOpeningPhase\('reveal'\)/);
+  assert.match(transition, /book-opening-page-left/);
+  assert.match(transition, /book-opening-page-right/);
+  assert.match(styles, /@keyframes opening-page-left/);
+  assert.match(styles, /@keyframes opening-soft-light/);
 });
 
 test('a voiceless sticker tap reveals a recording icon without opening details or the editor', async () => {

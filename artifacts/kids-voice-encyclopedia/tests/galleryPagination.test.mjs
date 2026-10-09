@@ -43,52 +43,63 @@ test('gallery recognizes horizontal swipes and ignores short or mostly vertical 
   assert.equal(gallerySwipeDelta(200, 100, 120, 190), 0);
 });
 
-test('successful page turns play a brief, filtered, fading swish', () => {
+test('successful page turns play a layered, paper-like stereo rustle without electronic tones', async () => {
   const parameters = () => ({
     value: 0,
     events: [],
     setValueAtTime(value, time) { this.events.push(['set', value, time]); },
     exponentialRampToValueAtTime(value, time) { this.events.push(['ramp', value, time]); },
   });
-  const state = { source: null, filter: null, gain: null, buffer: null };
+  const state = { source: null, filters: [], gains: [], buffer: null, buffers: [] };
   const context = {
     currentTime: 4,
     sampleRate: 1000,
     state: 'running',
     destination: {},
-    createBuffer: (_channels, length, sampleRate) => {
-      const data = new Float32Array(length);
-      state.buffer = { length, sampleRate, getChannelData: () => data, data };
+    createBuffer: (channels, length, sampleRate) => {
+      const data = Array.from({ length: channels }, () => new Float32Array(length));
+      const buffer = { numberOfChannels: channels, length, sampleRate, getChannelData: (channel) => data[channel], data };
+      state.buffers.push(buffer);
+      state.buffer = buffer;
       return state.buffer;
     },
     createBufferSource: () => {
       state.source = {
         buffer: null,
-        connect: () => {},
+        connections: [],
+        connect(node) { this.connections.push(node); },
         start(time) { this.startedAt = time; },
         stop(time) { this.stoppedAt = time; },
       };
       return state.source;
     },
     createBiquadFilter: () => {
-      state.filter = { type: '', Q: { value: 0 }, frequency: parameters(), connect: () => {} };
-      return state.filter;
+      const filter = { type: '', Q: { value: 0 }, frequency: parameters(), connect: () => {} };
+      state.filters.push(filter);
+      return filter;
     },
     createGain: () => {
-      state.gain = { gain: parameters(), connect: () => {} };
-      return state.gain;
+      const gain = { gain: parameters(), connect: () => {} };
+      state.gains.push(gain);
+      return gain;
     },
   };
 
   assert.equal(playPageTurnSound(context), true);
-  assert.equal(state.buffer.length, 260);
+  assert.equal(state.buffer.numberOfChannels, 2);
+  assert.equal(state.buffer.length, 480);
   assert.equal(state.buffer.sampleRate, 1000);
-  assert.ok(state.buffer.data.some((sample) => sample !== 0));
+  assert.ok(state.buffer.data.every((channel) => channel.some((sample) => sample !== 0)));
   assert.equal(state.source.startedAt, 4);
-  assert.ok(Math.abs(state.source.stoppedAt - 4.26) < 0.0001);
-  assert.equal(state.filter.type, 'bandpass');
-  assert.ok(state.filter.frequency.events.some(([kind, frequency]) => kind === 'ramp' && frequency === 850));
-  assert.ok(state.gain.gain.events.some(([kind, gain]) => kind === 'ramp' && gain === 0.035));
+  assert.ok(Math.abs(state.source.stoppedAt - 4.48) < 0.0001);
+  assert.deepEqual(state.filters.map((filter) => filter.type), ['lowpass', 'highpass']);
+  assert.ok(state.filters[0].frequency.events.some(([kind, frequency]) => kind === 'ramp' && frequency === 1150));
+  assert.ok(state.filters[1].frequency.events.some(([kind, frequency]) => kind === 'ramp' && frequency === 1550));
+  assert.ok(state.gains[0].gain.events.some(([kind, gain]) => kind === 'ramp' && gain === 0.34));
+  assert.ok(state.gains[1].gain.events.some(([kind, gain]) => kind === 'ramp' && gain === 0.14));
+  const sound = await readFile(new URL('../src/lib/pageTurnSound.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(sound, /createOscillator/);
+  assert.match(sound, /paperGrain/);
 });
 
 test('gallery cards render names as noninteractive labels and page through touch gestures', async () => {
@@ -119,6 +130,8 @@ test('gallery cards render names as noninteractive labels and page through touch
   assert.match(styles, /\.app-shell-library \.sticker-photo \{[^}]*width:88%/);
   assert.match(styles, /@keyframes book-page-next/);
   assert.match(styles, /@keyframes book-sheet-next/);
+  assert.match(styles, /\.book-left-page-peek/);
+  assert.match(styles, /\.book-hardcover/);
   assert.match(styles, /#category-panel \{[^}]*box-shadow:[^;]+/);
   assert.match(styles, /0 4px 0 -1px #f3d7d7/);
   assert.doesNotMatch(styles, /#category-panel::before/);
