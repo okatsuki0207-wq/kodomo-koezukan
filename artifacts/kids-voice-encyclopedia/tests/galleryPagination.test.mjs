@@ -70,6 +70,7 @@ test('page turns preload and play the latest supplied paper-turn MP3 from its be
     const audio = created[0];
     assert.equal(audio.src, '/assets/audio/page-turn-paper.mp3');
     assert.equal(audio.preload, 'auto');
+    assert.equal(audio.volume, 0.65);
     assert.equal(audio.loadCalls, 1);
     assert.equal(unlockPageTurnSound(), true);
     assert.equal(audio.muted, true);
@@ -107,6 +108,10 @@ test('gallery cards render names as noninteractive labels and page through touch
   const styles = await readFile(new URL('../src/index.css', import.meta.url), 'utf8');
   const pagination = await readFile(new URL('../src/lib/galleryPagination.ts', import.meta.url), 'utf8');
   const phraseDialog = await readFile(new URL('../src/components/BookPassphraseDialog.tsx', import.meta.url), 'utf8');
+  const opening = await readFile(new URL('../src/components/BookOpeningTransition.tsx', import.meta.url), 'utf8');
+  const openingTiming = await readFile(new URL('../src/lib/bookOpening.ts', import.meta.url), 'utf8');
+  const installDialog = await readFile(new URL('../src/components/InstallAppDialog.tsx', import.meta.url), 'utf8');
+  const companion = await readFile(new URL('../src/components/FloatingVoicele.tsx', import.meta.url), 'utf8');
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const manifest = JSON.parse(await readFile(new URL('../public/manifest.webmanifest', import.meta.url), 'utf8'));
   assert.match(app, /pageItems\.map\(\(item\) =>/);
@@ -154,10 +159,12 @@ test('gallery cards render names as noninteractive labels and page through touch
   assert.match(turnHandler, /playPageTurnSound\(\)/);
   assert.ok(turnHandler.indexOf('playPageTurnSound()') < turnHandler.indexOf('setPageTurnDirection'),
     'the sound is requested before React schedules the page-turn frame');
-  assert.match(app, /const PAGE_TURN_ANIMATION_MS = 600/);
+  assert.match(app, /const PAGE_TURN_ANIMATION_MS = 750/);
   assert.match(turnHandler, /}, PAGE_TURN_ANIMATION_MS\)/);
-  assert.match(styles, /\.sticker-collage\.page-turn-next \{[^}]*animation:book-page-next 600ms/);
-  assert.match(styles, /\.sticker-collage\.page-turn-previous \{[^}]*animation:book-page-previous 600ms/);
+  assert.match(styles, /\.sticker-collage\.page-turn-next \{[^}]*animation:book-page-next 750ms/);
+  assert.match(styles, /\.sticker-collage\.page-turn-previous \{[^}]*animation:book-page-previous 750ms/);
+  assert.match(styles, /animation:book-sheet-next 750ms/);
+  assert.match(styles, /animation:book-sheet-previous 750ms/);
   assert.match(app, /if \(!hasActivePassphraseBook\(\)\)[\s\S]*setBookPassphraseOpen\(true\)/);
   assert.match(app, /useState\(\(\) => view === 'library' && !hasActivePassphraseBook\(\)\)/);
   assert.match(app, /activateBookForPassphrase\(passphrase\)/);
@@ -168,9 +175,31 @@ test('gallery cards render names as noninteractive labels and page through touch
   assert.match(phraseDialog, /認証ではありません/);
   assert.match(html, /name="apple-mobile-web-app-capable" content="yes"/);
   assert.match(html, /rel="manifest" href="\/manifest\.webmanifest"/);
+  assert.match(app, /addEventListener\('beforeinstallprompt'/);
+  assert.match(app, /addEventListener\('appinstalled'/);
+  assert.match(app, /prompt\.prompt\(\)/);
+  assert.match(installDialog, /Safariの「共有」ボタン/);
+  assert.match(installDialog, /ずかんのリンクを共有する/);
+  assert.match(app, /openInstallExperience/);
+  assert.match(app, /BOOK_OPENING_AFTER_SELECTION_KEY/);
+  assert.match(opening, /assets\/video\/book-opening\.mp4/);
+  assert.match(opening, /assets\/video\/book-opening-poster\.jpg/);
+  assert.match(opening, /playsInline/);
+  assert.match(opening, /muted/);
+  assert.match(openingTiming, /openingMs: 3_100/);
+  assert.match(companion, /voicel_sit\.png/);
+  assert.match(companion, /voicel_zukan\.png/);
+  assert.match(app, /<FloatingVoicele \/>/);
+  assert.match(styles, /\.app-shell-library \.book-companion-layer \{[^}]*pointer-events:none/);
+  assert.match(styles, /\.app-shell-library \.book-companion \{[^}]*animation:book-companion-float/);
+  assert.match(styles, /\.app-shell-library \.sticker-add-card \{[^}]*var\(--rainbow-line\)/);
   assert.equal(manifest.display, 'standalone');
   assert.deepEqual(manifest.display_override, ['fullscreen', 'standalone']);
   assert.equal(manifest.theme_color, '#f8f9fa');
+  const videoAsset = await readFile(new URL('../public/assets/video/book-opening.mp4', import.meta.url));
+  const videoPoster = await readFile(new URL('../public/assets/video/book-opening-poster.jpg', import.meta.url));
+  assert.ok(videoAsset.byteLength > 100_000);
+  assert.ok(videoPoster.byteLength > 1_000);
 });
 
 test('PWA home-screen icons are present at the dimensions declared by the manifest', async () => {

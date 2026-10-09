@@ -46,9 +46,10 @@ test('the start screen uses the zukan mascot artwork and removes the duplicate c
   assert.match(app, /setInterval\(markActive, 60_000\)/);
   assert.match(app, /returnedAt - wentHiddenAt >= APP_VIEW_RESUME_WINDOW_MS/);
   assert.match(app, /setBookOpeningPhase\('reveal'\)/);
-  assert.match(transition, /book-opening-page-left/);
-  assert.match(transition, /book-opening-page-right/);
-  assert.match(styles, /@keyframes opening-page-left/);
+  assert.match(transition, /data-testid="video-book-opening"/);
+  assert.match(transition, /assets\/video\/book-opening\.mp4/);
+  assert.match(transition, /onEnded=/);
+  assert.match(styles, /@keyframes opening-video-enter/);
   assert.match(styles, /@keyframes opening-soft-light/);
 });
 

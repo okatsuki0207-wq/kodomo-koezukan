@@ -17,6 +17,7 @@ import {
   Share2,
   Scissors,
   Settings,
+  Smartphone,
   Square,
   Trash2,
   X,
@@ -37,6 +38,8 @@ import StartScreen from './components/StartScreen';
 import BookOpeningTransition from './components/BookOpeningTransition';
 import SettingsDialog from './components/SettingsDialog';
 import BookPassphraseDialog from './components/BookPassphraseDialog';
+import FloatingVoicele from './components/FloatingVoicele';
+import InstallAppDialog from './components/InstallAppDialog';
 import { useCategories } from './hooks/useCategories';
 import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, sortGalleryItems, type GallerySettings } from './lib/gallerySettings';
 import { COMPACT_GALLERY_PAGE_SIZE, clampGalleryPage, galleryPageCount, galleryPageItems, galleryPageSize, gallerySwipeDelta } from './lib/galleryPagination';
@@ -59,8 +62,14 @@ function formatDate(timestamp: number) {
   return new Intl.DateTimeFormat('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }).format(timestamp);
 }
 
-const PAGE_TURN_ANIMATION_MS = 600;
+const PAGE_TURN_ANIMATION_MS = 750;
 const READ_ONLY_MODE_STORAGE_KEY = 'kids-voice-encyclopedia:read-only-mode';
+const BOOK_OPENING_AFTER_SELECTION_KEY = 'kids-voice-encyclopedia:open-book-after-selection';
+
+type DeferredInstallPromptEvent = Event & {
+  prompt: () => Promise<unknown>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+};
 
 function loadReadOnlyMode() {
   try {
@@ -70,6 +79,13 @@ function loadReadOnlyMode() {
   }
 }
 
+function isStandaloneApp() {
+  const displayModeStandalone = typeof window.matchMedia === 'function'
+    && window.matchMedia('(display-mode: standalone)').matches;
+  const iosStandalone = (navigator as Navigator & { standalone?: boolean }).standalone === true;
+  return displayModeStandalone || iosStandalone;
+}
+
 function App() {
   const [items, setItems] = useState<Keepsake[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -77,20 +93,27 @@ function App() {
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [readOnlyMode, setReadOnlyMode] = useState(loadReadOnlyMode);
   const [shareFeedback, setShareFeedback] = useState('');
+  const [installDialogOpen, setInstallDialogOpen] = useState(false);
+  const [appInstalled, setAppInstalled] = useState(isStandaloneApp);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<DeferredInstallPromptEvent | null>(null);
   const shareFeedbackTimer = useRef<number | null>(null);
   const [view, setView] = useState<AppView>(() => {
     let saved: string | null = null;
     let lastActiveAt: string | null = null;
+    let openAfterSelection = false;
     try {
       saved = window.localStorage.getItem(APP_VIEW_STORAGE_KEY);
       lastActiveAt = window.localStorage.getItem(APP_LAST_ACTIVE_STORAGE_KEY);
+      openAfterSelection = window.sessionStorage.getItem(BOOK_OPENING_AFTER_SELECTION_KEY) === '1';
     } catch { /* private browsing can block storage */ }
+    if (openAfterSelection) return 'start';
     return restoreAppView(window.location.pathname, saved, lastActiveAt);
   });
   const [bookPassphraseOpen, setBookPassphraseOpen] = useState(() => view === 'library' && !hasActivePassphraseBook());
   const [bookPassphraseMode, setBookPassphraseMode] = useState<'open' | 'switch'>('open');
   const [bookOpeningPhase, setBookOpeningPhase] = useState<BookOpeningPhase>('idle');
   const bookOpeningActive = useRef(false);
+  const bookOpeningGlowStarted = useRef(false);
   const bookOpeningTimers = useRef<number[]>([]);
   const hiddenAt = useRef<number | null>(null);
   const [recordPromptId, setRecordPromptId] = useState<string | null>(null);
@@ -132,6 +155,28 @@ function App() {
     setView(next);
     persistAppView(next);
   };
+  const beginBookOpeningGlow = () => {
+    if (!bookOpeningActive.current || bookOpeningGlowStarted.current) return;
+    bookOpeningGlowStarted.current = true;
+    for (const timer of bookOpeningTimers.current) window.clearTimeout(timer);
+    bookOpeningTimers.current = [];
+    setBookOpeningPhase('glow');
+
+    const { glowMs, revealMs } = BOOK_OPENING_TIMING;
+    const schedule = (delay: number, callback: () => void) => {
+      bookOpeningTimers.current.push(window.setTimeout(callback, delay));
+    };
+    schedule(glowMs, () => {
+      navigate('library');
+      setBookOpeningPhase('reveal');
+    });
+    schedule(glowMs + revealMs, () => {
+      setBookOpeningPhase('idle');
+      bookOpeningActive.current = false;
+      bookOpeningGlowStarted.current = false;
+      bookOpeningTimers.current = [];
+    });
+  };
   const openLibraryWithTransition = () => {
     if (bookOpeningActive.current) return;
     unlockPageTurnSound();
@@ -140,23 +185,17 @@ function App() {
       return;
     }
     bookOpeningActive.current = true;
+    bookOpeningGlowStarted.current = false;
     bookOpeningTimers.current = [];
     setBookOpeningPhase('fade');
     const schedule = (delay: number, callback: () => void) => {
       bookOpeningTimers.current.push(window.setTimeout(callback, delay));
     };
-    const { fadeOutMs, openingMs, glowMs, revealMs } = BOOK_OPENING_TIMING;
+    const { fadeOutMs, openingMs } = BOOK_OPENING_TIMING;
     schedule(fadeOutMs, () => setBookOpeningPhase('opening'));
-    schedule(fadeOutMs + openingMs, () => setBookOpeningPhase('glow'));
-    schedule(fadeOutMs + openingMs + glowMs, () => {
-      navigate('library');
-      setBookOpeningPhase('reveal');
-    });
-    schedule(fadeOutMs + openingMs + glowMs + revealMs, () => {
-      setBookOpeningPhase('idle');
-      bookOpeningActive.current = false;
-      bookOpeningTimers.current = [];
-    });
+    // The video normally starts the glow through its ended event. This timer
+    // prevents a stalled or unsupported video from trapping the transition.
+    schedule(fadeOutMs + openingMs + 1_000, beginBookOpeningGlow);
   };
   const requestLibraryOpen = () => {
     if (!hasActivePassphraseBook()) {
@@ -170,10 +209,41 @@ function App() {
   const selectBookAndReload = async (passphrase: string) => {
     await activateBookForPassphrase(passphrase);
     persistAppView('library');
+    try {
+      window.sessionStorage.setItem(BOOK_OPENING_AFTER_SELECTION_KEY, '1');
+    } catch {
+      // Continue opening the selected book even when session storage is unavailable.
+    }
     window.location.reload();
   };
   useEffect(() => {
     preloadPageTurnSound();
+  }, []);
+  useEffect(() => {
+    const captureInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setDeferredInstallPrompt(event as DeferredInstallPromptEvent);
+    };
+    const markInstalled = () => {
+      setAppInstalled(true);
+      setDeferredInstallPrompt(null);
+    };
+    window.addEventListener('beforeinstallprompt', captureInstallPrompt);
+    window.addEventListener('appinstalled', markInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', captureInstallPrompt);
+      window.removeEventListener('appinstalled', markInstalled);
+    };
+  }, []);
+  useEffect(() => {
+    let openAfterSelection = false;
+    try {
+      openAfterSelection = window.sessionStorage.getItem(BOOK_OPENING_AFTER_SELECTION_KEY) === '1';
+      if (openAfterSelection) window.sessionStorage.removeItem(BOOK_OPENING_AFTER_SELECTION_KEY);
+    } catch {
+      // No transition marker is available in restricted browsing modes.
+    }
+    if (openAfterSelection) openLibraryWithTransition();
   }, []);
   useEffect(() => {
     const markActive = () => {
@@ -276,6 +346,7 @@ function App() {
     for (const timer of bookOpeningTimers.current) window.clearTimeout(timer);
     bookOpeningTimers.current = [];
     bookOpeningActive.current = false;
+    bookOpeningGlowStarted.current = false;
   }, []);
   const turnGalleryPage = (delta: -1 | 1) => {
     const nextPage = clampGalleryPage(currentPage + delta, pageCount);
@@ -716,10 +787,37 @@ function App() {
     }
   };
 
+  const openInstallExperience = async () => {
+    const prompt = deferredInstallPrompt;
+    if (appInstalled || !prompt) {
+      setInstallDialogOpen(true);
+      return;
+    }
+
+    try {
+      // Call prompt() synchronously from the click handler to preserve the
+      // browser's required user activation.
+      const promptResult = prompt.prompt();
+      setDeferredInstallPrompt(null);
+      await promptResult;
+      const choice = await prompt.userChoice;
+      if (choice.outcome === 'accepted') setAppInstalled(true);
+      else setInstallDialogOpen(true);
+    } catch {
+      setDeferredInstallPrompt(null);
+      setInstallDialogOpen(true);
+    }
+  };
+
+  const shareFromInstallDialog = () => {
+    setInstallDialogOpen(false);
+    void shareEncyclopedia();
+  };
+
   const formatTime = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   return (
     <div className={`app-shell${view === 'library' ? ' app-shell-library' : ''}${bookOpeningPhase !== 'idle' ? ' is-opening-book' : ''}`}>
-      <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen || bookPassphraseOpen}>
+      <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen || bookPassphraseOpen || installDialogOpen}>
         <div className="topbar-row">
           <button type="button" className="brand brand-home" onClick={() => navigate('start')} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
             <span className="brand-mark"><BookOpen size={20} strokeWidth={1.8} /></span>
@@ -727,14 +825,14 @@ function App() {
           </button>
           <div className="topbar-actions">
             <button type="button" className="header-settings-button" onClick={() => { stopPlayback(); setSettingsOpen(true); }} disabled={settingsLoading} aria-label="設定" title="設定" data-testid="button-settings"><Settings size={17} /></button>
-            <button type="button" className="header-settings-button" onClick={() => { void shareEncyclopedia(); }} aria-label="ずかんを共有" title="ずかんを共有" data-testid="button-share"><Share2 size={17} /></button>
+            <button type="button" className="header-settings-button" onClick={() => { void openInstallExperience(); }} aria-label="ホーム画面に追加" title="ホーム画面に追加" data-testid="button-share"><Smartphone size={17} /></button>
           </div>
         </div>
       </header>
       {shareFeedback && <p className="share-feedback" role="status" data-testid="status-share-feedback">{shareFeedback}</p>}
 
       {view === 'start' ? (
-        <main className="start-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || bookPassphraseOpen}>
+        <main className="start-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || bookPassphraseOpen || installDialogOpen}>
           <StartScreen
             onRecord={openCreate}
             showRecordAction={!readOnlyMode}
@@ -743,7 +841,7 @@ function App() {
           />
         </main>
       ) : (
-      <main className="page-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || bookPassphraseOpen}>
+      <main className="page-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || bookPassphraseOpen || installDialogOpen}>
         <CategoryBar
           categories={categories}
           selected={selectedCategory}
@@ -868,6 +966,7 @@ function App() {
         )}
 
         </div>
+        <FloatingVoicele />
         </div>
       </main>
       )}
@@ -1060,7 +1159,12 @@ function App() {
         onClose={() => setBookPassphraseOpen(false)}
         onSelect={selectBookAndReload}
       />}
-      {bookOpeningPhase !== 'idle' && <BookOpeningTransition phase={bookOpeningPhase} />}
+      {installDialogOpen && <InstallAppDialog
+        isInstalled={appInstalled}
+        onShare={shareFromInstallDialog}
+        onClose={() => setInstallDialogOpen(false)}
+      />}
+      {bookOpeningPhase !== 'idle' && <BookOpeningTransition phase={bookOpeningPhase} onFinished={beginBookOpeningGlow} />}
     </div>
   );
 }

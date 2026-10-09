@@ -15,7 +15,7 @@ function getPageTurnAudio() {
   try {
     const audio = new Audio(pageTurnAudioUrl());
     audio.preload = 'auto';
-    audio.volume = 0.78;
+    audio.volume = 0.65;
     audio.addEventListener('error', () => {
       pageTurnSoundUnavailable = true;
       if (pageTurnAudio === audio) pageTurnAudio = null;
