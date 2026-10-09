@@ -2,7 +2,7 @@ let pageTurnAudio: HTMLAudioElement | null = null;
 
 function pageTurnAudioUrl() {
   const baseUrl = typeof import.meta.env === 'object' ? import.meta.env.BASE_URL : '/';
-  return `${baseUrl}assets/audio/page-turn.mp3`;
+  return `${baseUrl}assets/audio/page-turn-paper.mp3`;
 }
 
 function getPageTurnAudio() {

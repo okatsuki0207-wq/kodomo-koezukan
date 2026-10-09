@@ -268,7 +268,7 @@ function App() {
     pageTurnTimer.current = window.setTimeout(() => {
       setPageTurnDirection(null);
       pageTurnTimer.current = null;
-    }, 540);
+    }, 800);
   };
   const handleGalleryTouchStart = (event: TouchEvent<HTMLDivElement>) => {
     if (event.touches.length !== 1) {

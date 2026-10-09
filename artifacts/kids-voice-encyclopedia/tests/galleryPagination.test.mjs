@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import {
   clampGalleryPage,
   galleryPageCount,
@@ -43,7 +43,7 @@ test('gallery recognizes horizontal swipes and ignores short or mostly vertical 
   assert.equal(gallerySwipeDelta(200, 100, 120, 190), 0);
 });
 
-test('page turns preload and play the user-supplied MP3 from its beginning', async () => {
+test('page turns preload and play the latest supplied paper-turn MP3 from its beginning', async () => {
   const created = [];
   class FakeAudio {
     constructor(source) {
@@ -65,7 +65,7 @@ test('page turns preload and play the user-supplied MP3 from its beginning', asy
   try {
     assert.equal(preloadPageTurnSound(), true);
     const audio = created[0];
-    assert.equal(audio.src, '/assets/audio/page-turn.mp3');
+    assert.equal(audio.src, '/assets/audio/page-turn-paper.mp3');
     assert.equal(audio.preload, 'auto');
     assert.equal(audio.loadCalls, 1);
     assert.equal(playPageTurnSound(), true);
@@ -80,10 +80,14 @@ test('page turns preload and play the user-supplied MP3 from its beginning', asy
     else globalThis.Audio = previousAudio;
   }
 
-  const audioAsset = await readFile(new URL('../public/assets/audio/page-turn.mp3', import.meta.url));
+  const audioAsset = await readFile(new URL('../public/assets/audio/page-turn-paper.mp3', import.meta.url));
   assert.ok(audioAsset.byteLength > 10_000);
+  await assert.rejects(
+    access(new URL('../public/assets/audio/page-turn.mp3', import.meta.url)),
+    { code: 'ENOENT' },
+  );
   const sound = await readFile(new URL('../src/lib/pageTurnSound.ts', import.meta.url), 'utf8');
-  assert.match(sound, /assets\/audio\/page-turn\.mp3/);
+  assert.match(sound, /assets\/audio\/page-turn-paper\.mp3/);
 });
 
 test('gallery cards render names as noninteractive labels and page through touch gestures', async () => {
@@ -115,6 +119,11 @@ test('gallery cards render names as noninteractive labels and page through touch
   assert.match(styles, /\.app-shell-library \.sticker-photo \{[^}]*width:86%;[^}]*height:86%;[^}]*padding:2%;[^}]*object-fit:contain/);
   assert.match(styles, /@keyframes book-page-next/);
   assert.match(styles, /@keyframes book-sheet-next/);
+  assert.match(styles, /@keyframes book-page-previous/);
+  assert.match(styles, /@keyframes book-sheet-previous/);
+  assert.match(styles, /rotateY\(-178deg\)/);
+  assert.match(styles, /rotateY\(178deg\)/);
+  assert.match(app, /setPageTurnDirection\(delta > 0 \? 'next' : 'previous'\)/);
   assert.match(styles, /\.book-left-page-peek/);
   assert.match(styles, /\.book-hardcover/);
   assert.match(styles, /#category-panel \{[^}]*box-shadow:[^;]+/);
