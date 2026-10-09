@@ -4,18 +4,23 @@ import {
   type DocumentData, type Firestore, type QuerySnapshot,
 } from 'firebase/firestore';
 import { DEFAULT_CATEGORIES } from './categories.ts';
-import { createBookId, isBookId, type BookId } from './bookIdentity.ts';
+import { bookIdForPassphrase, createBookId, isBookId, type BookId } from './bookIdentity.ts';
+import { getActiveBookId, storeActiveBookId, type BookIdStorage } from './bookSelection.ts';
 
 export type OwnerBookContext = { bookId: BookId };
 
 let database: Firestore | null = null;
 let getUid: (() => Promise<string>) | null = null;
 let cachedContext: Promise<OwnerBookContext> | null = null;
+let cachedContextKey: string | null = null;
+let selectionStorage: BookIdStorage | undefined;
 
-export function configureBookRepository(db: Firestore, userId: () => Promise<string>) {
+export function configureBookRepository(db: Firestore, userId: () => Promise<string>, storage?: BookIdStorage) {
   database = db;
   getUid = userId;
   cachedContext = null;
+  cachedContextKey = null;
+  selectionStorage = storage;
 }
 
 function services() {
@@ -144,9 +149,9 @@ function sourceNamespace(path: string) {
 }
 
 /**
- * The app now has one public book for every browser and origin. On the first
- * open, copy old canonical and legacy Firestore records into it without
- * deleting or moving the original documents or Storage objects.
+ * Copy old canonical and legacy records into a selected destination book.
+ * Named passphrase books call this only for the one-time legacy import target.
+ * Original Firestore documents and Storage objects are never deleted or moved.
  */
 async function consolidateExistingData(db: Firestore, bookId: string) {
   const rootRef = bookDocument(db, bookId);
@@ -303,14 +308,75 @@ async function ensureOwnerBook(uid: string): Promise<OwnerBookContext> {
   return context;
 }
 
+const legacyImportMarker = (db: Firestore) => doc(db, 'appMetadata', 'passphrase-book-migration-v1');
+
+/**
+ * Creates a stable Firestore namespace for a passphrase. The first selected
+ * namespace adopts existing records once; later passphrases start independently.
+ */
+async function ensurePassphraseBook(db: Firestore, bookId: BookId): Promise<OwnerBookContext> {
+  const rootRef = bookDocument(db, bookId);
+  const markerRef = legacyImportMarker(db);
+  const adoptsExistingLibrary = await runTransaction(db, async (transaction) => {
+    const [root, marker] = await Promise.all([
+      transaction.get(rootRef),
+      transaction.get(markerRef),
+    ]);
+    if (!root.exists()) {
+      transaction.set(rootRef, {
+        migrationState: 'ready',
+        schemaVersion: 1,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+    if (!marker.exists()) {
+      transaction.set(markerRef, {
+        legacyImportBookId: bookId,
+        createdAt: serverTimestamp(),
+      });
+      return true;
+    }
+    return marker.data().legacyImportBookId === bookId;
+  });
+
+  // Existing documents/media are copied by reference only; source records and
+  // Storage objects are retained. A repeated attempt is idempotent.
+  if (adoptsExistingLibrary) await consolidateExistingData(db, bookId);
+  return { bookId };
+}
+
+export async function activateBookForPassphrase(passphrase: string): Promise<OwnerBookContext> {
+  const { db } = services();
+  const bookId = await bookIdForPassphrase(passphrase);
+  const context = await ensurePassphraseBook(db, bookId);
+  storeActiveBookId(bookId, selectionStorage);
+  cachedContextKey = bookId;
+  cachedContext = Promise.resolve(context);
+  return context;
+}
+
+export function hasActivePassphraseBook() {
+  return getActiveBookId(selectionStorage) !== null;
+}
+
 export async function getOwnerBookContext(): Promise<OwnerBookContext> {
-  const { userId } = services();
-  const uid = await userId();
-  if (!cachedContext) {
-    cachedContext = ensureOwnerBook(uid).catch((error) => {
-      cachedContext = null;
+  const { db, userId } = services();
+  const activeBookId = getActiveBookId(selectionStorage);
+  const contextKey = activeBookId ?? 'legacy-default';
+  if (!cachedContext || cachedContextKey !== contextKey) {
+    const pending = activeBookId
+      ? ensurePassphraseBook(db, activeBookId)
+      : userId().then((uid) => ensureOwnerBook(uid));
+    const guarded = pending.catch((error) => {
+      if (cachedContext === guarded) {
+        cachedContext = null;
+        cachedContextKey = null;
+      }
       throw error;
     });
+    cachedContext = guarded;
+    cachedContextKey = contextKey;
   }
   return cachedContext;
 }

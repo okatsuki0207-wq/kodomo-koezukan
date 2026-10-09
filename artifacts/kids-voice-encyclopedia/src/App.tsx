@@ -36,11 +36,12 @@ import DetailDialogShell from './components/DetailDialogShell';
 import StartScreen from './components/StartScreen';
 import BookOpeningTransition from './components/BookOpeningTransition';
 import SettingsDialog from './components/SettingsDialog';
+import BookPassphraseDialog from './components/BookPassphraseDialog';
 import { useCategories } from './hooks/useCategories';
 import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, sortGalleryItems, type GallerySettings } from './lib/gallerySettings';
 import { COMPACT_GALLERY_PAGE_SIZE, clampGalleryPage, galleryPageCount, galleryPageItems, galleryPageSize, gallerySwipeDelta } from './lib/galleryPagination';
 import { playPageTurnSound, preloadPageTurnSound, unlockPageTurnSound } from './lib/pageTurnSound';
-import { deleteKeepsake, editKeepsake, firebaseError, saveGallerySettings, saveKeepsake, subscribeGallerySettings, subscribeKeepsakes, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
+import { activateBookForPassphrase, deleteKeepsake, editKeepsake, firebaseError, hasActivePassphraseBook, saveGallerySettings, saveKeepsake, subscribeGallerySettings, subscribeKeepsakes, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
 import { getVoices, type VoiceAsset } from './lib/voiceAssets';
 import { trimLeadingSilence } from './lib/audioTrim';
 import { preloadRecordingGuide } from './lib/recordingCue';
@@ -58,6 +59,7 @@ function formatDate(timestamp: number) {
   return new Intl.DateTimeFormat('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }).format(timestamp);
 }
 
+const PAGE_TURN_ANIMATION_MS = 600;
 const READ_ONLY_MODE_STORAGE_KEY = 'kids-voice-encyclopedia:read-only-mode';
 
 function loadReadOnlyMode() {
@@ -85,6 +87,8 @@ function App() {
     } catch { /* private browsing can block storage */ }
     return restoreAppView(window.location.pathname, saved, lastActiveAt);
   });
+  const [bookPassphraseOpen, setBookPassphraseOpen] = useState(() => view === 'library' && !hasActivePassphraseBook());
+  const [bookPassphraseMode, setBookPassphraseMode] = useState<'open' | 'switch'>('open');
   const [bookOpeningPhase, setBookOpeningPhase] = useState<BookOpeningPhase>('idle');
   const bookOpeningActive = useRef(false);
   const bookOpeningTimers = useRef<number[]>([]);
@@ -153,6 +157,20 @@ function App() {
       bookOpeningActive.current = false;
       bookOpeningTimers.current = [];
     });
+  };
+  const requestLibraryOpen = () => {
+    if (!hasActivePassphraseBook()) {
+      setBookPassphraseMode('open');
+      setBookPassphraseOpen(true);
+      return;
+    }
+    createDraftSession.current++;
+    openLibraryWithTransition();
+  };
+  const selectBookAndReload = async (passphrase: string) => {
+    await activateBookForPassphrase(passphrase);
+    persistAppView('library');
+    window.location.reload();
   };
   useEffect(() => {
     preloadPageTurnSound();
@@ -263,13 +281,15 @@ function App() {
     const nextPage = clampGalleryPage(currentPage + delta, pageCount);
     if (nextPage === currentPage) return;
     if (pageTurnTimer.current !== null) window.clearTimeout(pageTurnTimer.current);
+    // Start buffered sound in the accepted swipe/button gesture, then commit the
+    // page state in the same frame so the paper motion follows the sound onset.
+    playPageTurnSound();
     setPageTurnDirection(delta > 0 ? 'next' : 'previous');
     setGridPage(nextPage);
-    playPageTurnSound();
     pageTurnTimer.current = window.setTimeout(() => {
       setPageTurnDirection(null);
       pageTurnTimer.current = null;
-    }, 800);
+    }, PAGE_TURN_ANIMATION_MS);
   };
   const handleGalleryTouchStart = (event: TouchEvent<HTMLDivElement>) => {
     if (event.touches.length !== 1) {
@@ -699,7 +719,7 @@ function App() {
   const formatTime = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   return (
     <div className={`app-shell${view === 'library' ? ' app-shell-library' : ''}${bookOpeningPhase !== 'idle' ? ' is-opening-book' : ''}`}>
-      <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen}>
+      <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen || bookPassphraseOpen}>
         <div className="topbar-row">
           <button type="button" className="brand brand-home" onClick={() => navigate('start')} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
             <span className="brand-mark"><BookOpen size={20} strokeWidth={1.8} /></span>
@@ -714,16 +734,16 @@ function App() {
       {shareFeedback && <p className="share-feedback" role="status" data-testid="status-share-feedback">{shareFeedback}</p>}
 
       {view === 'start' ? (
-        <main className="start-main" inert={createOpen || !!detail || categoryOpen || settingsOpen}>
+        <main className="start-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || bookPassphraseOpen}>
           <StartScreen
             onRecord={openCreate}
             showRecordAction={!readOnlyMode}
-            onOpenEncyclopedia={() => { createDraftSession.current++; openLibraryWithTransition(); }}
+            onOpenEncyclopedia={requestLibraryOpen}
             isTransitioning={bookOpeningPhase !== 'idle'}
           />
         </main>
       ) : (
-      <main className="page-main" inert={createOpen || !!detail || categoryOpen || settingsOpen}>
+      <main className="page-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || bookPassphraseOpen}>
         <CategoryBar
           categories={categories}
           selected={selectedCategory}
@@ -1019,6 +1039,12 @@ function App() {
         settings={gallerySettings}
         readOnlyMode={readOnlyMode}
         onToggleReadOnlyMode={() => setReadOnlyMode((enabled) => !enabled)}
+        onSwitchBook={() => {
+          stopPlayback();
+          setSettingsOpen(false);
+          setBookPassphraseMode('switch');
+          setBookPassphraseOpen(true);
+        }}
         onClose={() => setSettingsOpen(false)}
         onSave={async (next) => {
           try {
@@ -1028,6 +1054,11 @@ function App() {
             throw new Error(firebaseError(caught));
           }
         }}
+      />}
+      {bookPassphraseOpen && <BookPassphraseDialog
+        mode={bookPassphraseMode}
+        onClose={() => setBookPassphraseOpen(false)}
+        onSelect={selectBookAndReload}
       />}
       {bookOpeningPhase !== 'idle' && <BookOpeningTransition phase={bookOpeningPhase} />}
     </div>

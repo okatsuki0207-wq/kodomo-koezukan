@@ -7,7 +7,9 @@ import { ref, uploadBytes, getDownloadURL, getMetadata, getBytes, deleteObject, 
 import { createKeepsakeRepository } from '../src/lib/keepsakeRepository.ts';
 import { createUnusedMediaService, MEDIA_RETENTION_MS } from '../src/lib/unusedMedia.ts';
 import { createKeepsakeEditor } from '../src/lib/keepsakeEditor.ts';
-import { configureBookRepository, getOwnerBookContext } from '../src/lib/bookRepository.ts';
+import { activateBookForPassphrase, configureBookRepository, getOwnerBookContext } from '../src/lib/bookRepository.ts';
+import { bookIdForPassphrase } from '../src/lib/bookIdentity.ts';
+import { ACTIVE_BOOK_ID_STORAGE_KEY } from '../src/lib/bookSelection.ts';
 
 const projectId = 'demo-keepsakes-test';
 const storageOrigin = 'http://127.0.0.1:9197';
@@ -20,6 +22,11 @@ assert.equal(process.env.FIRESTORE_EMULATOR_HOST, '127.0.0.1:8087');
 assert.equal(process.env.FIREBASE_STORAGE_EMULATOR_HOST, '127.0.0.1:9197');
 
 const photoBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
+const selectedBookValues = new Map();
+const selectedBookStorage = {
+  getItem: (key) => selectedBookValues.get(key) ?? null,
+  setItem: (key, value) => selectedBookValues.set(key, value),
+};
 // 10 ms silent mono PCM WAV, generated in memory (no family media).
 const voiceBytes = Buffer.alloc(204);
 voiceBytes.write('RIFF'); voiceBytes.writeUInt32LE(196, 4); voiceBytes.write('WAVEfmt ', 8);
@@ -51,6 +58,7 @@ before(async () => {
 });
 beforeEach(async () => {
   await env.clearFirestore();
+  selectedBookValues.clear();
   // rules-unit-testing clearStorage() only deletes root-level items in its default
   // bucket, not nested prefixes or explicitly selected buckets. Clean both demo
   // buckets recursively so every inventory test starts with truly isolated data.
@@ -123,6 +131,42 @@ test('media editing atomically replaces photo/voice, adds clips, preserves dates
   assert.equal(restored.createdAt.toMillis(), original.createdAt.toMillis());
   await repo.deleteKeepsake(changed);
   for (const v of changed.voices) await assert.rejects(getMetadata(ref(alice.storage, v.path)), (e) => e.code === 'storage/object-not-found');
+});
+
+test('passphrase books stay isolated across devices and only the first adopts existing records', async () => {
+  const legacyCard = {
+    itemName: '引き継ぐキロク',
+    photo: 'https://firebasestorage.googleapis.com/v0/b/demo/o/old-photo',
+    photoPath: 'users/public/keepsakes/legacy/photo',
+    voice: 'https://firebasestorage.googleapis.com/v0/b/demo/o/old-voice',
+    voicePath: 'users/public/keepsakes/legacy/voice',
+    createdAt: 1_700_000_000_000,
+  };
+  await setDoc(doc(alice.db, 'books', BOOK_ALICE, 'cards', 'legacy-card'), legacyCard);
+  configureBookRepository(alice.db, async () => 'alice', selectedBookStorage);
+
+  const first = await activateBookForPassphrase('あいちゃん');
+  const expectedId = await bookIdForPassphrase('あいちゃん');
+  assert.equal(first.bookId, expectedId);
+  assert.equal(selectedBookValues.get(ACTIVE_BOOK_ID_STORAGE_KEY), expectedId);
+  assert.equal(
+    (await getDocFromServer(doc(alice.db, 'books', expectedId, 'cards', 'legacy-card'))).data().itemName,
+    legacyCard.itemName,
+  );
+  assert.equal((await getDocFromServer(doc(alice.db, 'books', BOOK_ALICE, 'cards', 'legacy-card'))).exists(), true,
+    'legacy source data remains available');
+
+  await setDoc(doc(alice.db, 'books', expectedId, 'cards', 'device-sync-check'), { itemName: '別端末から見える' });
+  selectedBookValues.clear();
+  configureBookRepository(bob.db, async () => 'bob', selectedBookStorage);
+  const sameBookOnOtherDevice = await activateBookForPassphrase('あいちゃん');
+  assert.equal(sameBookOnOtherDevice.bookId, expectedId);
+  assert.equal((await getDocFromServer(doc(bob.db, 'books', expectedId, 'cards', 'device-sync-check'))).data().itemName, '別端末から見える');
+
+  const second = await activateBookForPassphrase('たろう');
+  assert.notEqual(second.bookId, expectedId);
+  assert.equal((await getDocs(collection(bob.db, 'books', second.bookId, 'cards'))).size, 0,
+    'later passphrases begin as independent books instead of importing the first');
 });
 
 test('voice-less card accepts added audio, metadata edits upload nothing, maximum five is enforced', async () => {

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Eye, Shuffle, X } from 'lucide-react';
+import { ArrowRightLeft, Eye, Shuffle, X } from 'lucide-react';
 import { normalizeGallerySettings, type GallerySettings } from '../lib/gallerySettings';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 
@@ -7,6 +7,7 @@ type Props = {
   settings: GallerySettings;
   readOnlyMode: boolean;
   onToggleReadOnlyMode: () => void;
+  onSwitchBook: () => void;
   onSave: (settings: GallerySettings) => Promise<void>;
   onClose: () => void;
 };
@@ -22,6 +23,7 @@ export default function SettingsDialog({
   settings,
   readOnlyMode,
   onToggleReadOnlyMode,
+  onSwitchBook,
   onSave,
   onClose,
 }: Props) {
@@ -94,6 +96,19 @@ export default function SettingsDialog({
                 <small>{settings.displayMode === 'shuffle' ? 'オン：最新のキロクが先頭、ほかはランダムに並びます。' : 'オフ：新しいキロクから順に並びます。'}</small>
               </span>
               <span className={`settings-switch${settings.displayMode === 'shuffle' ? ' is-on' : ''}`} aria-hidden="true"><span /></span>
+            </button>
+            <button
+              type="button"
+              className="settings-mode-option settings-book-switch"
+              disabled={busy}
+              onClick={onSwitchBook}
+              data-testid="setting-switch-book"
+            >
+              <ArrowRightLeft size={18} />
+              <span className="settings-option-copy">
+                <strong>あいことばを切り替える</strong>
+                <small>別の図鑑をひらきます。</small>
+              </span>
             </button>
           </div>
         </section>

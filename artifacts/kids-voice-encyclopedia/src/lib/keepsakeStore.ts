@@ -6,7 +6,7 @@ import { storageFailureMessage } from './storageDiagnostics';
 import { createKeepsakeRepository, FirebaseTimeoutError, type Keepsake } from './keepsakeRepository';
 import { createKeepsakeEditor } from './keepsakeEditor';
 import { createUnusedMediaService } from './unusedMedia';
-import { configureBookRepository, getOwnerBookContext } from './bookRepository';
+import { activateBookForPassphrase, configureBookRepository, getOwnerBookContext, hasActivePassphraseBook } from './bookRepository';
 export type { Keepsake } from './keepsakeRepository';
 import { categoryIdForName, DEFAULT_CATEGORIES, keepsakeMetadata, validateCategoryId, validateCategoryName, type Category } from './categories';
 import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, type GallerySettings } from './gallerySettings';
@@ -37,6 +37,8 @@ async function userId(): Promise<string> {
 }
 
 if (db) configureBookRepository(db, userId);
+
+export { activateBookForPassphrase, hasActivePassphraseBook };
 
 const repository = createKeepsakeRepository(db!, storage!, userId, currentBookId);
 export const { saveKeepsake, deleteKeepsake } = repository;

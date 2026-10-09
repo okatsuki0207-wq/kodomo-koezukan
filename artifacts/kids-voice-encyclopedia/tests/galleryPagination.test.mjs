@@ -106,6 +106,7 @@ test('gallery cards render names as noninteractive labels and page through touch
   const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
   const styles = await readFile(new URL('../src/index.css', import.meta.url), 'utf8');
   const pagination = await readFile(new URL('../src/lib/galleryPagination.ts', import.meta.url), 'utf8');
+  const phraseDialog = await readFile(new URL('../src/components/BookPassphraseDialog.tsx', import.meta.url), 'utf8');
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const manifest = JSON.parse(await readFile(new URL('../public/manifest.webmanifest', import.meta.url), 'utf8'));
   assert.match(app, /pageItems\.map\(\(item\) =>/);
@@ -149,7 +150,22 @@ test('gallery cards render names as noninteractive labels and page through touch
   assert.match(styles, /touch-action:pan-x pinch-zoom/);
   assert.match(styles, /\.gallery-page-viewport \{[^}]*touch-action:none/);
   assert.match(pagination, /threshold = 72/);
-  assert.match(app.slice(app.indexOf('const turnGalleryPage'), app.indexOf('const handleGalleryTouchStart')), /playPageTurnSound\(\)/);
+  const turnHandler = app.slice(app.indexOf('const turnGalleryPage'), app.indexOf('const handleGalleryTouchStart'));
+  assert.match(turnHandler, /playPageTurnSound\(\)/);
+  assert.ok(turnHandler.indexOf('playPageTurnSound()') < turnHandler.indexOf('setPageTurnDirection'),
+    'the sound is requested before React schedules the page-turn frame');
+  assert.match(app, /const PAGE_TURN_ANIMATION_MS = 600/);
+  assert.match(turnHandler, /}, PAGE_TURN_ANIMATION_MS\)/);
+  assert.match(styles, /\.sticker-collage\.page-turn-next \{[^}]*animation:book-page-next 600ms/);
+  assert.match(styles, /\.sticker-collage\.page-turn-previous \{[^}]*animation:book-page-previous 600ms/);
+  assert.match(app, /if \(!hasActivePassphraseBook\(\)\)[\s\S]*setBookPassphraseOpen\(true\)/);
+  assert.match(app, /useState\(\(\) => view === 'library' && !hasActivePassphraseBook\(\)\)/);
+  assert.match(app, /activateBookForPassphrase\(passphrase\)/);
+  assert.match(app, /setBookPassphraseMode\('switch'\)/);
+  assert.match(app, /onSwitchBook=\{\(\) =>/);
+  assert.match(phraseDialog, /autoComplete="off"/);
+  assert.doesNotMatch(phraseDialog, /autoFocus/);
+  assert.match(phraseDialog, /認証ではありません/);
   assert.match(html, /name="apple-mobile-web-app-capable" content="yes"/);
   assert.match(html, /rel="manifest" href="\/manifest\.webmanifest"/);
   assert.equal(manifest.display, 'standalone');

@@ -66,7 +66,9 @@ if (!vm.SourceTextModule) {
       './unusedMedia': { createUnusedMediaService: () => { throw new Error('Metadata edits must not inspect or delete unused media'); } },
       './keepsakeEditor': { createKeepsakeEditor: () => ({ editKeepsake: () => { throw new Error('Not a metadata-only operation'); } }) },
       './bookRepository': {
+        activateBookForPassphrase: async () => ({ bookId: 'test-book' }),
         configureBookRepository: () => {},
+        hasActivePassphraseBook: () => false,
         getOwnerBookContext: async () => ({ bookId: 'test-book' }),
       },
       './gallerySettings': {
