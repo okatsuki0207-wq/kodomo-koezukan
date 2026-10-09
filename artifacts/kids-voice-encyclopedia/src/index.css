@@ -715,3 +715,144 @@ button:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .create-photo-picker,.create-icon-button,.create-photo-change { transition:none; }
 }
+
+/* Keep the library on one screen and paginate cards horizontally. */
+.app-shell-library {
+  height:100dvh;
+  min-height:100dvh;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+.app-shell-library > .topbar-library {
+  flex:0 0 auto;
+  width:100%;
+  margin:0 auto;
+}
+.app-shell-library > .page-main {
+  flex:1 1 auto;
+  width:100%;
+  height:auto;
+  min-height:0;
+  margin:0 auto;
+  padding:8px 16px;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+.app-shell-library .category-bar {
+  flex:0 0 auto;
+  margin:0 0 6px;
+  padding:0;
+}
+.app-shell-library #category-panel {
+  flex:1 1 auto;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+.gallery-page-viewport {
+  flex:1 1 auto;
+  min-height:0;
+  overflow:hidden;
+  touch-action:pan-y;
+  overscroll-behavior:contain;
+}
+.app-shell-library .sticker-collage {
+  box-sizing:border-box;
+  width:100%;
+  height:100%;
+  min-height:0;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  grid-template-rows:repeat(5,minmax(0,1fr));
+  align-content:stretch;
+  align-items:stretch;
+  gap:clamp(6px,1.2dvh,14px) clamp(8px,2vw,20px);
+  padding:4px 2px;
+}
+.app-shell-library .sticker-collage.is-compact {
+  grid-template-rows:repeat(4,minmax(0,1fr));
+}
+.app-shell-library .sticker-item {
+  min-width:0;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  overflow:hidden;
+}
+.app-shell-library .sticker-media {
+  position:relative;
+  flex:0 0 auto;
+  width:min(100%,clamp(48px,calc(20dvh - 84px),108px));
+  aspect-ratio:1;
+  display:grid;
+  place-items:center;
+}
+.app-shell-library .sticker-collage.is-compact .sticker-media {
+  width:min(100%,clamp(44px,calc(25dvh - 86px),96px));
+}
+.app-shell-library .sticker-photo-button {
+  width:100%;
+  height:100%;
+  aspect-ratio:1;
+}
+.app-shell-library .sticker-photo {
+  object-fit:contain;
+  object-position:center;
+}
+.app-shell-library .sticker-name {
+  display:-webkit-box;
+  width:100%;
+  min-height:0;
+  max-height:2.7em;
+  margin:3px 0 0;
+  padding:0 2px;
+  overflow:hidden;
+  color:#65513d;
+  font-size:clamp(11px,3.2vw,14px);
+  line-height:1.35;
+  text-align:center;
+  text-overflow:ellipsis;
+  overflow-wrap:anywhere;
+  -webkit-box-orient:vertical;
+  -webkit-line-clamp:2;
+  pointer-events:none;
+  cursor:default;
+}
+.app-shell-library .sticker-name:hover { color:#65513d; }
+.app-shell-library .sticker-record-prompt {
+  top:50%;
+  right:3px;
+  width:40px;
+  height:40px;
+  transform:translateY(-50%);
+}
+.gallery-pagination {
+  flex:0 0 38px;
+  min-height:38px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:14px;
+  color:#726a60;
+  font-size:12px;
+  font-variant-numeric:tabular-nums;
+}
+.gallery-page-button {
+  width:42px;
+  height:34px;
+  display:grid;
+  place-items:center;
+  border:1px solid #d8dfd7;
+  border-radius:999px;
+  background:#fff;
+  color:#627b68;
+}
+.gallery-page-button:not(:disabled):hover { background:#f1f5ef; }
+.gallery-page-button:focus-visible { outline:3px solid #a8c2a8; outline-offset:2px; }
+@media (max-width:760px) {
+  .app-shell-library > .page-main { padding:8px 12px; }
+}

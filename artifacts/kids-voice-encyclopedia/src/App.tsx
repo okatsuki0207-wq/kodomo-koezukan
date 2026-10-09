@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type TouchEvent } from 'react';
 import {
   AlertCircle,
   BookOpen,
   Camera,
   Check,
+  ChevronLeft,
+  ChevronRight,
   CircleHelp,
   Image as ImageIcon,
   Mic,
@@ -35,6 +37,7 @@ import StartScreen from './components/StartScreen';
 import SettingsDialog from './components/SettingsDialog';
 import { useCategories } from './hooks/useCategories';
 import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, sortGalleryItems, type GallerySettings } from './lib/gallerySettings';
+import { clampGalleryPage, galleryPageCount, galleryPageItems, galleryPageSize, gallerySwipeDelta } from './lib/galleryPagination';
 import { deleteKeepsake, editKeepsake, firebaseError, saveGallerySettings, saveKeepsake, subscribeGallerySettings, subscribeKeepsakes, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
 import { getVoices, type VoiceAsset } from './lib/voiceAssets';
 import { trimLeadingSilence } from './lib/audioTrim';
@@ -98,6 +101,9 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [processingVoice, setProcessingVoice] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [gridPage, setGridPage] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight);
+  const galleryTouchStart = useRef<{ x: number; y: number } | null>(null);
   const [cardCategory, setCardCategory] = useState<string | null>(null);
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [newCatInCreate, setNewCatInCreate] = useState(false);
@@ -138,7 +144,40 @@ function App() {
   useEffect(() => () => {
     if (shareFeedbackTimer.current !== null) window.clearTimeout(shareFeedbackTimer.current);
   }, []);
+  useEffect(() => {
+    const updateViewportHeight = () => setViewportHeight(window.innerHeight);
+    window.addEventListener('resize', updateViewportHeight);
+    window.visualViewport?.addEventListener('resize', updateViewportHeight);
+    return () => {
+      window.removeEventListener('resize', updateViewportHeight);
+      window.visualViewport?.removeEventListener('resize', updateViewportHeight);
+    };
+  }, []);
   const visibleItems = sortGalleryItems(items, gallerySettings, selectedCategory);
+  const pageSize = galleryPageSize(viewportHeight);
+  const pageCount = galleryPageCount(visibleItems.length, pageSize);
+  const currentPage = clampGalleryPage(gridPage, pageCount);
+  const pageItems = galleryPageItems(visibleItems, currentPage, pageSize);
+  useEffect(() => {
+    setGridPage(0);
+    galleryTouchStart.current = null;
+  }, [selectedCategory, pageSize]);
+  const handleGalleryTouchStart = (event: TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 1) {
+      galleryTouchStart.current = null;
+      return;
+    }
+    const touch = event.touches[0];
+    galleryTouchStart.current = { x: touch.clientX, y: touch.clientY };
+  };
+  const handleGalleryTouchEnd = (event: TouchEvent<HTMLDivElement>) => {
+    const start = galleryTouchStart.current;
+    const touch = event.changedTouches[0];
+    galleryTouchStart.current = null;
+    if (!start || !touch) return;
+    const delta = gallerySwipeDelta(start.x, start.y, touch.clientX, touch.clientY);
+    if (delta !== 0) setGridPage((page) => clampGalleryPage(page + delta, pageCount));
+  };
   const categoryName = (id: string | null | undefined) => categories.find((c) => c.id === id)?.name;
   const recordingSession = useRef(0);
   const createDraftSession = useRef(0);
@@ -550,7 +589,7 @@ function App() {
 
   const formatTime = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   return (
-    <div className="app-shell">
+    <div className={`app-shell${view === 'library' ? ' app-shell-library' : ''}`}>
       <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen}>
         <div className="topbar-row">
           <button type="button" className="brand brand-home" onClick={() => navigate('start')} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
@@ -577,7 +616,7 @@ function App() {
         <CategoryBar
           categories={categories}
           selected={selectedCategory}
-          onSelect={(id) => { stopPlayback(); setRecordPromptId(null); setSelectedCategory(id); }}
+          onSelect={(id) => { stopPlayback(); setRecordPromptId(null); setSelectedCategory(id); setGridPage(0); }}
           onNew={() => { if (!readOnlyMode) setCategoryOpen(true); }}
           showNew={!readOnlyMode}
           disabled={busy}
@@ -598,43 +637,84 @@ function App() {
             {!readOnlyMode && <button type="button" className="empty-action" onClick={openCreate} data-testid="button-category-empty-create">このページにキロクする</button>}
           </section>
         ) : (
-          <section className="sticker-collage" aria-label="わが家のキロク" data-testid="grid-keepsakes">
-            {visibleItems.map((item) => (
-              <article
-                key={item.id}
-                className={`sticker-item${playing && playingItemId === item.id ? ' is-playing' : ''}`}
-                data-testid={`card-keepsake-${item.id}`}
+          <>
+            <div
+              className="gallery-page-viewport"
+              onTouchStart={handleGalleryTouchStart}
+              onTouchEnd={handleGalleryTouchEnd}
+              onTouchCancel={() => { galleryTouchStart.current = null; }}
+              data-testid="gallery-page-viewport"
+            >
+              <section
+                className={`sticker-collage${pageSize === 12 ? ' is-compact' : ''}`}
+                aria-label="わが家のキロク"
+                data-testid="grid-keepsakes"
               >
+                {pageItems.map((item) => (
+                  <article
+                    key={item.id}
+                    className={`sticker-item${playing && playingItemId === item.id ? ' is-playing' : ''}`}
+                    data-testid={`card-keepsake-${item.id}`}
+                  >
+                    <div className="sticker-media">
+                      <button
+                        type="button"
+                        className="sticker-photo-button"
+                        onClick={() => playKeepsake(item)}
+                        {...longPress(item)}
+                        aria-label={getVoices(item).length ? `${item.itemName}の声をきく` : readOnlyMode ? item.itemName : `${item.itemName}の録音ボタンを表示`}
+                        data-testid={`button-play-card-${item.id}`}
+                      >
+                        {item.photo
+                          ? <img className="sticker-photo" src={item.photo} alt={`${item.itemName}の写真`} data-testid={`img-sticker-${item.id}`} />
+                          : <ImageIcon size={40} />}
+                        {playing && playingItemId === item.id && <span className="voice-notes" aria-hidden="true"><span>♪</span><span>♫</span><span>♪</span></span>}
+                      </button>
+                      {!readOnlyMode && !getVoices(item).length && recordPromptId === item.id && (
+                        <button
+                          type="button"
+                          className="sticker-record-prompt"
+                          onClick={() => openRecordEditor(item)}
+                          aria-label={`${item.itemName}を録音する`}
+                          title="録音する"
+                          data-testid={`button-record-card-${item.id}`}
+                        >
+                          <Mic size={18} />
+                        </button>
+                      )}
+                    </div>
+                    <span className="sticker-name" data-testid={`label-card-name-${item.id}`}>{item.itemName}</span>
+                    <span className="sr-only" role="status">{playing && playingItemId === item.id ? `${item.itemName}の声を再生中` : ''}</span>
+                  </article>
+                ))}
+              </section>
+            </div>
+            {pageCount > 1 && (
+              <nav className="gallery-pagination" aria-label="キロク一覧のページ">
                 <button
                   type="button"
-                  className="sticker-photo-button"
-                  onClick={() => playKeepsake(item)}
-                  {...longPress(item)}
-                  aria-label={getVoices(item).length ? `${item.itemName}の声をきく` : readOnlyMode ? item.itemName : `${item.itemName}の録音ボタンを表示`}
-                  data-testid={`button-play-card-${item.id}`}
+                  className="gallery-page-button"
+                  onClick={() => setGridPage((page) => clampGalleryPage(page - 1, pageCount))}
+                  disabled={currentPage === 0}
+                  aria-label="前のページ"
+                  data-testid="button-gallery-previous"
                 >
-                  {item.photo
-                    ? <img className="sticker-photo" src={item.photo} alt={`${item.itemName}の写真`} data-testid={`img-sticker-${item.id}`} />
-                    : <ImageIcon size={44} />}
-                  {playing && playingItemId === item.id && <span className="voice-notes" aria-hidden="true"><span>♪</span><span>♫</span><span>♪</span></span>}
+                  <ChevronLeft size={18} />
                 </button>
-                {!readOnlyMode && !getVoices(item).length && recordPromptId === item.id && (
-                  <button
-                    type="button"
-                    className="sticker-record-prompt"
-                    onClick={() => openRecordEditor(item)}
-                    aria-label={`${item.itemName}を録音する`}
-                    title="録音する"
-                    data-testid={`button-record-card-${item.id}`}
-                  >
-                    <Mic size={20} />
-                  </button>
-                )}
-                <button type="button" className="sticker-name" onClick={() => openDetail(item)} aria-label={`${item.itemName}の写真を大きく表示`} data-testid={`button-detail-${item.id}`}>{item.itemName}</button>
-                <span className="sr-only" role="status">{playing && playingItemId === item.id ? `${item.itemName}の声を再生中` : ''}</span>
-              </article>
-            ))}
-          </section>
+                <span aria-live="polite" data-testid="gallery-page-count">{currentPage + 1} / {pageCount}</span>
+                <button
+                  type="button"
+                  className="gallery-page-button"
+                  onClick={() => setGridPage((page) => clampGalleryPage(page + 1, pageCount))}
+                  disabled={currentPage >= pageCount - 1}
+                  aria-label="次のページ"
+                  data-testid="button-gallery-next"
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </nav>
+            )}
+          </>
         )}
 
         </div>
