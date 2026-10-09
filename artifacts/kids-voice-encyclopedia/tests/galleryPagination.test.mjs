@@ -95,6 +95,8 @@ test('gallery cards render names as noninteractive labels and page through touch
   const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
   const styles = await readFile(new URL('../src/index.css', import.meta.url), 'utf8');
   const pagination = await readFile(new URL('../src/lib/galleryPagination.ts', import.meta.url), 'utf8');
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const manifest = JSON.parse(await readFile(new URL('../public/manifest.webmanifest', import.meta.url), 'utf8'));
   assert.match(app, /pageItems\.map\(\(item\) =>/);
   assert.match(app, /onTouchEnd=\{handleGalleryTouchEnd\}/);
   assert.match(app, /<span className="sticker-name"[^>]*data-testid=\{`label-card-name-/);
@@ -114,12 +116,30 @@ test('gallery cards render names as noninteractive labels and page through touch
   assert.match(styles, /\.app-shell-library \.sticker-photo-button \{[^}]*position:absolute;[^}]*inset:0;[^}]*height:100%/);
   assert.match(styles, /\.app-shell-library \.sticker-item \{[^}]*grid-template-rows:minmax\(0,1fr\) clamp\(/);
   assert.match(styles, /\.app-shell-library \.sticker-photo \{[^}]*object-fit:contain/);
+  assert.match(styles, /\.app-shell-library \.sticker-photo \{[^}]*width:88%/);
   assert.match(styles, /@keyframes book-page-next/);
   assert.match(styles, /@keyframes book-sheet-next/);
   assert.match(styles, /#category-panel \{[^}]*box-shadow:[^;]+/);
-  assert.match(styles, /0 4px 0 -1px #efebe3/);
+  assert.match(styles, /0 4px 0 -1px #f3d7d7/);
   assert.doesNotMatch(styles, /#category-panel::before/);
   assert.match(styles, /#category-panel::after/);
+  assert.match(styles, /overscroll-behavior:none/);
+  assert.match(styles, /touch-action:pan-x pinch-zoom/);
+  assert.match(styles, /\.gallery-page-viewport \{[^}]*touch-action:none/);
   assert.match(pagination, /threshold = 72/);
   assert.match(app.slice(app.indexOf('const turnGalleryPage'), app.indexOf('const handleGalleryTouchStart')), /playPageTurnSound\(\)/);
+  assert.match(html, /name="apple-mobile-web-app-capable" content="yes"/);
+  assert.match(html, /rel="manifest" href="\/manifest\.webmanifest"/);
+  assert.equal(manifest.display, 'standalone');
+  assert.deepEqual(manifest.display_override, ['fullscreen', 'standalone']);
+  assert.equal(manifest.theme_color, '#f8f9fa');
+});
+
+test('PWA home-screen icons are present at the dimensions declared by the manifest', async () => {
+  const manifest = JSON.parse(await readFile(new URL('../public/manifest.webmanifest', import.meta.url), 'utf8'));
+  for (const icon of manifest.icons) {
+    const iconBytes = await readFile(new URL(`../public/${icon.src.slice(1)}`, import.meta.url));
+    assert.ok(iconBytes.length > 100);
+    assert.equal(iconBytes.toString('hex', 0, 8), '89504e470d0a1a0a');
+  }
 });

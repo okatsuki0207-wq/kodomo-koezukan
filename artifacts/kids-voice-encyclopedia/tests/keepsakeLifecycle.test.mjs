@@ -513,7 +513,8 @@ test('prototype rules accept any media and Firestore writes', async () => {
   const publicDocument = doc(alice.db, 'public-probe', 'unrestricted-write');
   await assertSucceeds(setDoc(publicDocument, { value: true }));
   await assertSucceeds(deleteDoc(publicDocument));
-  await Promise.all(uploaded.map((file) => deleteObject(file)));
+  const uniqueUploads = [...new Map(uploaded.map((file) => [file.fullPath, file])).values()];
+  await Promise.all(uniqueUploads.map((file) => deleteObject(file)));
 });
 
 // Storage time cannot be backdated through the Web SDK. Only this adapter simulates

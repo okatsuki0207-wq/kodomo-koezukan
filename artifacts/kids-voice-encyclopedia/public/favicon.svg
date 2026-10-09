@@ -1,3 +1,21 @@
-<svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
-<rect width="180" height="180" rx="36" fill="#FF3C00"/>
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="rainbow" x1="52" y1="95" x2="454" y2="430" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E8AEBF"/>
+      <stop offset=".27" stop-color="#EBD294"/>
+      <stop offset=".52" stop-color="#ADD2B5"/>
+      <stop offset=".76" stop-color="#AAC8E8"/>
+      <stop offset="1" stop-color="#CAB2E5"/>
+    </linearGradient>
+    <filter id="shadow" x="42" y="65" width="428" height="393" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="12"/>
+    </filter>
+  </defs>
+  <rect x="12" y="12" width="488" height="488" rx="132" fill="#FBFAF6"/>
+  <rect x="15" y="15" width="482" height="482" rx="130" stroke="url(#rainbow)" stroke-width="14"/>
+  <ellipse cx="256" cy="400" rx="153" ry="23" fill="#8D8072" fill-opacity=".15" filter="url(#shadow)"/>
+  <path d="M102 152C154 133 211 139 256 166V371C211 344 154 338 102 357V152Z" fill="#FFFEFC" stroke="#69816E" stroke-width="15" stroke-linejoin="round"/>
+  <path d="M410 152C358 133 301 139 256 166V371C301 344 358 338 410 357V152Z" fill="#FFFEFC" stroke="#69816E" stroke-width="15" stroke-linejoin="round"/>
+  <path d="M256 166V371" stroke="#8EA78F" stroke-width="12" stroke-linecap="round"/>
+  <path d="M130 204C166 194 200 197 226 209M130 244C166 234 200 237 226 249M386 204C350 194 316 197 290 209M386 244C350 234 316 237 290 249" stroke="#D5DFD4" stroke-width="10" stroke-linecap="round"/>
 </svg>

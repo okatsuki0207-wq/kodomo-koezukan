@@ -45,20 +45,32 @@
 }
 
 * { box-sizing: border-box; }
-html { min-width: 320px; background: hsl(var(--background)); }
+html {
+  width:100%;
+  height:100%;
+  min-width:320px;
+  background:hsl(var(--background));
+  overscroll-behavior:none;
+}
 body {
+  width:100%;
+  height:100%;
   margin: 0;
+  overflow:hidden;
   color: hsl(var(--foreground));
   background: #F8F9FA;
   font-family: var(--app-font-sans);
   -webkit-font-smoothing: antialiased;
+  overscroll-behavior:none;
+  touch-action:pan-x pinch-zoom;
 }
+#root { width:100%; height:100dvh; min-height:100dvh; overflow:hidden; overscroll-behavior:none; }
 button, input { font: inherit; }
 button { cursor: pointer; }
 button:focus-visible, input:focus-visible { outline: 3px solid rgba(194, 104, 78, .38); outline-offset: 3px; }
 ::selection { background: #e7b58e; color: #49362c; }
 
-.app-shell { min-height: 100dvh; overflow: hidden; }
+.app-shell { width:100%; height:100dvh; min-height:100dvh; overflow:hidden; }
 .topbar { max-width: 1200px; margin: auto; height: 94px; padding: 0 32px; display:flex; align-items:center; justify-content:space-between; }
 .brand { display:flex; align-items:center; gap:14px; color:inherit; text-decoration:none; }
 .brand-mark { width:44px;height:44px;display:grid;place-items:center;border-radius:50% 50% 48% 42%;background:#d8e4d7;color:#627b68;transform:rotate(-7deg); }
@@ -137,7 +149,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(194, 104, 78
 .empty-action { border:1px solid #d9ad8e;background:#fff8ec;color:#a85f49;padding:11px 20px;border-radius:999px;font-size:13px;font-weight:700; }
 .empty-action:hover {background:#faecda;}
 
-.overlay { position:fixed;inset:0;background:rgba(47,43,35,.48);backdrop-filter:blur(5px);z-index:20;display:flex;align-items:center;justify-content:center;padding:20px;animation:fade .18s ease-out; }
+.overlay { position:fixed;inset:0;background:rgba(47,43,35,.48);backdrop-filter:blur(5px);z-index:20;display:flex;align-items:center;justify-content:center;padding:max(16px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom));animation:fade .18s ease-out; }
 .dialog { position:relative;width:min(100%,520px);max-height:min(92dvh,850px);overflow:auto;background:#fcf8ef;border-radius:19px;border:1px solid #eee1cf;box-shadow:0 25px 80px rgba(51,41,29,.22);padding:28px 30px 27px;animation:rise .25s both; }
 .dialog-detail { width:min(100%,860px);padding:15px; }
 .dialog-head {display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:22px;}
@@ -718,7 +730,9 @@ button:focus-visible {
   display:flex;
   flex-direction:column;
   overflow:hidden;
-  background-color:#f1efe9;
+  overscroll-behavior:none;
+  touch-action:pan-x pinch-zoom;
+  background-color:#f5f4f0;
   background-image:
     repeating-linear-gradient(0deg,rgba(97,83,66,.012) 0 1px,transparent 1px 8px),
     radial-gradient(ellipse at 50% 0%,rgba(255,255,255,.84),transparent 78%);
@@ -729,6 +743,7 @@ button:focus-visible {
   flex:0 0 auto;
   width:100%;
   margin:0 auto;
+  padding-top:max(8px,env(safe-area-inset-top));
 }
 .app-shell-library > .page-main {
   position:relative;
@@ -739,10 +754,11 @@ button:focus-visible {
   min-height:0;
   box-sizing:border-box;
   margin:0 auto;
-  padding:8px 16px;
+  padding:8px 16px max(8px,env(safe-area-inset-bottom));
   display:flex;
   flex-direction:column;
   overflow:hidden;
+  overscroll-behavior:none;
 }
 .app-shell-library .category-bar {
   flex:0 0 auto;
@@ -757,12 +773,20 @@ button:focus-visible {
   display:flex;
   flex-direction:column;
   overflow:visible;
-  margin:5px 8px 8px;
+  margin:5px 8px 13px;
   padding:10px 10px 5px 22px;
-  border:1px solid rgba(143,124,96,.24);
+  border:1px solid transparent;
   border-radius:8px 21px 21px 8px;
-  background:linear-gradient(90deg,#f2efe7 0,#fffefb 25px,#fffefb 100%);
-  box-shadow:0 13px 28px rgba(64,53,41,.16),0 4px 0 -1px #efebe3,0 7px 0 -2px #ded8ce,0 10px 0 -3px #f8f5ee,inset 0 1px rgba(255,255,255,.9);
+  background:
+    linear-gradient(90deg,#f4f0e8 0,#fffefb 25px,#fffefb 100%) padding-box,
+    var(--rainbow-line) border-box;
+  box-shadow:
+    0 15px 30px rgba(64,53,41,.17),
+    0 4px 0 -1px #f3d7d7,
+    0 7px 0 -2px #f3e8c8,
+    0 10px 0 -3px #dcebdd,
+    0 13px 0 -4px #e3ddf0,
+    inset 0 1px rgba(255,255,255,.95);
 }
 .app-shell-library #category-panel::after {
   content:"";
@@ -771,7 +795,7 @@ button:focus-visible {
   inset:0 auto 0 0;
   width:25px;
   border-radius:8px 0 0 8px;
-  background:linear-gradient(90deg,rgba(104,88,67,.16),rgba(104,88,67,.075) 5px,rgba(255,255,255,.66) 12px,rgba(255,255,255,.12) 19px,transparent 100%);
+  background:linear-gradient(90deg,rgba(104,88,67,.16),rgba(104,88,67,.075) 5px,rgba(255,255,255,.76) 12px,rgba(244,201,215,.24) 17px,rgba(207,225,213,.2) 21px,transparent 100%);
   box-shadow:inset -1px 0 rgba(117,99,76,.08);
   pointer-events:none;
 }
@@ -782,8 +806,8 @@ button:focus-visible {
   overflow:hidden;
   perspective:1250px;
   transform-style:preserve-3d;
-  touch-action:pan-y;
-  overscroll-behavior:contain;
+  touch-action:none;
+  overscroll-behavior:none;
 }
 .app-shell-library .sticker-collage {
   position:relative;
@@ -834,8 +858,11 @@ button:focus-visible {
   transform:scale(1.06);
 }
 .app-shell-library .sticker-photo {
-  width:100%;
-  height:100%;
+  width:88%;
+  height:88%;
+  max-width:100%;
+  max-height:100%;
+  margin:auto;
   object-fit:contain;
   object-position:center;
 }
@@ -988,16 +1015,19 @@ button:focus-visible {
 .gallery-page-button:not(:disabled):hover { background:#f1f5ef; }
 .gallery-page-button:focus-visible { outline:3px solid #a8c2a8; outline-offset:2px; }
 @media (max-width:760px) {
-  .app-shell-library > .page-main { padding:8px 12px; }
-  .app-shell-library > .topbar-library { padding-left:16px; }
+  .app-shell-library > .page-main { padding:8px 12px max(8px,env(safe-area-inset-bottom)); }
+  .app-shell-library > .topbar-library { padding: max(6px,env(safe-area-inset-top)) 16px 8px 25px; }
   .app-shell-library #category-panel {
-    margin:4px 5px 7px;
+    margin:4px 5px 12px;
     padding:8px 8px 4px 20px;
   }
   .app-shell-library .sticker-collage {
     gap:clamp(5px,1dvh,8px) 8px;
     padding:4px 1px;
   }
+}
+@media (display-mode: standalone) {
+  body { -webkit-tap-highlight-color:transparent; }
 }
 @media (prefers-reduced-motion:reduce) {
   .app-shell-library .sticker-collage.page-turn-next,
