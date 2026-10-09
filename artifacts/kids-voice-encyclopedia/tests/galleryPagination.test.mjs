@@ -79,7 +79,7 @@ test('page turns preload and play the latest supplied paper-turn MP3 from its be
     const audio = created[0];
     assert.equal(audio.src, '/assets/audio/page-turn-paper.mp3');
     assert.equal(audio.preload, 'auto');
-    assert.equal(audio.volume, 0.25);
+    assert.equal(audio.volume, 0.12);
     assert.equal(audio.loadCalls, 1);
     assert.equal(unlockPageTurnSound(), true);
     assert.equal(audio.muted, true);
@@ -126,6 +126,7 @@ test('gallery cards render names as noninteractive labels and page through touch
   const phraseDialog = await readFile(new URL('../src/components/BookPassphraseDialog.tsx', import.meta.url), 'utf8');
   const opening = await readFile(new URL('../src/components/BookOpeningTransition.tsx', import.meta.url), 'utf8');
   const openingTiming = await readFile(new URL('../src/lib/bookOpening.ts', import.meta.url), 'utf8');
+  const pageTurnSound = await readFile(new URL('../src/lib/pageTurnSound.ts', import.meta.url), 'utf8');
   const shareDialog = await readFile(new URL('../src/components/ShareLinkDialog.tsx', import.meta.url), 'utf8');
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const manifest = JSON.parse(await readFile(new URL('../public/manifest.webmanifest', import.meta.url), 'utf8'));
@@ -206,16 +207,9 @@ test('gallery cards render names as noninteractive labels and page through touch
   assert.match(opening, /playsInline/);
   assert.match(opening, /muted/);
   assert.match(openingTiming, /openingMs: 3_100/);
-  assert.match(companion, /voicel_sit\.png/);
-  assert.match(companion, /voicel_zukan\.png/);
-  assert.match(companion, /useLayoutEffect[\s\S]*?\[revision\]/);
-  assert.match(companion, /filter\(\(image\) => image !== previous\.image\)/);
-  assert.match(companion, /filter\(\(position\) => position !== previous\.position\)/);
-  assert.match(app, /setCompanionRevision\(\(revision\) => revision \+ 1\)/);
-  assert.match(app, /<FloatingVoicele revision=\{companionRevision\} \/>/);
-  assert.match(styles, /\.app-shell-library \.book-companion \{[^}]*width:clamp\(64px,20vw,88px\);[^}]*height:clamp\(80px,25vw,110px\)/);
-  assert.match(styles, /\.app-shell-library \.book-companion-layer \{[^}]*pointer-events:none/);
-  assert.match(styles, /\.app-shell-library \.book-companion \{[^}]*animation:book-companion-float/);
+  assert.match(pageTurnSound, /audio\.volume = 0\.12/);
+  assert.doesNotMatch(app, /FloatingVoicele|book-companion/);
+  assert.doesNotMatch(styles, /book-companion/);
   assert.match(styles, /\.app-shell-library \.sticker-add-card \{[^}]*border:0;[^}]*background:transparent;[^}]*box-shadow:none/);
   assert.match(styles, /\.app-shell-library \.sticker-add-media \{[^}]*border:0;[^}]*background:var\(--rainbow-line\);[^}]*box-shadow:none/);
   assert.equal(manifest.display, 'standalone');
