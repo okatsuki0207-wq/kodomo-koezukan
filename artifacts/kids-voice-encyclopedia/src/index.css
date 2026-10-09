@@ -734,6 +734,7 @@ button:focus-visible {
   width:100%;
   height:auto;
   min-height:0;
+  box-sizing:border-box;
   margin:0 auto;
   padding:8px 16px;
   display:flex;
@@ -787,12 +788,13 @@ button:focus-visible {
   position:relative;
   flex:0 0 auto;
   width:min(100%,clamp(48px,calc(20dvh - 84px),108px));
-  aspect-ratio:1;
+  height:min(100%,clamp(48px,calc(20dvh - 84px),108px));
   display:grid;
   place-items:center;
 }
 .app-shell-library .sticker-collage.is-compact .sticker-media {
   width:min(100%,clamp(44px,calc(25dvh - 86px),96px));
+  height:min(100%,clamp(44px,calc(25dvh - 86px),96px));
 }
 .app-shell-library .sticker-photo-button {
   width:100%;
