@@ -1,4 +1,20 @@
+import { useState } from 'react';
 import { BookOpen, Plus } from 'lucide-react';
+
+const VOICELE_IMAGES = [
+  'voicel_welcome.png',
+  'voicel_stand.png',
+  'voicel_listen.png',
+  'voicel_record.png',
+  'voicel_happy.png',
+  'voicel_sleep.png',
+  'voicel_think.png',
+  'voicel_fly.png',
+  'voicel_cheer.png',
+  'voicel_surprise.png',
+  'voicel_sit.png',
+  'voicel_zukan.png',
+] as const;
 
 type Props = {
   onRecord: () => void;
@@ -8,6 +24,7 @@ type Props = {
 };
 
 export default function StartScreen({ onRecord, showRecordAction = true, onOpenEncyclopedia, isTransitioning = false }: Props) {
+  const [characterImage] = useState(() => VOICELE_IMAGES[Math.floor(Math.random() * VOICELE_IMAGES.length)]);
   return (
     <section className={`start-screen${isTransitioning ? ' is-transitioning' : ''}`} aria-labelledby="start-title">
       <div className="start-character" role="img" aria-label="ボイスルが図鑑を見ています">
@@ -15,7 +32,7 @@ export default function StartScreen({ onRecord, showRecordAction = true, onOpenE
         <span className="start-orbit start-orbit-two" />
         <img
           className="rg-char"
-          src={`${import.meta.env.BASE_URL}character/voicel_zukan.png`}
+          src={`${import.meta.env.BASE_URL}character/${characterImage}`}
           alt=""
           aria-hidden="true"
           draggable={false}

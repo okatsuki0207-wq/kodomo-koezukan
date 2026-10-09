@@ -37,7 +37,6 @@ import StartScreen from './components/StartScreen';
 import BookOpeningTransition from './components/BookOpeningTransition';
 import SettingsDialog from './components/SettingsDialog';
 import BookPassphraseDialog from './components/BookPassphraseDialog';
-import FloatingVoicele from './components/FloatingVoicele';
 import ShareLinkDialog from './components/ShareLinkDialog';
 import { useCategories } from './hooks/useCategories';
 import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, sortGalleryItems, type GallerySettings } from './lib/gallerySettings';
@@ -126,7 +125,6 @@ function App() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [gridPage, setGridPage] = useState(0);
   const [pageTurnDirection, setPageTurnDirection] = useState<'next' | 'previous' | null>(null);
-  const [companionRevision, setCompanionRevision] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight);
   const galleryTouchStart = useRef<{ x: number; y: number } | null>(null);
   const pageTurnTimer = useRef<number | null>(null);
@@ -338,7 +336,6 @@ function App() {
     playPageTurnSound();
     setPageTurnDirection(delta > 0 ? 'next' : 'previous');
     setGridPage(nextPage);
-    setCompanionRevision((revision) => revision + 1);
     pageTurnTimer.current = window.setTimeout(() => {
       setPageTurnDirection(null);
       pageTurnTimer.current = null;
@@ -816,7 +813,6 @@ function App() {
             setRecordPromptId(null);
             setSelectedCategory(id);
             setGridPage(0);
-            setCompanionRevision((revision) => revision + 1);
           }}
           onNew={() => { if (!readOnlyMode) setCategoryOpen(true); }}
           showNew={!readOnlyMode}
@@ -938,7 +934,6 @@ function App() {
         )}
 
         </div>
-        <FloatingVoicele revision={companionRevision} />
         </div>
       </main>
       )}

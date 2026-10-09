@@ -126,7 +126,6 @@ test('gallery cards render names as noninteractive labels and page through touch
   const phraseDialog = await readFile(new URL('../src/components/BookPassphraseDialog.tsx', import.meta.url), 'utf8');
   const opening = await readFile(new URL('../src/components/BookOpeningTransition.tsx', import.meta.url), 'utf8');
   const openingTiming = await readFile(new URL('../src/lib/bookOpening.ts', import.meta.url), 'utf8');
-  const companion = await readFile(new URL('../src/components/FloatingVoicele.tsx', import.meta.url), 'utf8');
   const shareDialog = await readFile(new URL('../src/components/ShareLinkDialog.tsx', import.meta.url), 'utf8');
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const manifest = JSON.parse(await readFile(new URL('../public/manifest.webmanifest', import.meta.url), 'utf8'));

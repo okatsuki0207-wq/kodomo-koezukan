@@ -293,6 +293,7 @@ button:disabled {cursor:not-allowed;opacity:.55;}
 .app-shell.is-opening-book:not(.app-shell-library) > .start-main {
   transition:opacity .26s ease, transform .26s ease;
 }
+.app-shell.is-opening-book { background-color:#fff; }
 .app-shell.is-opening-book:not(.app-shell-library) > .topbar { opacity:0; }
 .app-shell.is-opening-book:not(.app-shell-library) > .start-main { opacity:0; transform:scale(.99); }
 .book-opening-overlay {
@@ -303,7 +304,8 @@ button:disabled {cursor:not-allowed;opacity:.55;}
   place-items:center;
   overflow:hidden;
   pointer-events:auto;
-  background:transparent;
+  background-color:#fff;
+  background-image:none;
   opacity:1;
   transition:background-color .38s ease, opacity .46s ease;
 }
@@ -319,9 +321,9 @@ button:disabled {cursor:not-allowed;opacity:.55;}
   z-index:1;
   width:min(88vw,520px);
   aspect-ratio:1;
+  background-color:#fff;
   transform:translateY(12px) scale(.94);
   opacity:0;
-  filter:drop-shadow(0 18px 19px rgba(71,62,55,.2));
 }
 .book-opening-video-poster,
 .book-opening-video {
@@ -330,6 +332,7 @@ button:disabled {cursor:not-allowed;opacity:.55;}
   width:100%;
   height:100%;
   object-fit:contain;
+  background-color:#fff;
 }
 .book-opening-video-poster { z-index:0; }
 .book-opening-video {
@@ -338,11 +341,11 @@ button:disabled {cursor:not-allowed;opacity:.55;}
   transition:opacity .15s ease;
 }
 .book-opening-video.is-failed { opacity:0; }
-.book-opening-overlay[data-phase="opening"] { background:rgba(251,250,246,.94); }
+.book-opening-overlay[data-phase="opening"] { background-color:#fff; }
 .book-opening-overlay[data-phase="opening"] .book-opening-video-stage {
   animation:opening-video-enter .5s cubic-bezier(.2,.7,.2,1) both;
 }
-.book-opening-overlay[data-phase="glow"] { background:rgba(255,255,255,.99); }
+.book-opening-overlay[data-phase="glow"] { background-color:#fff; }
 .book-opening-overlay[data-phase="glow"] .book-opening-light { opacity:1; animation:opening-soft-light .42s ease-out both; }
 .book-opening-overlay[data-phase="glow"] .book-opening-video-stage { opacity:1; transform:scale(1.025); transition:transform .42s ease, opacity .2s ease; }
 .book-opening-overlay[data-phase="reveal"] { opacity:0; background:#fff; }
@@ -859,30 +862,6 @@ button:focus-visible {
   perspective:1650px;
   overflow:visible;
 }
-.app-shell-library .book-companion-layer {
-  position:absolute;
-  z-index:4;
-  inset:0;
-  overflow:visible;
-  pointer-events:none;
-}
-.app-shell-library .book-companion {
-  position:absolute;
-  left:0;
-  width:clamp(64px,20vw,88px);
-  height:clamp(80px,25vw,110px);
-  object-fit:contain;
-  opacity:.9;
-  filter:drop-shadow(0 3px 4px rgba(64,53,41,.16));
-  animation:book-companion-float 4.1s ease-in-out infinite;
-}
-.app-shell-library .book-companion-upper { top:11%; }
-.app-shell-library .book-companion-middle { top:43%; }
-.app-shell-library .book-companion-lower { bottom:14%; }
-@keyframes book-companion-float {
-  0%,100% { transform:translateY(0) rotate(-1deg); }
-  50% { transform:translateY(-5px) rotate(1deg); }
-}
 .app-shell-library .book-hardcover {
   position:absolute;
   z-index:0;
@@ -1236,10 +1215,6 @@ button:focus-visible {
 @media (max-width:760px) {
   .start-character { width:min(74vw,248px); height:min(64vw,218px); min-height:190px; }
   .start-character .rg-char { width:min(86%,218px); height:74%; bottom:19px; }
-}
-
-@media (prefers-reduced-motion:reduce) {
-  .app-shell-library .book-companion { animation:none; }
 }
 
 .share-link-dialog {
