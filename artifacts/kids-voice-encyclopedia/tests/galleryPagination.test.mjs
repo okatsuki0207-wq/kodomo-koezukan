@@ -43,7 +43,7 @@ test('gallery recognizes horizontal swipes and ignores short or mostly vertical 
   assert.equal(gallerySwipeDelta(200, 100, 120, 190), 0);
 });
 
-test('successful page turns play a layered, paper-like stereo rustle without electronic tones', async () => {
+test('successful page turns play a soft, crinkled paper rustle without electronic tones', async () => {
   const parameters = () => ({
     value: 0,
     events: [],
@@ -87,19 +87,22 @@ test('successful page turns play a layered, paper-like stereo rustle without ele
 
   assert.equal(playPageTurnSound(context), true);
   assert.equal(state.buffer.numberOfChannels, 2);
-  assert.equal(state.buffer.length, 480);
+  assert.equal(state.buffer.length, 560);
   assert.equal(state.buffer.sampleRate, 1000);
   assert.ok(state.buffer.data.every((channel) => channel.some((sample) => sample !== 0)));
+  assert.ok(state.buffer.data.every((channel) => Math.abs(channel[0]) < 0.0001 && Math.abs(channel.at(-1)) < 0.001));
+  assert.ok(state.buffer.data.every((channel) => channel.some((sample) => Math.abs(sample) > 0.01)));
   assert.equal(state.source.startedAt, 4);
-  assert.ok(Math.abs(state.source.stoppedAt - 4.48) < 0.0001);
+  assert.ok(Math.abs(state.source.stoppedAt - 4.56) < 0.0001);
   assert.deepEqual(state.filters.map((filter) => filter.type), ['lowpass', 'highpass']);
-  assert.ok(state.filters[0].frequency.events.some(([kind, frequency]) => kind === 'ramp' && frequency === 1150));
-  assert.ok(state.filters[1].frequency.events.some(([kind, frequency]) => kind === 'ramp' && frequency === 1550));
-  assert.ok(state.gains[0].gain.events.some(([kind, gain]) => kind === 'ramp' && gain === 0.34));
-  assert.ok(state.gains[1].gain.events.some(([kind, gain]) => kind === 'ramp' && gain === 0.14));
+  assert.ok(state.filters[0].frequency.events.some(([kind, frequency]) => kind === 'ramp' && frequency === 1450));
+  assert.ok(state.filters[1].frequency.events.some(([kind, frequency]) => kind === 'ramp' && frequency === 2100));
+  assert.ok(state.gains[0].gain.events.some(([kind, gain]) => kind === 'ramp' && gain === 0.25));
+  assert.ok(state.gains[1].gain.events.some(([kind, gain]) => kind === 'ramp' && gain === 0.09));
   const sound = await readFile(new URL('../src/lib/pageTurnSound.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(sound, /createOscillator/);
   assert.match(sound, /paperGrain/);
+  assert.match(sound, /foldCrinkles/);
 });
 
 test('gallery cards render names as noninteractive labels and page through touch gestures', async () => {
@@ -127,7 +130,7 @@ test('gallery cards render names as noninteractive labels and page through touch
   assert.match(styles, /\.app-shell-library \.sticker-photo-button \{[^}]*position:absolute;[^}]*inset:0;[^}]*height:100%/);
   assert.match(styles, /\.app-shell-library \.sticker-item \{[^}]*grid-template-rows:minmax\(0,1fr\) clamp\(/);
   assert.match(styles, /\.app-shell-library \.sticker-photo \{[^}]*object-fit:contain/);
-  assert.match(styles, /\.app-shell-library \.sticker-photo \{[^}]*width:88%/);
+  assert.match(styles, /\.app-shell-library \.sticker-photo \{[^}]*width:86%;[^}]*height:86%;[^}]*padding:2%;[^}]*object-fit:contain/);
   assert.match(styles, /@keyframes book-page-next/);
   assert.match(styles, /@keyframes book-sheet-next/);
   assert.match(styles, /\.book-left-page-peek/);

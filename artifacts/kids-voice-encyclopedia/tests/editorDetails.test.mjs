@@ -36,7 +36,8 @@ test('the start screen uses the seated reading mascot and animates a book-openin
   const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
   const transition = await readFile(new URL('../src/components/BookOpeningTransition.tsx', import.meta.url), 'utf8');
   const styles = await readFile(new URL('../src/index.css', import.meta.url), 'utf8');
-  assert.match(start, /RecordingCharacter pose="sit"/);
+  assert.match(start, /character\/voicel_sit\.png/);
+  assert.match(start, /data-testid="start-voicel"/);
   assert.match(start, /start-reading-cushion/);
   assert.match(start, /start-reading-book/);
   assert.match(app, /openLibraryWithTransition/);

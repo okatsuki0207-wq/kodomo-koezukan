@@ -793,7 +793,7 @@ function App() {
                       >
                         {item.photo
                           ? <img className="sticker-photo" src={item.photo} alt={`${item.itemName}の写真`} data-testid={`img-sticker-${item.id}`} />
-                          : <ImageIcon size={40} />}
+                          : <ImageIcon size={40} aria-hidden="true" />}
                         {playing && playingItemId === item.id && <span className="voice-notes" aria-hidden="true"><span>♪</span><span>♫</span><span>♪</span></span>}
                       </button>
                       {!readOnlyMode && !getVoices(item).length && recordPromptId === item.id && (

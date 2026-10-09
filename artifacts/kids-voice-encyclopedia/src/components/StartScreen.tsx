@@ -1,5 +1,4 @@
 import { BookOpen, Plus } from 'lucide-react';
-import { RecordingCharacter } from './RecordingGuide';
 
 type Props = {
   onRecord: () => void;
@@ -15,7 +14,16 @@ export default function StartScreen({ onRecord, showRecordAction = true, onOpenE
         <span className="start-orbit start-orbit-one" />
         <span className="start-orbit start-orbit-two" />
         <span className="start-reading-cushion" aria-hidden="true"><span /><span /></span>
-        <RecordingCharacter pose="sit" />
+        <img
+          className="rg-char"
+          src={`${import.meta.env.BASE_URL}character/voicel_sit.png`}
+          alt=""
+          aria-hidden="true"
+          draggable={false}
+          decoding="async"
+          fetchPriority="high"
+          data-testid="start-voicel"
+        />
         <svg className="start-reading-book" viewBox="0 0 96 62" aria-hidden="true">
           <path d="M8 13c14-5 27-2 40 5v35C35 46 22 44 8 49V13Z" fill="#fffdf8" stroke="#718b73" strokeWidth="3" strokeLinejoin="round" />
           <path d="M88 13c-14-5-27-2-40 5v35c13-7 26-9 40-4V13Z" fill="#fffdf8" stroke="#718b73" strokeWidth="3" strokeLinejoin="round" />
