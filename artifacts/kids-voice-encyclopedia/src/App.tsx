@@ -34,7 +34,6 @@ import { useNewKeepsakeDraft } from './hooks/useNewKeepsakeDraft';
 import { VoicePlayback, VoiceShuffleBag } from './lib/voicePlayback';
 import DetailDialogShell from './components/DetailDialogShell';
 import StartScreen from './components/StartScreen';
-import BookOpeningTransition from './components/BookOpeningTransition';
 import SettingsDialog from './components/SettingsDialog';
 import BookPassphraseDialog from './components/BookPassphraseDialog';
 import ShareLinkDialog from './components/ShareLinkDialog';
@@ -48,7 +47,6 @@ import { trimLeadingSilence } from './lib/audioTrim';
 import { preloadRecordingGuide } from './lib/recordingCue';
 import { hasNewKeepsakeDraftContent, type NewKeepsakeDraftInput } from './lib/newKeepsakeDraft';
 import { APP_LAST_ACTIVE_STORAGE_KEY, APP_VIEW_RESUME_WINDOW_MS, APP_VIEW_STORAGE_KEY, persistAppView, restoreAppView, type AppView } from './lib/appViewState';
-import { BOOK_OPENING_TIMING, type BookOpeningPhase } from './lib/bookOpening';
 import { isFirebaseConfigured } from './firebaseConfig';
 import './index.css';
 
@@ -62,8 +60,6 @@ function formatDate(timestamp: number) {
 
 const PAGE_TURN_ANIMATION_MS = 1_000;
 const READ_ONLY_MODE_STORAGE_KEY = 'kids-voice-encyclopedia:read-only-mode';
-const BOOK_OPENING_AFTER_SELECTION_KEY = 'kids-voice-encyclopedia:open-book-after-selection';
-
 function loadReadOnlyMode() {
   try {
     return window.localStorage.getItem(READ_ONLY_MODE_STORAGE_KEY) === 'true';
@@ -84,21 +80,14 @@ function App() {
   const [view, setView] = useState<AppView>(() => {
     let saved: string | null = null;
     let lastActiveAt: string | null = null;
-    let openAfterSelection = false;
     try {
       saved = window.localStorage.getItem(APP_VIEW_STORAGE_KEY);
       lastActiveAt = window.localStorage.getItem(APP_LAST_ACTIVE_STORAGE_KEY);
-      openAfterSelection = window.sessionStorage.getItem(BOOK_OPENING_AFTER_SELECTION_KEY) === '1';
     } catch { /* private browsing can block storage */ }
-    if (openAfterSelection) return 'start';
     return restoreAppView(window.location.pathname, saved, lastActiveAt);
   });
   const [bookPassphraseOpen, setBookPassphraseOpen] = useState(() => view === 'library' && !hasActivePassphraseBook());
   const [bookPassphraseMode, setBookPassphraseMode] = useState<'open' | 'switch'>('open');
-  const [bookOpeningPhase, setBookOpeningPhase] = useState<BookOpeningPhase>('idle');
-  const bookOpeningActive = useRef(false);
-  const bookOpeningGlowStarted = useRef(false);
-  const bookOpeningTimers = useRef<number[]>([]);
   const hiddenAt = useRef<number | null>(null);
   const [recordPromptId, setRecordPromptId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -139,47 +128,9 @@ function App() {
     setView(next);
     persistAppView(next);
   };
-  const beginBookOpeningGlow = () => {
-    if (!bookOpeningActive.current || bookOpeningGlowStarted.current) return;
-    bookOpeningGlowStarted.current = true;
-    for (const timer of bookOpeningTimers.current) window.clearTimeout(timer);
-    bookOpeningTimers.current = [];
-    setBookOpeningPhase('glow');
-
-    const { glowMs, revealMs } = BOOK_OPENING_TIMING;
-    const schedule = (delay: number, callback: () => void) => {
-      bookOpeningTimers.current.push(window.setTimeout(callback, delay));
-    };
-    schedule(glowMs, () => {
-      navigate('library');
-      setBookOpeningPhase('reveal');
-    });
-    schedule(glowMs + revealMs, () => {
-      setBookOpeningPhase('idle');
-      bookOpeningActive.current = false;
-      bookOpeningGlowStarted.current = false;
-      bookOpeningTimers.current = [];
-    });
-  };
-  const openLibraryWithTransition = () => {
-    if (bookOpeningActive.current) return;
-    unlockPageTurnSound();
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
-      navigate('library');
-      return;
-    }
-    bookOpeningActive.current = true;
-    bookOpeningGlowStarted.current = false;
-    bookOpeningTimers.current = [];
-    setBookOpeningPhase('fade');
-    const schedule = (delay: number, callback: () => void) => {
-      bookOpeningTimers.current.push(window.setTimeout(callback, delay));
-    };
-    const { fadeOutMs, openingMs } = BOOK_OPENING_TIMING;
-    schedule(fadeOutMs, () => setBookOpeningPhase('opening'));
-    // The video normally starts the glow through its ended event. This timer
-    // prevents a stalled or unsupported video from trapping the transition.
-    schedule(fadeOutMs + openingMs + 1_000, beginBookOpeningGlow);
+  const openLibrary = () => {
+    playPageTurnSound();
+    navigate('library');
   };
   const requestLibraryOpen = () => {
     if (!hasActivePassphraseBook()) {
@@ -188,16 +139,12 @@ function App() {
       return;
     }
     createDraftSession.current++;
-    openLibraryWithTransition();
+    openLibrary();
   };
   const selectBookAndReload = async (passphrase: string) => {
     await activateBookForPassphrase(passphrase);
+    playPageTurnSound();
     persistAppView('library');
-    try {
-      window.sessionStorage.setItem(BOOK_OPENING_AFTER_SELECTION_KEY, '1');
-    } catch {
-      // Continue opening the selected book even when session storage is unavailable.
-    }
     window.location.reload();
   };
   useEffect(() => {
@@ -213,16 +160,6 @@ function App() {
       document.removeEventListener('touchstart', unlockOnTrustedGesture, true);
       document.removeEventListener('keydown', unlockOnTrustedGesture, true);
     };
-  }, []);
-  useEffect(() => {
-    let openAfterSelection = false;
-    try {
-      openAfterSelection = window.sessionStorage.getItem(BOOK_OPENING_AFTER_SELECTION_KEY) === '1';
-      if (openAfterSelection) window.sessionStorage.removeItem(BOOK_OPENING_AFTER_SELECTION_KEY);
-    } catch {
-      // No transition marker is available in restricted browsing modes.
-    }
-    if (openAfterSelection) openLibraryWithTransition();
   }, []);
   useEffect(() => {
     const markActive = () => {
@@ -320,12 +257,6 @@ function App() {
   }, [selectedCategory, pageSize, readOnlyMode]);
   useEffect(() => () => {
     if (pageTurnTimer.current !== null) window.clearTimeout(pageTurnTimer.current);
-  }, []);
-  useEffect(() => () => {
-    for (const timer of bookOpeningTimers.current) window.clearTimeout(timer);
-    bookOpeningTimers.current = [];
-    bookOpeningActive.current = false;
-    bookOpeningGlowStarted.current = false;
   }, []);
   const turnGalleryPage = (delta: -1 | 1) => {
     const nextPage = clampGalleryPage(currentPage + delta, pageCount);
@@ -778,7 +709,7 @@ function App() {
 
   const formatTime = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   return (
-    <div className={`app-shell${view === 'library' ? ' app-shell-library' : ''}${bookOpeningPhase !== 'idle' ? ' is-opening-book' : ''}`}>
+    <div className={`app-shell${view === 'library' ? ' app-shell-library' : ''}`}>
       <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen || bookPassphraseOpen || shareLinkDialogOpen}>
         <div className="topbar-row">
           <button type="button" className="brand brand-home" onClick={() => navigate('start')} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
@@ -799,7 +730,6 @@ function App() {
             onRecord={openCreate}
             showRecordAction={!readOnlyMode}
             onOpenEncyclopedia={requestLibraryOpen}
-            isTransitioning={bookOpeningPhase !== 'idle'}
           />
         </main>
       ) : (
@@ -1131,7 +1061,6 @@ function App() {
         onCopy={copyEncyclopediaLink}
         onClose={() => setShareLinkDialogOpen(false)}
       />}
-      {bookOpeningPhase !== 'idle' && <BookOpeningTransition phase={bookOpeningPhase} onFinished={beginBookOpeningGlow} />}
     </div>
   );
 }

@@ -34,7 +34,6 @@ test('the last main screen is restored, the first visit starts at the start scre
 test('the start screen chooses a registered mascot image randomly and removes duplicate cushion/book overlays', async () => {
   const start = await readFile(new URL('../src/components/StartScreen.tsx', import.meta.url), 'utf8');
   const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
-  const transition = await readFile(new URL('../src/components/BookOpeningTransition.tsx', import.meta.url), 'utf8');
   const styles = await readFile(new URL('../src/index.css', import.meta.url), 'utf8');
   assert.match(start, /character\/\$\{characterImage\}/);
   assert.match(start, /data-testid="start-voicel"/);
@@ -46,22 +45,13 @@ test('the start screen chooses a registered mascot image randomly and removes du
   await Promise.all(imageNames.map((name) => access(new URL(`../public/character/${name}`, import.meta.url))));
   assert.doesNotMatch(start, /start-reading-(?:cushion|book)/);
   assert.doesNotMatch(styles, /start-reading-(?:cushion|book)/);
-  assert.match(app, /openLibraryWithTransition/);
+  assert.match(app, /const openLibrary = \(\) => \{\s*playPageTurnSound\(\);\s*navigate\('library'\);\s*\}/);
+  assert.doesNotMatch(app, /BookOpeningTransition|BOOK_OPENING|bookOpeningPhase|openLibraryWithTransition/);
+  assert.doesNotMatch(styles, /book-opening|opening-video/);
   assert.match(app, /visibilitychange/);
   assert.match(app, /pageshow/);
   assert.match(app, /setInterval\(markActive, 60_000\)/);
   assert.match(app, /returnedAt - wentHiddenAt >= APP_VIEW_RESUME_WINDOW_MS/);
-  assert.match(app, /setBookOpeningPhase\('reveal'\)/);
-  assert.match(transition, /data-testid="video-book-opening"/);
-  assert.match(transition, /assets\/video\/book-opening\.mp4/);
-  assert.match(transition, /muted/);
-  assert.match(transition, /onEnded=/);
-  assert.match(styles, /\.book-opening-overlay \{[^}]*background-color:#fff/);
-  assert.match(styles, /\.book-opening-video-stage \{[^}]*background-color:#fff/);
-  assert.match(styles, /\.book-opening-overlay\[data-phase="opening"\] \{ background-color:#fff; \}/);
-  assert.match(styles, /\.book-opening-overlay\[data-phase="glow"\] \{ background-color:#fff; \}/);
-  assert.match(styles, /@keyframes opening-video-enter/);
-  assert.match(styles, /@keyframes opening-soft-light/);
 });
 
 test('a voiceless sticker tap reveals a recording icon without opening details or the editor', async () => {

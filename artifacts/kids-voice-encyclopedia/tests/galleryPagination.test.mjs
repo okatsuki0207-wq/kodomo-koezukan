@@ -124,15 +124,13 @@ test('gallery cards render names as noninteractive labels and page through touch
   const styles = await readFile(new URL('../src/index.css', import.meta.url), 'utf8');
   const pagination = await readFile(new URL('../src/lib/galleryPagination.ts', import.meta.url), 'utf8');
   const phraseDialog = await readFile(new URL('../src/components/BookPassphraseDialog.tsx', import.meta.url), 'utf8');
-  const opening = await readFile(new URL('../src/components/BookOpeningTransition.tsx', import.meta.url), 'utf8');
-  const openingTiming = await readFile(new URL('../src/lib/bookOpening.ts', import.meta.url), 'utf8');
   const pageTurnSound = await readFile(new URL('../src/lib/pageTurnSound.ts', import.meta.url), 'utf8');
   const shareDialog = await readFile(new URL('../src/components/ShareLinkDialog.tsx', import.meta.url), 'utf8');
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const manifest = JSON.parse(await readFile(new URL('../public/manifest.webmanifest', import.meta.url), 'utf8'));
   assert.match(app, /pageItems\.map\(\(item\) =>/);
   assert.match(app, /preloadPageTurnSound\(\)/);
-  assert.match(app, /const openLibraryWithTransition = \(\) => \{[\s\S]*?unlockPageTurnSound\(\)/);
+  assert.match(app, /const openLibrary = \(\) => \{\s*playPageTurnSound\(\);\s*navigate\('library'\);\s*\}/);
   assert.match(app, /onTouchEnd=\{handleGalleryTouchEnd\}/);
   assert.match(app, /<span className="sticker-name"[^>]*data-testid=\{`label-card-name-/);
   assert.doesNotMatch(app, /<button[^>]*className="sticker-name"[^>]*onClick=/);
@@ -201,13 +199,9 @@ test('gallery cards render names as noninteractive labels and page through touch
   assert.match(app, /<ShareLinkDialog[\s\S]*?url=\{window\.location\.href\}/);
   assert.match(shareDialog, /リンクをコピー/);
   assert.match(shareDialog, /value=\{url\}[\s\S]*?readOnly/);
-  assert.match(app, /BOOK_OPENING_AFTER_SELECTION_KEY/);
-  assert.match(opening, /assets\/video\/book-opening\.mp4/);
-  assert.match(opening, /assets\/video\/book-opening-poster\.jpg/);
-  assert.match(opening, /playsInline/);
-  assert.match(opening, /muted/);
-  assert.match(openingTiming, /openingMs: 3_100/);
   assert.match(pageTurnSound, /audio\.volume = 0\.12/);
+  assert.doesNotMatch(app, /BookOpeningTransition|BOOK_OPENING|bookOpeningPhase|openLibraryWithTransition/);
+  assert.doesNotMatch(styles, /book-opening|opening-video/);
   assert.doesNotMatch(app, /FloatingVoicele|book-companion/);
   assert.doesNotMatch(styles, /book-companion/);
   assert.match(styles, /\.app-shell-library \.sticker-add-card \{[^}]*border:0;[^}]*background:transparent;[^}]*box-shadow:none/);
@@ -215,10 +209,8 @@ test('gallery cards render names as noninteractive labels and page through touch
   assert.equal(manifest.display, 'standalone');
   assert.deepEqual(manifest.display_override, ['fullscreen', 'standalone']);
   assert.equal(manifest.theme_color, '#f8f9fa');
-  const videoAsset = await readFile(new URL('../public/assets/video/book-opening.mp4', import.meta.url));
-  const videoPoster = await readFile(new URL('../public/assets/video/book-opening-poster.jpg', import.meta.url));
-  assert.ok(videoAsset.byteLength > 100_000);
-  assert.ok(videoPoster.byteLength > 1_000);
+  await assert.rejects(readFile(new URL('../public/assets/video/book-opening.mp4', import.meta.url)));
+  await assert.rejects(readFile(new URL('../public/assets/video/book-opening-poster.jpg', import.meta.url)));
 });
 
 test('PWA home-screen icons are present at the dimensions declared by the manifest', async () => {

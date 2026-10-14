@@ -20,13 +20,12 @@ type Props = {
   onRecord: () => void;
   showRecordAction?: boolean;
   onOpenEncyclopedia: () => void;
-  isTransitioning?: boolean;
 };
 
-export default function StartScreen({ onRecord, showRecordAction = true, onOpenEncyclopedia, isTransitioning = false }: Props) {
+export default function StartScreen({ onRecord, showRecordAction = true, onOpenEncyclopedia }: Props) {
   const [characterImage] = useState(() => VOICELE_IMAGES[Math.floor(Math.random() * VOICELE_IMAGES.length)]);
   return (
-    <section className={`start-screen${isTransitioning ? ' is-transitioning' : ''}`} aria-labelledby="start-title">
+    <section className="start-screen" aria-labelledby="start-title">
       <div className="start-character" role="img" aria-label="ボイスルが図鑑を見ています">
         <span className="start-orbit start-orbit-one" />
         <span className="start-orbit start-orbit-two" />
@@ -45,11 +44,11 @@ export default function StartScreen({ onRecord, showRecordAction = true, onOpenE
       <h2 id="start-title" className="start-title">さあ キロクしよう！</h2>
       <p className="start-message">わが家の声をあつめて育てる、<br />世界にひとつの宝物ずかん。</p>
       <div className="start-actions">
-        {showRecordAction && <button type="button" className="start-record-button" onClick={onRecord} disabled={isTransitioning} data-testid="button-start-record">
+        {showRecordAction && <button type="button" className="start-record-button" onClick={onRecord} data-testid="button-start-record">
           <Plus size={21} strokeWidth={2.5} />
           <span>キロクする</span>
         </button>}
-        <button type="button" className="start-library-button" onClick={onOpenEncyclopedia} disabled={isTransitioning} data-testid="button-open-encyclopedia">
+        <button type="button" className="start-library-button" onClick={onOpenEncyclopedia} data-testid="button-open-encyclopedia">
           <BookOpen size={19} />
           <span>ずかんをみる</span>
         </button>
