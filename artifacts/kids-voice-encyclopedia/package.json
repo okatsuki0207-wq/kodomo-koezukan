@@ -8,7 +8,7 @@
     "build": "vite build --config vite.config.ts",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --experimental-vm-modules --test tests/audioTrim.test.mjs tests/storageDiagnostics.test.mjs tests/categories.test.mjs tests/keepsakeCategories.test.mjs tests/gallerySettings.test.mjs tests/galleryPagination.test.mjs tests/cropGeometry.test.mjs tests/guidedSegmentation.test.mjs tests/editorDetails.test.mjs tests/localDraft.test.mjs tests/bookIdentity.test.mjs",
+    "test": "node --experimental-vm-modules --test tests/audioTrim.test.mjs tests/storageDiagnostics.test.mjs tests/categories.test.mjs tests/keepsakeCategories.test.mjs tests/gallerySettings.test.mjs tests/galleryPagination.test.mjs tests/cropGeometry.test.mjs tests/guidedSegmentation.test.mjs tests/editorDetails.test.mjs tests/localDraft.test.mjs tests/bookIdentity.test.mjs tests/archiveManagement.test.mjs",
     "test:cloud": "node tests/runCloudTests.mjs"
   },
   "devDependencies": {

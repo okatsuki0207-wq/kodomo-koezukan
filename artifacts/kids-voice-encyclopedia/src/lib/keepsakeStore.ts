@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { collection, doc, getFirestore, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, deleteField, doc, getFirestore, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { getDownloadURL, getStorage, ref } from 'firebase/storage';
 import { firebaseConfig, isFirebaseConfigured } from '../firebaseConfig';
 import { storageFailureMessage } from './storageDiagnostics';
@@ -139,6 +139,14 @@ export async function updateKeepsakeCategory(id: string, categoryId: string | nu
   validateCategoryId(categoryId);
   const { bookId } = await getOwnerBookContext();
   await deadline(updateDoc(doc(db!, 'books', bookId, 'cards', id), { categoryId }));
+}
+
+/** Archive and restore only update card metadata; media files remain untouched. */
+export async function setKeepsakeArchived(id: string, archived: boolean): Promise<void> {
+  const { bookId } = await getOwnerBookContext();
+  await deadline(updateDoc(doc(db!, 'books', bookId, 'cards', id), archived
+    ? { archived: true, archivedAt: serverTimestamp() }
+    : { archived: false, archivedAt: deleteField() }));
 }
 
 export function firebaseError(error: unknown): string {

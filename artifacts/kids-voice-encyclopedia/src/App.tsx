@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type TouchEvent } from 'react';
 import {
   AlertCircle,
+  Archive,
   BookOpen,
   Camera,
   Check,
@@ -35,19 +36,21 @@ import { VoicePlayback, VoiceShuffleBag } from './lib/voicePlayback';
 import DetailDialogShell from './components/DetailDialogShell';
 import StartScreen from './components/StartScreen';
 import SettingsDialog from './components/SettingsDialog';
+import ArchiveDialog from './components/ArchiveDialog';
 import BookPassphraseDialog from './components/BookPassphraseDialog';
 import ShareLinkDialog from './components/ShareLinkDialog';
 import { useCategories } from './hooks/useCategories';
 import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, sortGalleryItems, type GallerySettings } from './lib/gallerySettings';
 import { COMPACT_GALLERY_PAGE_SIZE, clampGalleryPage, galleryPageCount, galleryPageItems, galleryPageSize, gallerySwipeDelta } from './lib/galleryPagination';
 import { playPageTurnSound, preloadPageTurnSound, unlockPageTurnSound } from './lib/pageTurnSound';
-import { activateBookForPassphrase, deleteKeepsake, editKeepsake, firebaseError, hasActivePassphraseBook, saveGallerySettings, saveKeepsake, subscribeGallerySettings, subscribeKeepsakes, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
+import { activateBookForPassphrase, deleteKeepsake, editKeepsake, firebaseError, hasActivePassphraseBook, saveGallerySettings, saveKeepsake, setKeepsakeArchived, subscribeGallerySettings, subscribeKeepsakes, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
 import { getVoices, type VoiceAsset } from './lib/voiceAssets';
 import { trimLeadingSilence } from './lib/audioTrim';
 import { preloadRecordingGuide } from './lib/recordingCue';
 import { hasNewKeepsakeDraftContent, type NewKeepsakeDraftInput } from './lib/newKeepsakeDraft';
 import { APP_LAST_ACTIVE_STORAGE_KEY, APP_VIEW_RESUME_WINDOW_MS, APP_VIEW_STORAGE_KEY, persistAppView, restoreAppView, type AppView } from './lib/appViewState';
 import { isFirebaseConfigured } from './firebaseConfig';
+import { activeKeepsakes, archivedKeepsakes } from './lib/archiveManagement';
 import './index.css';
 
 function formatStamp(timestamp: number) {
@@ -71,6 +74,9 @@ function loadReadOnlyMode() {
 function App() {
   const [items, setItems] = useState<Keepsake[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiveBusyId, setArchiveBusyId] = useState<string | null>(null);
+  const [archiveError, setArchiveError] = useState('');
   const [gallerySettings, setGallerySettings] = useState<GallerySettings>(() => ({ ...DEFAULT_GALLERY_SETTINGS }));
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [readOnlyMode, setReadOnlyMode] = useState(loadReadOnlyMode);
@@ -108,6 +114,7 @@ function App() {
   const [playingItemId, setPlayingItemId] = useState<string | null>(null);
   const [playingUrl, setPlayingUrl] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [processingVoice, setProcessingVoice] = useState(false);
@@ -240,7 +247,8 @@ function App() {
       window.visualViewport?.removeEventListener('resize', updateViewportHeight);
     };
   }, []);
-  const visibleItems = sortGalleryItems(items, gallerySettings, selectedCategory);
+  const visibleItems = sortGalleryItems(activeKeepsakes(items), gallerySettings, selectedCategory);
+  const archivedItems = archivedKeepsakes(items);
   const pageSize = galleryPageSize(viewportHeight);
   const showAddCard = !readOnlyMode;
   const pageCount = galleryPageCount(visibleItems.length, pageSize, showAddCard);
@@ -451,7 +459,7 @@ function App() {
     const current = items.find((entry) => entry.id === item.id);
     if (!mutationLock.current && current) openDetail(current);
   }, undefined, (item) => playKeepsake(item));
-  const closeDetail = () => { if (mutationLock.current) return; stopPlayback(); setDetail(null); setEditOpen(false); setConfirmDelete(false); };
+  const closeDetail = () => { if (mutationLock.current) return; stopPlayback(); setDetail(null); setEditOpen(false); setConfirmDelete(false); setConfirmArchive(false); };
 
   const changeDetailCategory = async (categoryId: string | null) => {
     if (readOnlyMode || !detail || mutationLock.current) return;
@@ -472,6 +480,7 @@ function App() {
     setDetail(item);
     setEditOpen(false);
     setConfirmDelete(false);
+    setConfirmArchive(false);
   };
 
   const playKeepsake = (item: Keepsake) => {
@@ -660,6 +669,54 @@ function App() {
     finally { mutationLock.current = false; setBusy(false); }
   };
 
+  const archiveCard = async () => {
+    if (readOnlyMode || !detail || mutationLock.current) return;
+    const target = detail;
+    mutationLock.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      await setKeepsakeArchived(target.id, true);
+      setItems((list) => list.map((item) => item.id === target.id ? { ...item, archived: true } : item));
+      stopPlayback();
+      setDetail(null);
+      setConfirmArchive(false);
+    } catch (caught) { setError(firebaseError(caught)); }
+    finally { mutationLock.current = false; setBusy(false); }
+  };
+
+  const changeArchiveState = async (item: Keepsake, archived: boolean) => {
+    if (readOnlyMode || mutationLock.current) return;
+    mutationLock.current = true;
+    setArchiveBusyId(item.id);
+    setArchiveError('');
+    try {
+      await setKeepsakeArchived(item.id, archived);
+      setItems((list) => list.map((entry) => entry.id === item.id ? { ...entry, archived } : entry));
+    } catch (caught) {
+      setArchiveError(firebaseError(caught));
+    } finally {
+      mutationLock.current = false;
+      setArchiveBusyId(null);
+    }
+  };
+
+  const permanentlyDeleteArchivedCard = async (item: Keepsake) => {
+    if (readOnlyMode || mutationLock.current) return;
+    mutationLock.current = true;
+    setArchiveBusyId(item.id);
+    setArchiveError('');
+    try {
+      await deleteKeepsake(item);
+      setItems((list) => list.filter((entry) => entry.id !== item.id));
+    } catch (caught) {
+      setArchiveError(firebaseError(caught));
+    } finally {
+      mutationLock.current = false;
+      setArchiveBusyId(null);
+    }
+  };
+
   const playDetailVoice = (url: string) => {
     if (!detail) return;
     if (playingUrl === url && playback.isActive(detail.id)) { stopPlayback(); return; }
@@ -710,7 +767,7 @@ function App() {
   const formatTime = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   return (
     <div className={`app-shell${view === 'library' ? ' app-shell-library' : ''}`}>
-      <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen || bookPassphraseOpen || shareLinkDialogOpen}>
+      <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || bookPassphraseOpen || shareLinkDialogOpen}>
         <div className="topbar-row">
           <button type="button" className="brand brand-home" onClick={() => navigate('start')} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
             <span className="brand-mark"><BookOpen size={20} strokeWidth={1.8} /></span>
@@ -725,7 +782,7 @@ function App() {
       {shareFeedback && <p className="share-feedback" role="status" data-testid="status-share-feedback">{shareFeedback}</p>}
 
       {view === 'start' ? (
-        <main className="start-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || bookPassphraseOpen || shareLinkDialogOpen}>
+        <main className="start-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || bookPassphraseOpen || shareLinkDialogOpen}>
           <StartScreen
             onRecord={openCreate}
             showRecordAction={!readOnlyMode}
@@ -733,7 +790,7 @@ function App() {
           />
         </main>
       ) : (
-      <main className="page-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || bookPassphraseOpen || shareLinkDialogOpen}>
+      <main className="page-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || bookPassphraseOpen || shareLinkDialogOpen}>
         <CategoryBar
           categories={categories}
           selected={selectedCategory}
@@ -989,10 +1046,12 @@ function App() {
                 {getVoices(detail).map((v, i, all) => { const on = playing && playingItemId === detail.id && playingUrl === v.url; return (
                   <button key={v.id} type="button" className="record-button primary" onClick={() => playDetailVoice(v.url)} data-testid={i === 0 ? 'button-play-detail-voice' : `button-play-detail-voice-${i}`}>{on ? <Pause size={16} /> : <Play size={16} />}{on ? 'とめる' : all.length > 1 ? `声${i + 1}をきく` : '声をきく'}</button>); })}
                  {!readOnlyMode && <button type="button" className="record-button" disabled={busy} onClick={() => { stopPlayback(); setEditOpen(true); }} data-testid="button-edit-card"><Pencil size={15} /> へんしゅう</button>}
+                 {!readOnlyMode && <button type="button" className="record-button archive-card-button" disabled={busy} onClick={() => setConfirmArchive((value) => !value)} data-testid="button-archive-card"><Archive size={15} /> アーカイブする</button>}
                  {!readOnlyMode && <button type="button" className="plain-action" disabled={busy} onClick={() => setConfirmDelete((value) => !value)} aria-label="このキロクを削除" data-testid="button-delete-card"><Trash2 size={17} /></button>}
               </div>
             </div>
             {confirmDelete && !readOnlyMode && <div className="delete-confirm" role="alert"><AlertCircle size={16} />写真・声・このキロクを完全に削除しますか？<button type="button" disabled={busy} onClick={deleteCard} data-testid="button-confirm-delete">{busy ? '削除中…' : '削除する'}</button><button type="button" disabled={busy} onClick={() => setConfirmDelete(false)}>やめる</button></div>}
+            {confirmArchive && !readOnlyMode && <div className="archive-confirm" role="alert"><AlertCircle size={16} />このキロクを一覧からしまいます。写真と声は残ります。<button type="button" disabled={busy} onClick={archiveCard} data-testid="button-confirm-archive">{busy ? '処理中…' : 'しまう'}</button><button type="button" disabled={busy} onClick={() => setConfirmArchive(false)}>やめる</button></div>}
             {error && <p className="form-error" role="alert">{error}</p>}
           </DetailDialogShell>
         </div>
@@ -1041,6 +1100,11 @@ function App() {
           setBookPassphraseMode('switch');
           setBookPassphraseOpen(true);
         }}
+        onManageArchive={() => {
+          setSettingsOpen(false);
+          setArchiveError('');
+          setArchiveOpen(true);
+        }}
         onClose={() => setSettingsOpen(false)}
         onSave={async (next) => {
           try {
@@ -1050,6 +1114,14 @@ function App() {
             throw new Error(firebaseError(caught));
           }
         }}
+      />}
+      {archiveOpen && !readOnlyMode && <ArchiveDialog
+        items={archivedItems}
+        busyId={archiveBusyId}
+        error={archiveError}
+        onRestore={(item) => { void changeArchiveState(item, false); }}
+        onDelete={(item) => { void permanentlyDeleteArchivedCard(item); }}
+        onClose={() => { if (!archiveBusyId) setArchiveOpen(false); }}
       />}
       {bookPassphraseOpen && <BookPassphraseDialog
         mode={bookPassphraseMode}

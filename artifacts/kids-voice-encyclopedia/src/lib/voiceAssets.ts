@@ -16,6 +16,10 @@ export function keepsakeFromData(id: string, data: Record<string, any>): Keepsak
     id, itemName: data.itemName, photo: data.photo, voice: data.voice ?? null,
     photoPath: data.photoPath, voicePath: data.voicePath ?? null,
     categoryId: data.categoryId ?? null,
+    ...(data.archived === true ? { archived: true } : {}),
+    ...(data.archivedAt ? {
+      archivedAt: data.archivedAt.toMillis?.() ?? data.archivedAt.getTime?.() ?? null,
+    } : {}),
     ...(Array.isArray(data.voices) ? { voices: data.voices } : {}),
     createdAt: data.createdAt?.toMillis?.() ?? data.createdAt?.getTime?.() ?? Date.now(),
   };

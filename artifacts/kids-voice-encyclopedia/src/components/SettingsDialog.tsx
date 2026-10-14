@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { ArrowRightLeft, Eye, Shuffle, X } from 'lucide-react';
+import { Archive, ArrowRightLeft, Eye, Shuffle, X } from 'lucide-react';
 import { normalizeGallerySettings, type GallerySettings } from '../lib/gallerySettings';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 
@@ -8,6 +8,7 @@ type Props = {
   readOnlyMode: boolean;
   onToggleReadOnlyMode: () => void;
   onSwitchBook: () => void;
+  onManageArchive: () => void;
   onSave: (settings: GallerySettings) => Promise<void>;
   onClose: () => void;
 };
@@ -24,6 +25,7 @@ export default function SettingsDialog({
   readOnlyMode,
   onToggleReadOnlyMode,
   onSwitchBook,
+  onManageArchive,
   onSave,
   onClose,
 }: Props) {
@@ -110,6 +112,19 @@ export default function SettingsDialog({
                 <small>別の図鑑をひらきます。</small>
               </span>
             </button>
+            {!readOnlyMode && <button
+              type="button"
+              className="settings-mode-option settings-archive-option"
+              disabled={busy}
+              onClick={onManageArchive}
+              data-testid="setting-manage-archive"
+            >
+              <Archive size={18} />
+              <span className="settings-option-copy">
+                <strong>アーカイブの整理</strong>
+                <small>しまったキロクをもどす、または完全に削除します。</small>
+              </span>
+            </button>}
           </div>
         </section>
 

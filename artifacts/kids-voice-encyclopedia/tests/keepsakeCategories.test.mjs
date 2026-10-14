@@ -28,6 +28,7 @@ if (!vm.SourceTextModule) {
       'firebase/app': { initializeApp: () => ({}) },
       'firebase/firestore': {
         getFirestore: () => ({}),
+        deleteField: () => ({ deleteField: true }),
         collection: (_db, ...parts) => parts.join('/'),
         doc: (_db, ...parts) => parts.join('/'),
         orderBy: (...args) => args,
@@ -39,7 +40,9 @@ if (!vm.SourceTextModule) {
         updateDoc: async (path, data) => {
           calls.push(['updateDoc', path, data]);
           if (!records.has(path)) throw new Error('missing record');
-          records.set(path, { ...records.get(path), ...data });
+          const next = { ...records.get(path), ...data };
+          for (const [key, value] of Object.entries(data)) if (value?.deleteField) delete next[key];
+          records.set(path, next);
         },
         deleteDoc: async (path) => { calls.push(['deleteDoc', path]); records.delete(path); },
         onSnapshot: (query, onChange) => {
@@ -169,6 +172,18 @@ if (!vm.SourceTextModule) {
     await api.updateKeepsakeCategory('card', null);
     assert.equal(records.get(path).categoryId, null);
     await assert.rejects(api.updateKeepsakeCategory('card', 'untrusted'));
+  });
+
+  test('archiving and restoring only changes visibility metadata and retains card media', async () => {
+    const { api, records, calls, timestamp } = await fixture();
+    const path = 'books/test-book/cards/card';
+    const original = { itemName: '大切な絵', photo: 'photo-url', voice: 'voice-url', photoPath: 'photo-path', voicePath: 'voice-path', createdAt: 123 };
+    records.set(path, original);
+    await api.setKeepsakeArchived('card', true);
+    assert.deepEqual(records.get(path), { ...original, archived: true, archivedAt: timestamp });
+    await api.setKeepsakeArchived('card', false);
+    assert.deepEqual(records.get(path), { ...original, archived: false });
+    assert.deepEqual(calls.filter(([operation]) => operation === 'deleteObject'), []);
   });
 
   test('new card persists assigned category; unclassified legacy saves stay compatible', async () => {

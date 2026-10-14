@@ -391,6 +391,31 @@ button:disabled {cursor:not-allowed;opacity:.55;}
   .voice-notes > span { animation: none; opacity: .85; transform: translateY(-16px); }
 }
 
+/* Archive management */
+.archive-dialog { width:min(100%,700px); }
+.archive-list { list-style:none; display:grid; gap:10px; margin:0; padding:0; }
+.archive-row { display:flex; align-items:center; gap:12px; min-width:0; padding:10px; border:1px solid #e6e5d7; border-radius:14px; background:#fff; }
+.archive-thumbnail { width:56px; height:56px; flex:0 0 56px; object-fit:contain; border-radius:10px; background:#fafaf5; }
+.archive-thumbnail-empty { display:grid; place-items:center; color:#9daa8d; }
+.archive-copy { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
+.archive-copy > strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#51483e; font-size:13px; }
+.archive-copy > small { color:#958b7c; font-size:11px; }
+.archive-actions { display:flex; align-items:center; gap:6px; flex:0 0 auto; }
+.archive-restore,.archive-delete { min-height:38px; border:1px solid #d9dfd0; border-radius:999px; background:#f7faf3; color:#61775d; display:flex; align-items:center; justify-content:center; gap:5px; padding:0 11px; }
+.archive-delete { width:38px; padding:0; border-color:#ead8d0; background:#fff8f5; color:#a26050; }
+.archive-restore:disabled,.archive-delete:disabled { opacity:.5; }
+.archive-empty { padding:30px 12px; border:1px dashed #d9ded0; border-radius:14px; color:#817b70; text-align:center; font-size:13px; }
+.archive-confirm,.archive-delete-confirm { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:9px; padding:9px 10px; border-radius:10px; background:#fbf2e9; color:#8b594b; font-size:11px; line-height:1.5; }
+.archive-confirm button,.archive-delete-confirm button { border:0; border-radius:999px; background:#fff; color:#9a594b; padding:6px 10px; font-size:11px; font-weight:700; }
+.archive-card-button { color:#718064; border-color:#d5decf; background:#f7faf3; }
+.archive-delete-confirm { display:flex; }
+@media (max-width:540px) {
+  .archive-row { align-items:flex-start; gap:8px; padding:8px; }
+  .archive-thumbnail { width:46px; height:46px; flex-basis:46px; }
+  .archive-restore { min-height:36px; padding:0 9px; font-size:11px; }
+  .archive-delete { width:36px; min-height:36px; }
+}
+
 /* Compact header + gallery first */
 .topbar { height:60px; min-height:60px; padding:0 16px; flex-wrap:nowrap; gap:8px; }
 .brand { flex:1 1 auto; gap:10px; }

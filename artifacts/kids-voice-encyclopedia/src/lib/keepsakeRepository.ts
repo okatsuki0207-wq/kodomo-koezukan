@@ -16,6 +16,8 @@ export type Keepsake = {
   photoPath?: string;
   voicePath?: string | null;
   categoryId?: string | null;
+  archived?: boolean;
+  archivedAt?: number | null;
   voices?: VoiceAsset[];
 };
 
