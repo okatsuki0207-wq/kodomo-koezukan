@@ -492,7 +492,6 @@ function App() {
     }
     setRecordPromptId(null);
     setError('');
-    if (playback.isActive(item.id)) { playback.restart(item.id); return; }
     let bag = voiceShuffleBags.current.get(item.id);
     if (!bag) {
       bag = new VoiceShuffleBag((candidate) => candidate.id);
@@ -966,7 +965,7 @@ function App() {
                   )}
                   {rec.starting && <button type="button" className="record-button create-icon-button secondary-icon-button" onClick={rec.cancel} aria-label="録音を中止" title="録音を中止"><X size={19} /></button>}
                   {voice && !recording && !processingVoice && !rec.starting && <>
-                    <button type="button" className="record-button create-icon-button secondary-icon-button" disabled={busy} onClick={() => playback.play(voice, 'voice-preview')} aria-label={playing && playingUrl === voice ? '声をとめる' : '声をきく'} title={playing && playingUrl === voice ? '声をとめる' : '声をきく'} data-testid="button-preview-recording">{playing && playingUrl === voice ? <Pause size={20} /> : <Play size={20} />}</button>
+                    <button type="button" className="record-button create-icon-button secondary-icon-button" disabled={busy} onClick={() => playing && playingUrl === voice && playback.isActive('voice-preview') ? stopPlayback() : playback.play(voice, 'voice-preview')} aria-label={playing && playingUrl === voice ? '声をとめる' : '声をきく'} title={playing && playingUrl === voice ? '声をとめる' : '声をきく'} data-testid="button-preview-recording">{playing && playingUrl === voice ? <Pause size={20} /> : <Play size={20} />}</button>
                     <button type="button" className="record-button create-icon-button secondary-icon-button" disabled={busy} onClick={() => { stopPlayback(); setVoice(null); setVoiceBlob(null); setTrimOpen(false); setNotice('録音を消しました。'); }} aria-label="録音を消す" title="録音を消す" data-testid="button-remove-recording"><RotateCcw size={19} /></button>
                     <button type="button" className={`record-button create-icon-button secondary-icon-button${trimOpen ? ' is-selected' : ''}`} aria-expanded={trimOpen} aria-controls="new-keepsake-waveform" disabled={busy || draftLoading} onClick={() => setTrimOpen((open) => !open)} aria-label={trimOpen ? '波形編集を閉じる' : '波形を見てカット'} title={trimOpen ? '波形編集を閉じる' : '波形を見てカット'} data-testid="button-open-waveform-trim"><Scissors size={19} /></button>
                   </>}

@@ -149,7 +149,7 @@ test('tapping the active card restarts its current clip from the beginning witho
   p.dispose();
 });
 
-test('switching, same-card stop and stale play completion cannot activate another card', async () => {
+test('switching cards stops the previous voice and stale play completion cannot activate another card', async () => {
   const states = [], audios = [], resolves = [];
   const p = new VoicePlayback({ onChange: s => states.push(s), onError: () => assert.fail('unexpected error'),
     createAudio: () => { const a = fakeAudio(); a.play = () => { a.paused = false; return new Promise(r => resolves.push(r)); }; audios.push(a); return a; } });
@@ -160,8 +160,24 @@ test('switching, same-card stop and stale play completion cannot activate anothe
   resolves[1](); await Promise.resolve();
   assert.equal(states.at(-1).playing, true);
   assert.equal(audios[0].paused, true);
-  p.play('second', 'two');
-  assert.equal(states.at(-1), null);
+  p.dispose();
+});
+
+test('a new clip on the active card replaces the old clip without overlapping audio', async () => {
+  const states = [], audios = [];
+  const p = new VoicePlayback({
+    onChange: state => states.push(state),
+    onError: () => assert.fail('unexpected error'),
+    createAudio: url => { const audio = fakeAudio(); audio.url = url; audios.push(audio); return audio; },
+  });
+  p.play('voice-one', 'card');
+  await Promise.resolve();
+  p.play('voice-two', 'card');
+  await Promise.resolve();
+  assert.equal(audios[0].paused, true);
+  assert.equal(audios[0].playCalls, 1);
+  assert.equal(audios[1].playCalls, 1);
+  assert.deepEqual(states.at(-1), { id: 'card', url: 'voice-two', playing: true });
   p.dispose();
 });
 

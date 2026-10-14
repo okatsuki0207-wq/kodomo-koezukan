@@ -134,7 +134,6 @@ export class VoicePlayback {
   }
 
   play(url: string, id: string) {
-    if (this.id === id && this.active) { this.stop(); return; }
     this.stop();
     const audio = this.get(url), token = ++this.token;
     this.active = audio; this.activeUrl = url; this.id = id;
