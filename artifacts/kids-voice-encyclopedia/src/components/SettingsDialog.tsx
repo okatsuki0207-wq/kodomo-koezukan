@@ -1,13 +1,12 @@
 import { useRef, useState } from 'react';
-import { Archive, ArrowRightLeft, Eye, Shuffle, X } from 'lucide-react';
+import { Archive, Eye, Shuffle, X } from 'lucide-react';
 import { normalizeGallerySettings, type GallerySettings } from '../lib/gallerySettings';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 
 type Props = {
   settings: GallerySettings;
-  readOnlyMode: boolean;
-  onToggleReadOnlyMode: () => void;
-  onSwitchBook: () => void;
+  childMode: 'normal' | 'view' | 'add';
+  onChildModeChange: (mode: 'normal' | 'view' | 'add') => void;
   onManageArchive: () => void;
   onSave: (settings: GallerySettings) => Promise<void>;
   onClose: () => void;
@@ -22,9 +21,8 @@ function nextShuffleSeed() {
 
 export default function SettingsDialog({
   settings,
-  readOnlyMode,
-  onToggleReadOnlyMode,
-  onSwitchBook,
+  childMode,
+  onChildModeChange,
   onManageArchive,
   onSave,
   onClose,
@@ -48,7 +46,7 @@ export default function SettingsDialog({
     try {
       await onSave(next);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '設定を保存できませんでした。通信とFirebaseのルールを確認してください。');
+      setError(caught instanceof Error ? caught.message : 'この端末に設定を保存できませんでした。');
     } finally {
       setBusy(false);
     }
@@ -69,19 +67,27 @@ export default function SettingsDialog({
           <div className="settings-mode-options" role="group" aria-label="ずかんの設定">
             <button
               type="button"
-              className={`settings-mode-option${readOnlyMode ? ' selected' : ''}`}
-              aria-pressed={readOnlyMode}
-              aria-label={`閲覧モード ${readOnlyMode ? 'オン' : 'オフ'}`}
+              className={`settings-mode-option${childMode === 'normal' ? ' selected' : ''}`}
+              aria-pressed={childMode === 'normal'}
+              aria-label="通常モード"
               disabled={busy}
-              onClick={onToggleReadOnlyMode}
-              data-testid="setting-read-only"
+              onClick={() => onChildModeChange('normal')}
+              data-testid="setting-mode-normal"
             >
-              <Eye size={18} />
+              <X size={18} />
               <span className="settings-option-copy">
-                <strong>閲覧モード</strong>
-                <small>{readOnlyMode ? 'オン：キロクの追加・編集・削除をかくします。閲覧と再生はできます。' : 'オフ：キロクの追加・編集・削除ができます。'}</small>
+                <strong>通常モード</strong>
+                <small>追加・編集・削除など、すべての操作ができます。</small>
               </span>
-              <span className={`settings-switch${readOnlyMode ? ' is-on' : ''}`} aria-hidden="true"><span /></span>
+              <span className={`settings-switch${childMode === 'normal' ? ' is-on' : ''}`} aria-hidden="true"><span /></span>
+            </button>
+            <button type="button" className={`settings-mode-option${childMode === 'view' ? ' selected' : ''}`} aria-pressed={childMode === 'view'} disabled={busy} onClick={() => onChildModeChange('view')} data-testid="setting-mode-child-view">
+              <Eye size={18} /><span className="settings-option-copy"><strong>こどもモード：見る・聞く</strong><small>追加・編集・削除はできません。</small></span>
+              <span className={`settings-switch${childMode === 'view' ? ' is-on' : ''}`} aria-hidden="true"><span /></span>
+            </button>
+            <button type="button" className={`settings-mode-option${childMode === 'add' ? ' selected' : ''}`} aria-pressed={childMode === 'add'} disabled={busy} onClick={() => onChildModeChange('add')} data-testid="setting-mode-child-add">
+              <Eye size={18} /><span className="settings-option-copy"><strong>こどもモード：追加・編集もOK</strong><small>新しいキロクや声を追加・編集できます。削除はできません。</small></span>
+              <span className={`settings-switch${childMode === 'add' ? ' is-on' : ''}`} aria-hidden="true"><span /></span>
             </button>
             <button
               type="button"
@@ -99,20 +105,7 @@ export default function SettingsDialog({
               </span>
               <span className={`settings-switch${settings.displayMode === 'shuffle' ? ' is-on' : ''}`} aria-hidden="true"><span /></span>
             </button>
-            <button
-              type="button"
-              className="settings-mode-option settings-book-switch"
-              disabled={busy}
-              onClick={onSwitchBook}
-              data-testid="setting-switch-book"
-            >
-              <ArrowRightLeft size={18} />
-              <span className="settings-option-copy">
-                <strong>あいことばを切り替える</strong>
-                <small>別の図鑑をひらきます。</small>
-              </span>
-            </button>
-            {!readOnlyMode && <button
+            {childMode === 'normal' && <button
               type="button"
               className="settings-mode-option settings-archive-option"
               disabled={busy}

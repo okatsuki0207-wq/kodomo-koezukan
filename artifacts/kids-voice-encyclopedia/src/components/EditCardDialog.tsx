@@ -44,7 +44,7 @@ export default function EditCardDialog({ item, categories, onSave, describeError
   const [photoSource, setPhotoSource] = useState('');
   const [originalPhoto, setOriginalPhoto] = useState<Blob | null>(null);
   const [slots, setSlots] = useState<Slot[]>(() =>
-    getVoices(base).map((v) => ({ key: v.id, id: v.id, url: v.url, path: v.path, fresh: false, replaced: false })));
+    getVoices(base).map((v) => ({ key: v.id, id: v.id, url: v.url, path: v.path, blob: (v as typeof v & { blob?: Blob }).blob, fresh: false, replaced: false })));
   const [target, setTarget] = useState<string | null>(null); // 録音/処理中のスロット
   const [processing, setProcessing] = useState(false);
   const [playingKey, setPlayingKey] = useState<string | null>(null);

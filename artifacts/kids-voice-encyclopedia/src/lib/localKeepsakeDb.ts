@@ -1,9 +1,9 @@
-import type { Keepsake } from './keepsakeRepository';
-import type { Category } from './categories';
-import type { GallerySettings } from './gallerySettings';
-import { DEFAULT_CATEGORIES } from './categories';
-import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings } from './gallerySettings';
-import { getVoices } from './voiceAssets';
+import type { Keepsake } from './keepsakeRepository.ts';
+import type { Category } from './categories.ts';
+import type { GallerySettings } from './gallerySettings.ts';
+import { DEFAULT_CATEGORIES } from './categories.ts';
+import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings } from './gallerySettings.ts';
+import { getVoices } from './voiceAssets.ts';
 
 type StoredVoice = { id: string; blob: Blob };
 type StoredKeepsake = Omit<Keepsake, 'photo' | 'voice' | 'voices' | 'photoBlob' | 'voiceBlob'> & {
@@ -77,8 +77,11 @@ function present(value: StoredKeepsake): Keepsake {
 async function allStored(): Promise<StoredKeepsake[]> {
   return request('cards', 'readonly', (store) => store.getAll());
 }
+export async function listKeepsakes(): Promise<Keepsake[]> {
+  return (await allStored()).map(present).sort((a, b) => b.createdAt - a.createdAt);
+}
 async function publish() {
-  const cards = (await allStored()).map(present).sort((a, b) => b.createdAt - a.createdAt);
+  const cards = await listKeepsakes();
   listeners.forEach((listener) => listener(cards));
 }
 async function asBlob(source: string | Blob, expected: 'image' | 'audio') {

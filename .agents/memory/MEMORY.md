@@ -9,3 +9,4 @@
 - [Firestore rule budgets](firestore-rule-budgets.md) — verify the maximum combined media edit; small edits can pass while larger atomic commits exceed the expression budget.
 - [Firestore rule publication](firestore-rule-publication.md) — emulator tests do not update hosted Firebase; publish changed rules in Console before new paths work.
 - [Child-friendly interactions](child-interactions.md) — protect overlapping child speech with browser echo cancellation; preserve the existing tap and recording UX rules.
+- [Local-first keepsake storage](local-first-storage.md) — IndexedDB is canonical after a one-time Firebase import; retain cloud originals and do not sync ongoing edits.

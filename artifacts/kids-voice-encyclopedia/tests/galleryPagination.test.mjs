@@ -136,7 +136,7 @@ test('gallery cards render names as noninteractive labels and page through touch
   assert.doesNotMatch(app, /<button[^>]*className="sticker-name"[^>]*onClick=/);
   assert.match(app, /className="sticker-photo-button"[\s\S]*?onClick=\{\(\) => playKeepsake\(item\)\}/);
   assert.match(app, /className="sticker-add-card"[\s\S]*?onClick=\{openCreate\}/);
-  assert.match(app, /const showAddCard = !readOnlyMode/);
+  assert.match(app, /const showAddCard = childMode !== 'view'/);
   assert.match(app, /showAddCard && currentPage === 0/);
   assert.match(app, /galleryPageItems\(visibleItems, currentPage, pageSize, showAddCard\)/);
   assert.doesNotMatch(app, /data-testid="button-create-card"/);
@@ -179,11 +179,7 @@ test('gallery cards render names as noninteractive labels and page through touch
   assert.match(styles, /\.sticker-collage\.page-turn-previous \{[^}]*animation:book-page-previous 1000ms/);
   assert.match(styles, /animation:book-sheet-next 1000ms/);
   assert.match(styles, /animation:book-sheet-previous 1000ms/);
-  assert.match(app, /if \(!hasActivePassphraseBook\(\)\)[\s\S]*setBookPassphraseOpen\(true\)/);
-  assert.match(app, /useState\(\(\) => view === 'library' && !hasActivePassphraseBook\(\)\)/);
-  assert.match(app, /activateBookForPassphrase\(passphrase\)/);
-  assert.match(app, /setBookPassphraseMode\('switch'\)/);
-  assert.match(app, /onSwitchBook=\{\(\) =>/);
+  assert.doesNotMatch(app, /BookPassphraseDialog|hasActivePassphraseBook|activateBookForPassphrase/);
   assert.match(phraseDialog, /autoComplete="off"/);
   assert.doesNotMatch(phraseDialog, /autoFocus/);
   assert.match(phraseDialog, /認証ではありません/);
@@ -191,14 +187,9 @@ test('gallery cards render names as noninteractive labels and page through touch
   assert.match(html, /rel="manifest" href="\/manifest\.webmanifest"/);
   assert.match(app, /document\.addEventListener\('pointerdown', unlockOnTrustedGesture, true\)/);
   assert.match(app, /document\.addEventListener\('touchstart', unlockOnTrustedGesture, \{ capture: true, passive: true \}\)/);
-  assert.match(app, /onClick=\{\(\) => \{ void shareEncyclopedia\(\); \}\} aria-label="ずかんを共有"/);
+  assert.doesNotMatch(app, /ShareLinkDialog|shareEncyclopedia|ずかんを共有/);
   assert.doesNotMatch(app, /beforeinstallprompt|openInstallExperience|InstallAppDialog/);
   assert.doesNotMatch(styles, /pwa-install-dialog|pwa-install-steps/);
-  assert.match(app, /navigator\.share/);
-  assert.match(app, /setShareLinkDialogOpen\(true\)/);
-  assert.match(app, /<ShareLinkDialog[\s\S]*?url=\{window\.location\.href\}/);
-  assert.match(shareDialog, /リンクをコピー/);
-  assert.match(shareDialog, /value=\{url\}[\s\S]*?readOnly/);
   assert.match(pageTurnSound, /audio\.volume = 0\.12/);
   assert.doesNotMatch(app, /BookOpeningTransition|BOOK_OPENING|bookOpeningPhase|openLibraryWithTransition/);
   assert.doesNotMatch(styles, /book-opening|opening-video/);

@@ -15,7 +15,6 @@ import {
   Play,
   Plus,
   RotateCcw,
-  Share2,
   Scissors,
   Settings,
   Square,
@@ -37,19 +36,16 @@ import DetailDialogShell from './components/DetailDialogShell';
 import StartScreen from './components/StartScreen';
 import SettingsDialog from './components/SettingsDialog';
 import ArchiveDialog from './components/ArchiveDialog';
-import BookPassphraseDialog from './components/BookPassphraseDialog';
-import ShareLinkDialog from './components/ShareLinkDialog';
 import { useCategories } from './hooks/useCategories';
 import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, sortGalleryItems, type GallerySettings } from './lib/gallerySettings';
 import { COMPACT_GALLERY_PAGE_SIZE, clampGalleryPage, galleryPageCount, galleryPageItems, galleryPageSize, gallerySwipeDelta } from './lib/galleryPagination';
 import { playPageTurnSound, preloadPageTurnSound, unlockPageTurnSound } from './lib/pageTurnSound';
-import { activateBookForPassphrase, deleteKeepsake, editKeepsake, firebaseError, hasActivePassphraseBook, saveGallerySettings, saveKeepsake, setKeepsakeArchived, subscribeGallerySettings, subscribeKeepsakes, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
+import { deleteKeepsake, editKeepsake, firebaseError, saveGallerySettings, saveKeepsake, setKeepsakeArchived, subscribeGallerySettings, subscribeKeepsakes, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
 import { getVoices, type VoiceAsset } from './lib/voiceAssets';
 import { trimLeadingSilence } from './lib/audioTrim';
 import { preloadRecordingGuide } from './lib/recordingCue';
 import { hasNewKeepsakeDraftContent, type NewKeepsakeDraftInput } from './lib/newKeepsakeDraft';
 import { APP_LAST_ACTIVE_STORAGE_KEY, APP_VIEW_RESUME_WINDOW_MS, APP_VIEW_STORAGE_KEY, persistAppView, restoreAppView, type AppView } from './lib/appViewState';
-import { isFirebaseConfigured } from './firebaseConfig';
 import { activeKeepsakes, archivedKeepsakes } from './lib/archiveManagement';
 import './index.css';
 
@@ -62,12 +58,14 @@ function formatDate(timestamp: number) {
 }
 
 const PAGE_TURN_ANIMATION_MS = 1_000;
-const READ_ONLY_MODE_STORAGE_KEY = 'kids-voice-encyclopedia:read-only-mode';
-function loadReadOnlyMode() {
+type ChildMode = 'normal' | 'view' | 'add';
+const CHILD_MODE_STORAGE_KEY = 'kids-voice-encyclopedia:child-mode';
+function loadChildMode(): ChildMode {
   try {
-    return window.localStorage.getItem(READ_ONLY_MODE_STORAGE_KEY) === 'true';
+    const value = window.localStorage.getItem(CHILD_MODE_STORAGE_KEY);
+    return value === 'view' || value === 'add' ? value : 'normal';
   } catch {
-    return false;
+    return 'normal';
   }
 }
 
@@ -79,10 +77,12 @@ function App() {
   const [archiveError, setArchiveError] = useState('');
   const [gallerySettings, setGallerySettings] = useState<GallerySettings>(() => ({ ...DEFAULT_GALLERY_SETTINGS }));
   const [settingsLoading, setSettingsLoading] = useState(true);
-  const [readOnlyMode, setReadOnlyMode] = useState(loadReadOnlyMode);
-  const [shareFeedback, setShareFeedback] = useState('');
-  const [shareLinkDialogOpen, setShareLinkDialogOpen] = useState(false);
-  const shareFeedbackTimer = useRef<number | null>(null);
+  const [childMode, setChildMode] = useState<ChildMode>(loadChildMode);
+  const readOnlyMode = childMode === 'view';
+  const [parentGateOpen, setParentGateOpen] = useState(false);
+  const [parentGateAnswer, setParentGateAnswer] = useState('');
+  const [parentGateError, setParentGateError] = useState('');
+  const [parentGateNumbers] = useState(() => [Math.floor(Math.random() * 5) + 2, Math.floor(Math.random() * 5) + 2]);
   const [view, setView] = useState<AppView>(() => {
     let saved: string | null = null;
     let lastActiveAt: string | null = null;
@@ -92,8 +92,6 @@ function App() {
     } catch { /* private browsing can block storage */ }
     return restoreAppView(window.location.pathname, saved, lastActiveAt);
   });
-  const [bookPassphraseOpen, setBookPassphraseOpen] = useState(() => view === 'library' && !hasActivePassphraseBook());
-  const [bookPassphraseMode, setBookPassphraseMode] = useState<'open' | 'switch'>('open');
   const hiddenAt = useRef<number | null>(null);
   const [recordPromptId, setRecordPromptId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -140,19 +138,8 @@ function App() {
     navigate('library');
   };
   const requestLibraryOpen = () => {
-    if (!hasActivePassphraseBook()) {
-      setBookPassphraseMode('open');
-      setBookPassphraseOpen(true);
-      return;
-    }
     createDraftSession.current++;
     openLibrary();
-  };
-  const selectBookAndReload = async (passphrase: string) => {
-    await activateBookForPassphrase(passphrase);
-    playPageTurnSound();
-    persistAppView('library');
-    window.location.reload();
   };
   useEffect(() => {
     preloadPageTurnSound();
@@ -230,14 +217,11 @@ function App() {
   }, []);
   useEffect(() => {
     try {
-      window.localStorage.setItem(READ_ONLY_MODE_STORAGE_KEY, String(readOnlyMode));
+      window.localStorage.setItem(CHILD_MODE_STORAGE_KEY, childMode);
     } catch {
       // The current tab still honors the mode if browser storage is unavailable.
     }
-  }, [readOnlyMode]);
-  useEffect(() => () => {
-    if (shareFeedbackTimer.current !== null) window.clearTimeout(shareFeedbackTimer.current);
-  }, []);
+  }, [childMode]);
   useEffect(() => {
     const updateViewportHeight = () => setViewportHeight(window.innerHeight);
     window.addEventListener('resize', updateViewportHeight);
@@ -250,7 +234,7 @@ function App() {
   const visibleItems = sortGalleryItems(activeKeepsakes(items), gallerySettings, selectedCategory);
   const archivedItems = archivedKeepsakes(items);
   const pageSize = galleryPageSize(viewportHeight);
-  const showAddCard = !readOnlyMode;
+  const showAddCard = childMode !== 'view';
   const pageCount = galleryPageCount(visibleItems.length, pageSize, showAddCard);
   const currentPage = clampGalleryPage(gridPage, pageCount);
   const pageItems = galleryPageItems(visibleItems, currentPage, pageSize, showAddCard);
@@ -279,6 +263,19 @@ function App() {
       setPageTurnDirection(null);
       pageTurnTimer.current = null;
     }, PAGE_TURN_ANIMATION_MS);
+  };
+  const openSettings = () => {
+    stopPlayback();
+    if (childMode === 'normal') setSettingsOpen(true);
+    else { setParentGateAnswer(''); setParentGateError(''); setParentGateOpen(true); }
+  };
+  const passParentGate = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (parentGateAnswer.trim() !== String(parentGateNumbers[0] + parentGateNumbers[1])) { setParentGateError('答えがちがいます。'); return; }
+    setParentGateOpen(false);
+    setSettingsOpen(true);
+    setParentGateAnswer('');
+    setParentGateError('');
   };
   const handleGalleryTouchStart = (event: TouchEvent<HTMLDivElement>) => {
     if (event.touches.length !== 1) {
@@ -396,13 +393,13 @@ function App() {
     const timer = window.setTimeout(() => {
       if (!cancelled) {
         setLoading(false);
-        console.warn('Firebaseのキロク読み込みがタイムアウトしました。');
+      console.warn('端末内のキロク読み込みがタイムアウトしました。');
       }
     }, 20_000);
     const fail = (caught: unknown) => {
       window.clearTimeout(timer);
       if (!cancelled) {
-        console.error('Firebaseのキロク読み込みに失敗しました。', firebaseError(caught));
+        console.error('端末内のキロク読み込みに失敗しました。', firebaseError(caught));
         setLoading(false);
       }
     };
@@ -655,7 +652,7 @@ function App() {
   };
 
   const deleteCard = async () => {
-    if (readOnlyMode || !detail || mutationLock.current) return;
+    if (childMode !== 'normal' || !detail || mutationLock.current) return;
     mutationLock.current = true;
     setBusy(true);
     setError('');
@@ -669,7 +666,7 @@ function App() {
   };
 
   const archiveCard = async () => {
-    if (readOnlyMode || !detail || mutationLock.current) return;
+    if (childMode !== 'normal' || !detail || mutationLock.current) return;
     const target = detail;
     mutationLock.current = true;
     setBusy(true);
@@ -685,7 +682,7 @@ function App() {
   };
 
   const changeArchiveState = async (item: Keepsake, archived: boolean) => {
-    if (readOnlyMode || mutationLock.current) return;
+    if (childMode !== 'normal' || mutationLock.current) return;
     mutationLock.current = true;
     setArchiveBusyId(item.id);
     setArchiveError('');
@@ -701,7 +698,7 @@ function App() {
   };
 
   const permanentlyDeleteArchivedCard = async (item: Keepsake) => {
-    if (readOnlyMode || mutationLock.current) return;
+    if (childMode !== 'normal' || mutationLock.current) return;
     mutationLock.current = true;
     setArchiveBusyId(item.id);
     setArchiveError('');
@@ -724,64 +721,23 @@ function App() {
     stopPlayback(); playback.play(url, detail.id);
   };
 
-  const showShareFeedback = (message: string) => {
-    setShareFeedback(message);
-    if (shareFeedbackTimer.current !== null) window.clearTimeout(shareFeedbackTimer.current);
-    shareFeedbackTimer.current = window.setTimeout(() => {
-      setShareFeedback('');
-      shareFeedbackTimer.current = null;
-    }, 2600);
-  };
-
-  const shareEncyclopedia = async () => {
-    const url = window.location.href;
-    if (typeof navigator.share === 'function') {
-      try {
-        await navigator.share({
-          title: 'こどもの こえずかん',
-          text: 'わが家のずかんを見てね。',
-          url,
-        });
-        return;
-      } catch (caught) {
-        if (caught instanceof Error && caught.name === 'AbortError') return;
-      }
-    }
-    if (await copyEncyclopediaLink()) return;
-    setShareLinkDialogOpen(true);
-  };
-
-  const copyEncyclopediaLink = async () => {
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API is unavailable');
-      await navigator.clipboard.writeText(window.location.href);
-      setShareLinkDialogOpen(false);
-      showShareFeedback('共有リンクをコピーしました。');
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
   const formatTime = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   return (
     <div className={`app-shell${view === 'library' ? ' app-shell-library' : ''}`}>
-      <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || bookPassphraseOpen || shareLinkDialogOpen}>
+      <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen}>
         <div className="topbar-row">
           <button type="button" className="brand brand-home" onClick={() => navigate('start')} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
             <span className="brand-mark"><BookOpen size={20} strokeWidth={1.8} /></span>
             <h1 className="brand-title" style={{ margin: 0 }}>こどもの こえずかん</h1>
           </button>
           <div className="topbar-actions">
-            <button type="button" className="header-settings-button" onClick={() => { stopPlayback(); setSettingsOpen(true); }} disabled={settingsLoading} aria-label="設定" title="設定" data-testid="button-settings"><Settings size={17} /></button>
-            <button type="button" className="header-settings-button" onClick={() => { void shareEncyclopedia(); }} aria-label="ずかんを共有" title="ずかんを共有" data-testid="button-share"><Share2 size={17} /></button>
+            <button type="button" className="header-settings-button" onClick={openSettings} disabled={settingsLoading} aria-label="設定" title="設定" data-testid="button-settings"><Settings size={17} /></button>
           </div>
         </div>
       </header>
-      {shareFeedback && <p className="share-feedback" role="status" data-testid="status-share-feedback">{shareFeedback}</p>}
 
       {view === 'start' ? (
-        <main className="start-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || bookPassphraseOpen || shareLinkDialogOpen}>
+        <main className="start-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen}>
           <StartScreen
             onRecord={openCreate}
             showRecordAction={!readOnlyMode}
@@ -789,7 +745,7 @@ function App() {
           />
         </main>
       ) : (
-      <main className="page-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || bookPassphraseOpen || shareLinkDialogOpen}>
+      <main className="page-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen}>
         <CategoryBar
           categories={categories}
           selected={selectedCategory}
@@ -810,7 +766,7 @@ function App() {
           <span className="book-left-page-lines" />
         </div>
         <div id="category-panel" role="tabpanel" aria-labelledby={`category-tab-${selectedCategory ?? 'all'}`}>
-        {loading ? <p className="notice neutral" role="status">Firebase から図鑑を読み込んでいます…</p> : visibleItems.length === 0 && readOnlyMode && selectedCategory === null ? (
+        {loading ? <p className="notice neutral" role="status">端末内の図鑑を読み込んでいます…</p> : visibleItems.length === 0 && readOnlyMode && selectedCategory === null ? (
           <section className="empty-state" data-testid="empty-keepsakes">
             <div className="empty-illustration"><RecordingCharacter pose="sit" /></div>
             <h2 className="empty-title">まだ、まっさらなページ</h2>
@@ -999,7 +955,7 @@ function App() {
             {error && <p className="form-error" role="alert" data-testid="status-form-error">{error}</p>}
             <div className="dialog-actions create-dialog-actions">
               <button type="button" className="cancel-button create-icon-button secondary-icon-button" disabled={busy} onClick={closeCreate} aria-label="やめる" title="やめる" data-testid="button-cancel-create"><X size={19} /></button>
-              <button type="button" className="save-button create-icon-button" onClick={saveCard} disabled={recording || rec.micStatus === 'preparing' || rec.starting || processingVoice || draftLoading || busy || !isFirebaseConfigured || loading} aria-label={busy ? 'キロクを保存しています' : 'キロクする'} title={busy ? 'キロクを保存しています' : 'キロクする'} data-testid="button-save-card"><Check size={21} /></button>
+              <button type="button" className="save-button create-icon-button" onClick={saveCard} disabled={recording || rec.micStatus === 'preparing' || rec.starting || processingVoice || draftLoading || busy || loading} aria-label={busy ? 'キロクを保存しています' : 'キロクする'} title={busy ? 'キロクを保存しています' : 'キロクする'} data-testid="button-save-card"><Check size={21} /></button>
             </div>
           </DetailDialogShell>
         </div>
@@ -1045,12 +1001,12 @@ function App() {
                 {getVoices(detail).map((v, i, all) => { const on = playing && playingItemId === detail.id && playingUrl === v.url; return (
                   <button key={v.id} type="button" className="record-button primary" onClick={() => playDetailVoice(v.url)} data-testid={i === 0 ? 'button-play-detail-voice' : `button-play-detail-voice-${i}`}>{on ? <Pause size={16} /> : <Play size={16} />}{on ? 'とめる' : all.length > 1 ? `声${i + 1}をきく` : '声をきく'}</button>); })}
                  {!readOnlyMode && <button type="button" className="record-button" disabled={busy} onClick={() => { stopPlayback(); setEditOpen(true); }} data-testid="button-edit-card"><Pencil size={15} /> へんしゅう</button>}
-                 {!readOnlyMode && <button type="button" className="record-button archive-card-button" disabled={busy} onClick={() => setConfirmArchive((value) => !value)} data-testid="button-archive-card"><Archive size={15} /> アーカイブする</button>}
-                 {!readOnlyMode && <button type="button" className="plain-action" disabled={busy} onClick={() => setConfirmDelete((value) => !value)} aria-label="このキロクを削除" data-testid="button-delete-card"><Trash2 size={17} /></button>}
+                 {childMode === 'normal' && <button type="button" className="record-button archive-card-button" disabled={busy} onClick={() => setConfirmArchive((value) => !value)} data-testid="button-archive-card"><Archive size={15} /> アーカイブする</button>}
+                 {childMode === 'normal' && <button type="button" className="plain-action" disabled={busy} onClick={() => setConfirmDelete((value) => !value)} aria-label="このキロクを削除" data-testid="button-delete-card"><Trash2 size={17} /></button>}
               </div>
             </div>
-            {confirmDelete && !readOnlyMode && <div className="delete-confirm" role="alert"><AlertCircle size={16} />写真・声・このキロクを完全に削除しますか？<button type="button" disabled={busy} onClick={deleteCard} data-testid="button-confirm-delete">{busy ? '削除中…' : '削除する'}</button><button type="button" disabled={busy} onClick={() => setConfirmDelete(false)}>やめる</button></div>}
-            {confirmArchive && !readOnlyMode && <div className="archive-confirm" role="alert"><AlertCircle size={16} />このキロクを一覧からしまいます。写真と声は残ります。<button type="button" disabled={busy} onClick={archiveCard} data-testid="button-confirm-archive">{busy ? '処理中…' : 'しまう'}</button><button type="button" disabled={busy} onClick={() => setConfirmArchive(false)}>やめる</button></div>}
+            {confirmDelete && childMode === 'normal' && <div className="delete-confirm" role="alert"><AlertCircle size={16} />写真・声・このキロクを完全に削除しますか？<button type="button" disabled={busy} onClick={deleteCard} data-testid="button-confirm-delete">{busy ? '削除中…' : '削除する'}</button><button type="button" disabled={busy} onClick={() => setConfirmDelete(false)}>やめる</button></div>}
+            {confirmArchive && childMode === 'normal' && <div className="archive-confirm" role="alert"><AlertCircle size={16} />このキロクを一覧からしまいます。写真と声は残ります。<button type="button" disabled={busy} onClick={archiveCard} data-testid="button-confirm-archive">{busy ? '処理中…' : 'しまう'}</button><button type="button" disabled={busy} onClick={() => setConfirmArchive(false)}>やめる</button></div>}
             {error && <p className="form-error" role="alert">{error}</p>}
           </DetailDialogShell>
         </div>
@@ -1091,13 +1047,10 @@ function App() {
       )}
       {settingsOpen && <SettingsDialog
         settings={gallerySettings}
-        readOnlyMode={readOnlyMode}
-        onToggleReadOnlyMode={() => setReadOnlyMode((enabled) => !enabled)}
-        onSwitchBook={() => {
-          stopPlayback();
-          setSettingsOpen(false);
-          setBookPassphraseMode('switch');
-          setBookPassphraseOpen(true);
+        childMode={childMode}
+        onChildModeChange={(mode) => {
+          setChildMode(mode);
+          if (mode !== 'normal') setSettingsOpen(false);
         }}
         onManageArchive={() => {
           setSettingsOpen(false);
@@ -1114,7 +1067,7 @@ function App() {
           }
         }}
       />}
-      {archiveOpen && !readOnlyMode && <ArchiveDialog
+      {archiveOpen && childMode === 'normal' && <ArchiveDialog
         items={archivedItems}
         busyId={archiveBusyId}
         error={archiveError}
@@ -1122,16 +1075,12 @@ function App() {
         onDelete={(item) => { void permanentlyDeleteArchivedCard(item); }}
         onClose={() => { if (!archiveBusyId) setArchiveOpen(false); }}
       />}
-      {bookPassphraseOpen && <BookPassphraseDialog
-        mode={bookPassphraseMode}
-        onClose={() => setBookPassphraseOpen(false)}
-        onSelect={selectBookAndReload}
-      />}
-      {shareLinkDialogOpen && <ShareLinkDialog
-        url={window.location.href}
-        onCopy={copyEncyclopediaLink}
-        onClose={() => setShareLinkDialogOpen(false)}
-      />}
+      {parentGateOpen && <div className="overlay overlay-top" role="presentation"><form className="dialog" role="dialog" aria-modal="true" aria-labelledby="parent-gate-title" onSubmit={passParentGate}>
+        <h2 id="parent-gate-title" className="dialog-title">おとなの確認</h2><p>設定を開くには、計算の答えを入力してください。</p>
+        <label htmlFor="parent-gate-answer">{parentGateNumbers[0]} ＋ {parentGateNumbers[1]} は？</label><input id="parent-gate-answer" className="text-input" type="number" inputMode="numeric" value={parentGateAnswer} onChange={(event) => setParentGateAnswer(event.target.value)} />
+        {parentGateError && <p className="form-error" role="alert">{parentGateError}</p>}
+        <div className="dialog-actions"><button type="button" className="record-button" onClick={() => setParentGateOpen(false)}>やめる</button><button type="submit" className="save-button">設定をひらく</button></div>
+      </form></div>}
     </div>
   );
 }
