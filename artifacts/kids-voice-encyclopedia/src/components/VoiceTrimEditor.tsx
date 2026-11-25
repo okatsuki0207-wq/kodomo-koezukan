@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Play, Square, RotateCcw } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Check, Play, Square, RotateCcw, X } from 'lucide-react';
 import { decodeAudioBlob, trimAudioRange, waveformPeaks, type DecodedAudio } from '../lib/audioTrim';
 import { loadVoiceSource } from '../lib/voiceSource';
 import './voice-editing.css';
@@ -9,6 +10,7 @@ type Props = {
   refreshSource?: () => Promise<string>;
   disabled?: boolean;
   onApply: (blob: Blob) => void;
+  onClose: () => void;
   onPendingChange?: (pending: boolean) => void;
   onBeforePreview?: () => void;
 };
@@ -16,7 +18,7 @@ type Props = {
 const MIN = 0.05;
 const fmt = (s: number) => `${s.toFixed(2)}秒`;
 
-export default function VoiceTrimEditor({ source, refreshSource, disabled, onApply, onPendingChange, onBeforePreview }: Props) {
+export default function VoiceTrimEditor({ source, refreshSource, disabled, onApply, onClose, onPendingChange, onBeforePreview }: Props) {
   const [audio, setAudio] = useState<DecodedAudio | null>(null);
   const [peaks, setPeaks] = useState<number[]>([]);
   const [range, setRange] = useState<[number, number]>([0, 0]);
@@ -83,6 +85,14 @@ export default function VoiceTrimEditor({ source, refreshSource, disabled, onApp
       cbRef.current.onPendingChange?.(false);
     };
   }, [source, stop, reload]);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [onClose]);
 
   useEffect(() => {
     const c = canvas.current;
@@ -203,9 +213,12 @@ export default function VoiceTrimEditor({ source, refreshSource, disabled, onApp
   const reset = () => { stop(); if (audio) setRange([0, audio.duration]); setError(''); };
   const pct = (v: number) => (dur > 0 ? (v / dur) * 100 : 0);
 
-  return (
-    <div className="vte" data-testid="voice-trim-editor">
-      <h3 className="vte-title">声の長さをととのえる</h3>
+  return createPortal(
+    <div className="voice-trim-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <section className="voice-trim-modal" role="dialog" aria-modal="true" aria-labelledby="voice-trim-title" data-testid="voice-trim-modal">
+        <button type="button" className="voice-trim-close" onClick={onClose} aria-label="波形編集を閉じる" data-testid="button-close-waveform-trim"><X size={22} /></button>
+        <div className="vte" data-testid="voice-trim-editor">
+      <h3 id="voice-trim-title" className="vte-title">声の長さをととのえる</h3>
       <p className="vte-help">波形の左のハンドルで前を、右のハンドルで後ろを切ります。親の声などが入った部分を外せます。</p>
       {loading && <div className="vte-load" aria-label="読み込み中" />}
       {error && <div className="vte-msg err" role="alert" data-testid="status-trim-error">{error}
@@ -248,6 +261,9 @@ export default function VoiceTrimEditor({ source, refreshSource, disabled, onApp
           {pending && <p className="vte-msg" role="status">範囲を変えました。右のチェックを押すと反映されます。</p>}
         </>
       )}
-    </div>
+        </div>
+      </section>
+    </div>,
+    document.body,
   );
 }

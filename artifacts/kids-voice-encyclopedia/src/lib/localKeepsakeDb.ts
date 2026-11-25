@@ -11,26 +11,48 @@ type StoredKeepsake = Omit<Keepsake, 'photo' | 'voice' | 'voices' | 'photoBlob' 
   voices: Array<{ id: string; blob: Blob; path?: string | null }>;
 };
 const DB_NAME = 'kids-voice-encyclopedia-local';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const URLS = new Map<string, string>();
 const listeners = new Set<(items: Keepsake[]) => void>();
 let opening: Promise<IDBDatabase> | null = null;
 
 function db() {
   if (!('indexedDB' in globalThis)) return Promise.reject(new Error('このブラウザでは端末内保存を利用できません。'));
-  if (!opening) opening = new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
-      const database = request.result;
-      if (!database.objectStoreNames.contains('cards')) database.createObjectStore('cards', { keyPath: 'id' });
-      if (!database.objectStoreNames.contains('categories')) database.createObjectStore('categories', { keyPath: 'id' });
-      if (!database.objectStoreNames.contains('settings')) database.createObjectStore('settings');
-      if (!database.objectStoreNames.contains('meta')) database.createObjectStore('meta');
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error('端末内データを開けませんでした。'));
-    request.onblocked = () => reject(new Error('別の画面がデータベースを使用中です。アプリを開き直してください。'));
-  });
+  if (!opening) {
+    const pending = new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      let settled = false;
+      request.onupgradeneeded = () => {
+        const database = request.result;
+        if (!database.objectStoreNames.contains('cards')) database.createObjectStore('cards', { keyPath: 'id' });
+        if (!database.objectStoreNames.contains('categories')) database.createObjectStore('categories', { keyPath: 'id' });
+        if (!database.objectStoreNames.contains('settings')) database.createObjectStore('settings');
+        if (!database.objectStoreNames.contains('meta')) database.createObjectStore('meta');
+      };
+      request.onsuccess = () => {
+        const database = request.result;
+        if (settled) {
+          database.close();
+          return;
+        }
+        database.onversionchange = () => {
+          database.close();
+          if (opening === pending) opening = null;
+        };
+        resolve(database);
+      };
+      request.onerror = () => {
+        settled = true;
+        reject(request.error ?? new Error('端末内データを開けませんでした。'));
+      };
+      request.onblocked = () => {
+        settled = true;
+        reject(new Error('別の画面がデータベースを使用中です。ほかのアプリ画面を閉じて再試行してください。'));
+      };
+    });
+    opening = pending;
+    void pending.catch(() => { if (opening === pending) opening = null; });
+  }
   return opening;
 }
 
@@ -38,10 +60,27 @@ async function request<T>(storeName: string, mode: IDBTransactionMode, run: (sto
   const database = await db();
   return new Promise((resolve, reject) => {
     const transaction = database.transaction(storeName, mode);
-    const result = run(transaction.objectStore(storeName));
-    result.onsuccess = () => resolve(result.result);
-    result.onerror = () => reject(result.error ?? new Error('端末内データを保存できませんでした。'));
-    transaction.onabort = () => reject(transaction.error ?? new Error('端末内データの保存を完了できませんでした。'));
+    let resultValue: T;
+    let settled = false;
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      reject(error instanceof Error ? error : new Error('端末内データを保存できませんでした。'));
+    };
+    transaction.oncomplete = () => {
+      if (settled) return;
+      settled = true;
+      resolve(resultValue);
+    };
+    transaction.onerror = () => fail(transaction.error ?? new Error('端末内データの保存に失敗しました。'));
+    transaction.onabort = () => fail(transaction.error ?? new Error('端末内データの保存を完了できませんでした。'));
+    try {
+      const result = run(transaction.objectStore(storeName));
+      result.onsuccess = () => { resultValue = result.result; };
+      result.onerror = () => fail(result.error ?? new Error('端末内データを保存できませんでした。'));
+    } catch (error) {
+      fail(error);
+    }
   });
 }
 
@@ -102,20 +141,23 @@ export async function setMeta(key: string, value: unknown) {
 }
 export async function replaceImportedData(cards: Keepsake[], categories: Category[], settings: GallerySettings) {
   const database = await db();
+  const existingCards = await allStored();
   await new Promise<void>((resolve, reject) => {
     const tx = database.transaction(['cards', 'categories', 'settings', 'meta'], 'readwrite');
     const cardStore = tx.objectStore('cards');
+    cardStore.clear();
+    const categoryStore = tx.objectStore('categories');
+    categoryStore.clear();
     for (const item of cards) {
       const sourceVoices = getVoices(item);
       const record: StoredKeepsake = {
         id: item.id, itemName: item.itemName, photoBlob: item.photoBlob!,
         createdAt: item.createdAt, photoPath: item.photoPath,
-        categoryId: item.categoryId, archived: item.archived, archivedAt: item.archivedAt,
+        categoryId: item.categoryId, memo: item.memo ?? '', archived: item.archived, archivedAt: item.archivedAt,
         voices: sourceVoices.map((voice) => ({ id: voice.id, blob: (voice as typeof voice & { blob?: Blob }).blob! , path: voice.path })),
       };
       cardStore.put(record);
     }
-    const categoryStore = tx.objectStore('categories');
     categories.filter((category) => !DEFAULT_CATEGORIES.some((defaultCategory) => defaultCategory.id === category.id))
       .forEach((category) => categoryStore.put(category));
     tx.objectStore('settings').put(normalizeGallerySettings(settings), 'gallery');
@@ -123,6 +165,7 @@ export async function replaceImportedData(cards: Keepsake[], categories: Categor
     tx.oncomplete = () => resolve();
     tx.onerror = tx.onabort = () => reject(tx.error ?? new Error('初回データ移行に失敗しました。元のFirebaseデータは残っています。'));
   });
+  existingCards.forEach((card) => invalidateUrls(card.id));
   await publish();
 }
 export async function subscribe(onChange: (items: Keepsake[]) => void, onError: (error: unknown) => void) {
@@ -140,14 +183,14 @@ export async function save(item: Keepsake) {
   });
   const record: StoredKeepsake = {
     id: item.id, itemName: item.itemName, photoBlob, createdAt: item.createdAt || Date.now(),
-    categoryId: item.categoryId, archived: item.archived, archivedAt: item.archivedAt,
+    categoryId: item.categoryId, memo: item.memo ?? '', archived: item.archived, archivedAt: item.archivedAt,
     voices: storedVoices,
   };
   invalidateUrls(item.id);
   await request('cards', 'readwrite', (store) => store.put(record));
   await publish();
 }
-export async function edit(base: Keepsake, changes: { itemName?: string; categoryId?: string | null; photo?: string; voices?: Array<{id:string;source:string}> }) {
+export async function edit(base: Keepsake, changes: { itemName?: string; categoryId?: string | null; memo?: string; photo?: string; voices?: Array<{id:string;source:string}> }) {
   const current = (await allStored()).find((item) => item.id === base.id);
   if (!current) throw new Error('このキロクが見つかりません。');
   const voices = current.voices.slice();
@@ -161,6 +204,7 @@ export async function edit(base: Keepsake, changes: { itemName?: string; categor
     ...current,
     ...(changes.itemName !== undefined ? { itemName: changes.itemName.trim() } : {}),
     ...(changes.categoryId !== undefined ? { categoryId: changes.categoryId } : {}),
+    ...(changes.memo !== undefined ? { memo: changes.memo } : {}),
     ...(changes.photo !== undefined ? { photoBlob: await asBlob(changes.photo, 'image') } : {}),
     voices,
   };

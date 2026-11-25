@@ -60,6 +60,82 @@ test('a voiceless sticker tap reveals a recording icon without opening details o
   assert.match(app, /className="sticker-record-prompt"[\s\S]*?onClick=\{\(\) => openRecordEditor\(item\)\}/);
 });
 
+test('the three modes allow child card creation but restrict edits on existing cards to adding voices', async () => {
+  const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const settings = await readFile(new URL('../src/components/SettingsDialog.tsx', import.meta.url), 'utf8');
+  const editor = await readFile(new URL('../src/components/EditCardDialog.tsx', import.meta.url), 'utf8');
+  const archive = await readFile(new URL('../src/components/ArchiveDialog.tsx', import.meta.url), 'utf8');
+  assert.match(settings, /<strong>通常モード<\/strong>/);
+  assert.match(settings, /<strong>見るだけモード<\/strong>/);
+  assert.match(settings, /<strong>こどもモード<\/strong>/);
+  assert.match(app, /const showAddCard = childMode !== 'view'/);
+  assert.doesNotMatch(app, /childAddMode && !getVoices\(item\)\.length/);
+  assert.match(app, /mode={childAddMode \? 'add-voice-only' : 'normal'}/);
+  assert.match(app, /if \(readOnlyMode \|\| \(childAddMode && Object\.keys\(changes\)\.some\(\(key\) => key !== 'voices'\)\)\) return;/);
+  assert.match(editor, /(!voiceOnly \|\| slot\.fresh)/);
+  assert.match(editor, /!voiceOnly && slot\.url && !mine/);
+  assert.match(editor, /(!voiceOnly \|\| s\.fresh)/);
+  assert.match(app, /role="alertdialog" aria-modal="true"/);
+  assert.match(archive, /role="alertdialog" aria-modal="true"/);
+  assert.match(app, /parentGateNumbers\[0\] \* parentGateNumbers\[1\]/);
+  assert.match(app, /parentGateNumbers\[0\]} × \{parentGateNumbers\[1\]/);
+  assert.match(app, /className="parent-gate-answer"/);
+  assert.match(editor, /changes\.memo = memo\.trim\(\)/);
+  assert.match(editor, /<MemoDialog value=\{memo\}/);
+  assert.match(app, /detail\.memo\?\.trim\(\)/);
+  assert.match(app, /void subscribeKeepsakes\([\s\S]*?\}, \[loadAttempt\]\);/);
+});
+
+test('child mode can start a new card from the add tile, and memo editing is unavailable in voice-only mode', async () => {
+  const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const editor = await readFile(new URL('../src/components/EditCardDialog.tsx', import.meta.url), 'utf8');
+  assert.match(app, /visibleItems\.length === 0 && childMode === 'view'/);
+  assert.match(app, /if \(childMode === 'view' \|\| busy\) return;/);
+  assert.match(app, /button-add-card-tile/);
+  assert.match(editor, /memoOpen && !voiceOnly/);
+});
+
+test('the distributed app uses local IndexedDB only and denies Firebase access', async () => {
+  const store = await readFile(new URL('../src/lib/keepsakeStore.ts', import.meta.url), 'utf8');
+  const firestoreRules = await readFile(new URL('../firebase/firestore.rules', import.meta.url), 'utf8');
+  const storageRules = await readFile(new URL('../firebase/storage.rules', import.meta.url), 'utf8');
+  const emulator = JSON.parse(await readFile(new URL('../firebase/emulator.json', import.meta.url), 'utf8'));
+  assert.match(store, /return local\.subscribe\(onChange, onError\)/);
+  assert.doesNotMatch(store, /from ['"]firebase\/|ensureLocalData|getDocsFromServer|getOwnerBookContext/);
+  assert.match(firestoreRules, /allow read, write: if false/);
+  assert.match(storageRules, /allow read, write: if false/);
+  assert.match(emulator.firestore.rules, /test-firestore\.rules/);
+  assert.match(emulator.storage.rules, /test-storage\.rules/);
+});
+
+test('detail photos play a keepsake voice in every mode and child actions are icon-first', async () => {
+  const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const styles = await readFile(new URL('../src/index.css', import.meta.url), 'utf8');
+  assert.match(app, /className=\{`detail-photo-button[\s\S]*?onClick=\{\(\) => playKeepsake\(detail\)\}/);
+  assert.match(app, /className=\{`detail-actions\$\{childMode === 'normal' \? '' : ' detail-actions-child'\}`\}/);
+  assert.match(app, /aria-label="声をついか"/);
+  assert.match(styles, /\.detail-actions-child \.detail-action-label \{ display:none; \}/);
+  assert.match(styles, /\.app-shell\[data-child-mode="view"\] \.detail-date/);
+  assert.match(styles, /\.app-shell\[data-child-mode="add"\] \.sticker-record-prompt/);
+});
+
+test('waveform trimming opens as a full-screen modal without an internal scroll panel', async () => {
+  const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const editor = await readFile(new URL('../src/components/EditCardDialog.tsx', import.meta.url), 'utf8');
+  const trim = await readFile(new URL('../src/components/VoiceTrimEditor.tsx', import.meta.url), 'utf8');
+  const styles = await readFile(new URL('../src/components/voice-editing.css', import.meta.url), 'utf8');
+  assert.match(app, /data-testid="button-open-waveform-trim"/);
+  assert.match(app, /onClick=\{\(\) => setTrimOpen\(true\)\}/);
+  assert.doesNotMatch(app, /create-waveform-panel|new-waveform-panel/);
+  assert.match(trim, /return createPortal\([\s\S]*?<section className="voice-trim-modal" role="dialog" aria-modal="true"/);
+  assert.match(trim, /data-testid="button-close-waveform-trim"/);
+  assert.match(trim, /window\.addEventListener\('keydown', closeOnEscape\)/);
+  assert.match(editor, /onClose=\{\(\) => setTrimKey\(null\)\}/);
+  assert.match(styles, /\.voice-trim-modal\s*\{[^}]*overflow:hidden;/);
+  assert.match(styles, /\.voice-trim-modal \.vte\s*\{[^}]*overflow:hidden;/);
+  assert.doesNotMatch(styles, /(?:create|new)-waveform-panel|overflow:auto/);
+});
+
 test('transparent images can be kept as-is and rectangular crops are exported as PNG', async () => {
   const exporter = await readFile(new URL('../src/components/photo-editor/exportImage.ts', import.meta.url), 'utf8');
   const editor = await readFile(new URL('../src/components/PhotoEditor.tsx', import.meta.url), 'utf8');

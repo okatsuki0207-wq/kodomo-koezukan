@@ -27,6 +27,7 @@ import CategoryDialog from './components/CategoryDialog';
 import { useLongPress } from './hooks/useLongPress';
 import CategorySelect from './components/CategorySelect';
 import EditCardDialog from './components/EditCardDialog';
+import MemoDialog from './components/MemoDialog';
 import RecordingGuide, { RecordingCharacter } from './components/RecordingGuide';
 import VoiceTrimEditor from './components/VoiceTrimEditor';
 import { useEditRecording } from './hooks/useEditRecording';
@@ -36,12 +37,13 @@ import DetailDialogShell from './components/DetailDialogShell';
 import StartScreen from './components/StartScreen';
 import SettingsDialog from './components/SettingsDialog';
 import ArchiveDialog from './components/ArchiveDialog';
+import { downloadLocalBackup, restoreLocalBackup } from './lib/localDataBackup';
 import { useCategories } from './hooks/useCategories';
 import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, sortGalleryItems, type GallerySettings } from './lib/gallerySettings';
 import { COMPACT_GALLERY_PAGE_SIZE, clampGalleryPage, galleryPageCount, galleryPageItems, galleryPageSize, gallerySwipeDelta } from './lib/galleryPagination';
 import { playPageTurnSound, preloadPageTurnSound, unlockPageTurnSound } from './lib/pageTurnSound';
 import { deleteKeepsake, editKeepsake, firebaseError, saveGallerySettings, saveKeepsake, setKeepsakeArchived, subscribeGallerySettings, subscribeKeepsakes, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
-import { getVoices, type VoiceAsset } from './lib/voiceAssets';
+import { getVoices, MAX_VOICES, type VoiceAsset } from './lib/voiceAssets';
 import { trimLeadingSilence } from './lib/audioTrim';
 import { preloadRecordingGuide } from './lib/recordingCue';
 import { hasNewKeepsakeDraftContent, type NewKeepsakeDraftInput } from './lib/newKeepsakeDraft';
@@ -79,10 +81,11 @@ function App() {
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [childMode, setChildMode] = useState<ChildMode>(loadChildMode);
   const readOnlyMode = childMode === 'view';
+  const childAddMode = childMode === 'add';
   const [parentGateOpen, setParentGateOpen] = useState(false);
   const [parentGateAnswer, setParentGateAnswer] = useState('');
   const [parentGateError, setParentGateError] = useState('');
-  const [parentGateNumbers] = useState(() => [Math.floor(Math.random() * 5) + 2, Math.floor(Math.random() * 5) + 2]);
+  const [parentGateNumbers] = useState(() => [Math.floor(Math.random() * 9) + 2, Math.floor(Math.random() * 9) + 2]);
   const [view, setView] = useState<AppView>(() => {
     let saved: string | null = null;
     let lastActiveAt: string | null = null;
@@ -97,6 +100,8 @@ function App() {
   const [createOpen, setCreateOpen] = useState(false);
   const [detail, setDetail] = useState<Keepsake | null>(null);
   const [itemName, setItemName] = useState('');
+  const [memo, setMemo] = useState('');
+  const [memoOpen, setMemoOpen] = useState(false);
   const [photo, setPhoto] = useState('');
   const [pendingPhotoBlob, setPendingPhotoBlob] = useState<Blob | null>(null);
   const photoBeforeEditor = useRef<{ photo: string; pendingPhotoBlob: Blob | null } | null>(null);
@@ -114,6 +119,8 @@ function App() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
   const [processingVoice, setProcessingVoice] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -128,7 +135,7 @@ function App() {
   const [catBusy, setCatBusy] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const localDraft = useNewKeepsakeDraft();
-  const { categories, create: createCategoryEntry, describeError } = useCategories(0);
+  const { categories, create: createCategoryEntry, describeError } = useCategories(loadAttempt);
   const navigate = (next: AppView) => {
     setView(next);
     persistAppView(next);
@@ -271,7 +278,7 @@ function App() {
   };
   const passParentGate = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (parentGateAnswer.trim() !== String(parentGateNumbers[0] + parentGateNumbers[1])) { setParentGateError('答えがちがいます。'); return; }
+    if (parentGateAnswer.trim() !== String(parentGateNumbers[0] * parentGateNumbers[1])) { setParentGateError('答えがちがいます。'); return; }
     setParentGateOpen(false);
     setSettingsOpen(true);
     setParentGateAnswer('');
@@ -308,6 +315,7 @@ function App() {
     pendingPhotoBlob,
     voiceBlob,
     categoryId: cardCategory,
+    memo,
   };
   const latestDraft = useRef(draftSnapshot);
   latestDraft.current = draftSnapshot;
@@ -321,6 +329,7 @@ function App() {
       preloadRecordingGuide();
       setItemName(draft.itemName);
       setCardCategory(draft.categoryId);
+      setMemo(draft.memo ?? '');
       setPhoto(pending ? URL.createObjectURL(pending) : storedPhoto);
       setPendingPhotoBlob(pending);
       setVoiceBlob(draft.voiceBlob);
@@ -390,6 +399,7 @@ function App() {
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
     setLoading(true);
+    setLoadError('');
     const timer = window.setTimeout(() => {
       if (!cancelled) {
         setLoading(false);
@@ -399,20 +409,25 @@ function App() {
     const fail = (caught: unknown) => {
       window.clearTimeout(timer);
       if (!cancelled) {
-        console.error('端末内のキロク読み込みに失敗しました。', firebaseError(caught));
+        const message = firebaseError(caught);
+        console.error('端末内のキロク読み込みに失敗しました。', message);
+        setLoadError(message);
         setLoading(false);
       }
     };
+    // Begin loading IndexedDB as soon as the app opens, even while the start
+    // screen is visible, so the library can reuse the completed subscription.
     void subscribeKeepsakes((next) => {
       window.clearTimeout(timer);
       if (!cancelled) {
         setItems(next);
+        setLoadError('');
         setDetail((current) => current ? next.find((item) => item.id === current.id) ?? null : null);
         setLoading(false);
       }
     }, fail).then((stop) => { if (cancelled) stop(); else unsubscribe = stop; }).catch(fail);
     return () => { cancelled = true; window.clearTimeout(timer); unsubscribe?.(); };
-  }, []);
+  }, [loadAttempt]);
 
   useEffect(() => () => {
     recordingSession.current++;
@@ -434,7 +449,7 @@ function App() {
   useEffect(() => {
     if (!createOpen || !draftReady) return;
     localDraft.saveSoon(latestDraft.current);
-  }, [createOpen, draftReady, itemName, photo, pendingPhotoBlob, voiceBlob, cardCategory, localDraft.saveSoon]);
+  }, [createOpen, draftReady, itemName, photo, pendingPhotoBlob, voiceBlob, cardCategory, memo, localDraft.saveSoon]);
 
   useEffect(() => {
     if (!createOpen || !draftReady) return;
@@ -459,7 +474,7 @@ function App() {
   const closeDetail = () => { if (mutationLock.current) return; stopPlayback(); setDetail(null); setEditOpen(false); setConfirmDelete(false); setConfirmArchive(false); };
 
   const changeDetailCategory = async (categoryId: string | null) => {
-    if (readOnlyMode || !detail || mutationLock.current) return;
+    if (childMode !== 'normal' || !detail || mutationLock.current) return;
     const target = detail;
     mutationLock.current = true; setBusy(true); setCatBusy(true); setError('');
     try {
@@ -499,7 +514,7 @@ function App() {
   };
 
   const openRecordEditor = (item: Keepsake) => {
-    if (readOnlyMode || busy) return;
+    if (childMode !== 'normal' || busy) return;
     stopPlayback();
     setRecordPromptId(null);
     setError('');
@@ -508,8 +523,19 @@ function App() {
     setConfirmDelete(false);
   };
 
+  const openVoiceAddition = (item: Keepsake) => {
+    if (childMode !== 'add' || busy || getVoices(item).length >= MAX_VOICES) return;
+    stopPlayback();
+    setError('');
+    setRecordPromptId(null);
+    setDetail(item);
+    setEditOpen(true);
+    setConfirmDelete(false);
+    setConfirmArchive(false);
+  };
+
   const openCreate = () => {
-    if (readOnlyMode || busy) return;
+    if (childMode === 'view' || busy) return;
     draftCancelled.current = false;
     preloadRecordingGuide();
     // The request starts on the create-button gesture and releases the
@@ -519,6 +545,8 @@ function App() {
     pendingId.current = null;
     const session = ++createDraftSession.current;
     setItemName('');
+    setMemo('');
+    setMemoOpen(false);
     setCardCategory(selectedCategory);
     setPhoto('');
     setPendingPhotoBlob(null);
@@ -540,6 +568,7 @@ function App() {
         const storedPhoto = draft.photo && !draft.photo.startsWith('blob:') ? draft.photo : '';
         const restoredPhoto = pending ? URL.createObjectURL(pending) : storedPhoto;
         setItemName(draft.itemName);
+        setMemo(draft.memo ?? '');
         setCardCategory(draft.categoryId);
         setPhoto(restoredPhoto);
         setPendingPhotoBlob(pending);
@@ -563,6 +592,8 @@ function App() {
     setProcessingVoice(false);
     setVoice(null);
     setVoiceBlob(null);
+    setMemo('');
+    setMemoOpen(false);
     setTrimOpen(false);
     stopPlayback();
     setCreateOpen(false);
@@ -605,7 +636,7 @@ function App() {
   const stopRecording = rec.stop;
 
   const saveCard = async () => {
-    if (readOnlyMode || mutationLock.current || recording || processingVoice || rec.starting) return;
+    if (childMode === 'view' || mutationLock.current || recording || processingVoice || rec.starting) return;
     const cleanItemName = itemName.trim();
     if (!cleanItemName) {
       setError('キロクの名前を入力してください。');
@@ -629,13 +660,10 @@ function App() {
         voiceBlob: voiceBlob ?? undefined,
         createdAt: Date.now(),
         categoryId: cardCategory,
+        memo: memo.trim(),
       });
       draftCancelled.current = true;
-      const draftCleared = await localDraft.clear();
-      if (!draftCleared) {
-        setError('キロクは保存されましたが、この端末の下書きを消去できませんでした。保存ボタンをもう一度押して再試行してください。');
-        return;
-      }
+      void localDraft.clear();
       setCreateOpen(false);
       navigate('library');
       setItemName('');
@@ -723,7 +751,7 @@ function App() {
 
   const formatTime = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   return (
-    <div className={`app-shell${view === 'library' ? ' app-shell-library' : ''}`}>
+    <div className={`app-shell${view === 'library' ? ' app-shell-library' : ''}`} data-child-mode={childMode}>
       <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen}>
         <div className="topbar-row">
           <button type="button" className="brand brand-home" onClick={() => navigate('start')} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
@@ -736,11 +764,25 @@ function App() {
         </div>
       </header>
 
+      {loadError && (
+        <div className="local-load-error" role="alert" data-testid="status-local-load-error">
+          <p>{loadError}</p>
+          <button
+            type="button"
+            onClick={() => { setLoadError(''); setLoadAttempt((attempt) => attempt + 1); }}
+            disabled={loading}
+            data-testid="button-retry-local-load"
+          >
+            もう一度読み込む
+          </button>
+        </div>
+      )}
+
       {view === 'start' ? (
         <main className="start-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen}>
           <StartScreen
             onRecord={openCreate}
-            showRecordAction={!readOnlyMode}
+            showRecordAction={childMode === 'normal'}
             onOpenEncyclopedia={requestLibraryOpen}
           />
         </main>
@@ -756,8 +798,8 @@ function App() {
             setSelectedCategory(id);
             setGridPage(0);
           }}
-          onNew={() => { if (!readOnlyMode) setCategoryOpen(true); }}
-          showNew={!readOnlyMode}
+          onNew={() => { if (childMode === 'normal') setCategoryOpen(true); }}
+          showNew={childMode === 'normal'}
           disabled={busy}
         />
         <div className="book-spread-stage">
@@ -766,13 +808,13 @@ function App() {
           <span className="book-left-page-lines" />
         </div>
         <div id="category-panel" role="tabpanel" aria-labelledby={`category-tab-${selectedCategory ?? 'all'}`}>
-        {loading ? <p className="notice neutral" role="status">端末内の図鑑を読み込んでいます…</p> : visibleItems.length === 0 && readOnlyMode && selectedCategory === null ? (
+        {loading ? <p className="notice neutral" role="status">端末内の図鑑を読み込んでいます…</p> : visibleItems.length === 0 && childMode === 'view' && selectedCategory === null ? (
           <section className="empty-state" data-testid="empty-keepsakes">
             <div className="empty-illustration"><RecordingCharacter pose="sit" /></div>
             <h2 className="empty-title">まだ、まっさらなページ</h2>
             <p className="empty-copy">まだキロクがありません。<br />新しいキロクが増えるのを待っています。</p>
           </section>
-        ) : visibleItems.length === 0 && readOnlyMode ? (
+        ) : visibleItems.length === 0 && childMode === 'view' ? (
           <section className="empty-state category-empty" data-testid="empty-category">
             <div className="empty-illustration"><RecordingCharacter pose="sit" /></div>
             <h2 className="empty-title">{categoryName(selectedCategory) ?? 'このカテゴリ'}は、まだ空っぽ</h2>
@@ -820,7 +862,7 @@ function App() {
                         className="sticker-photo-button"
                         onClick={() => playKeepsake(item)}
                         {...longPress(item)}
-                        aria-label={getVoices(item).length ? `${item.itemName}の声をきく` : readOnlyMode ? item.itemName : `${item.itemName}の録音ボタンを表示`}
+                        aria-label={getVoices(item).length ? `${item.itemName}の声をきく` : childMode === 'normal' ? `${item.itemName}の録音ボタンを表示` : item.itemName}
                         data-testid={`button-play-card-${item.id}`}
                       >
                         {item.photo
@@ -828,7 +870,7 @@ function App() {
                           : <ImageIcon size={40} aria-hidden="true" />}
                         {playing && playingItemId === item.id && <span className="voice-notes" aria-hidden="true"><span>♪</span><span>♫</span><span>♪</span></span>}
                       </button>
-                      {!readOnlyMode && !getVoices(item).length && recordPromptId === item.id && (
+                      {childMode === 'normal' && !getVoices(item).length && recordPromptId === item.id && (
                         <button
                           type="button"
                           className="sticker-record-prompt"
@@ -896,6 +938,9 @@ function App() {
                 <CategorySelect id="create-category" categories={categories} value={cardCategory} onChange={setCardCategory} disabled={busy || draftLoading} testId="select-card-category" onNew={() => setNewCatInCreate(true)} />
               </div>
             </div>
+            <button type="button" className={`memo-access-button${memo.trim() ? ' has-memo' : ''}`} onClick={() => setMemoOpen(true)} disabled={busy || draftLoading} aria-label={memo.trim() ? '詳細メモを編集' : '詳細メモを追加'} data-testid="button-open-create-memo">
+              <Pencil size={18} /> <span>{memo.trim() ? '詳細メモを編集' : '詳細メモを追加'}</span>
+            </button>
             <div className="create-capture">
               <input ref={photoInput} className="sr-only" type="file" accept="image/*" disabled={busy || draftLoading || recording || rec.starting || processingVoice} onChange={onPhotoChange} aria-label="写真を選ぶ" data-testid="input-card-photo" />
               <div className="photo-composition create-photo-composition">
@@ -923,7 +968,7 @@ function App() {
                   {voice && !recording && !processingVoice && !rec.starting && <>
                     <button type="button" className="record-button create-icon-button secondary-icon-button" disabled={busy} onClick={() => playing && playingUrl === voice && playback.isActive('voice-preview') ? stopPlayback() : playback.play(voice, 'voice-preview')} aria-label={playing && playingUrl === voice ? '声をとめる' : '声をきく'} title={playing && playingUrl === voice ? '声をとめる' : '声をきく'} data-testid="button-preview-recording">{playing && playingUrl === voice ? <Pause size={20} /> : <Play size={20} />}</button>
                     <button type="button" className="record-button create-icon-button secondary-icon-button" disabled={busy} onClick={() => { stopPlayback(); setVoice(null); setVoiceBlob(null); setTrimOpen(false); setNotice('録音を消しました。'); }} aria-label="録音を消す" title="録音を消す" data-testid="button-remove-recording"><RotateCcw size={19} /></button>
-                    <button type="button" className={`record-button create-icon-button secondary-icon-button${trimOpen ? ' is-selected' : ''}`} aria-expanded={trimOpen} aria-controls="new-keepsake-waveform" disabled={busy || draftLoading} onClick={() => setTrimOpen((open) => !open)} aria-label={trimOpen ? '波形編集を閉じる' : '波形を見てカット'} title={trimOpen ? '波形編集を閉じる' : '波形を見てカット'} data-testid="button-open-waveform-trim"><Scissors size={19} /></button>
+                    <button type="button" className={`record-button create-icon-button secondary-icon-button${trimOpen ? ' is-selected' : ''}`} aria-expanded={trimOpen} disabled={busy || draftLoading} onClick={() => setTrimOpen(true)} aria-label="波形でカットする" title="波形でカットする" data-testid="button-open-waveform-trim"><Scissors size={19} /></button>
                   </>}
                 </div>
                 <p className="create-record-status" role="status" aria-live="polite">
@@ -931,20 +976,19 @@ function App() {
                 </p>
                 {rec.micStatus === 'preparing' && <p className="create-mic-hint" role="status">マイクを確認しています</p>}
                 {voice && !recording && !processingVoice && !rec.starting && trimOpen && (
-                  <div className="new-waveform-panel create-waveform-panel" id="new-keepsake-waveform">
-                    <VoiceTrimEditor
-                      source={voiceBlob ?? voice}
-                      disabled={busy}
-                      onBeforePreview={stopPlayback}
-                      onApply={(trimmed) => {
-                        stopPlayback();
-                        setVoice(URL.createObjectURL(trimmed));
-                        setVoiceBlob(trimmed);
-                        setTrimOpen(false);
-                        setNotice('声のカットを反映しました。');
-                      }}
-                    />
-                  </div>
+                  <VoiceTrimEditor
+                    source={voiceBlob ?? voice}
+                    disabled={busy}
+                    onClose={() => setTrimOpen(false)}
+                    onBeforePreview={stopPlayback}
+                    onApply={(trimmed) => {
+                      stopPlayback();
+                      setVoice(URL.createObjectURL(trimmed));
+                      setVoiceBlob(trimmed);
+                      setTrimOpen(false);
+                      setNotice('声のカットを反映しました。');
+                    }}
+                  />
                 )}
               </div>
             </div>
@@ -960,6 +1004,7 @@ function App() {
           </DetailDialogShell>
         </div>
       )}
+      {createOpen && memoOpen && <MemoDialog value={memo} onClose={() => setMemoOpen(false)} onSave={(value) => { setMemo(value); setMemoOpen(false); }} />}
 
       {photoEditorSource && (
         <PhotoEditor
@@ -994,21 +1039,49 @@ function App() {
         <div className="overlay" role="presentation" onMouseDown={(event) => { if (!busy && event.target === event.currentTarget) closeDetail(); }}>
           <DetailDialogShell label={`${detail.itemName}のキロク`} returnSelector={`[data-testid="button-detail-${detail.id}"]`} onClose={closeDetail}>
             <button type="button" className="icon-button" disabled={busy} style={{ position: 'absolute', zIndex: 2, right: 25, top: 25 }} onClick={closeDetail} aria-label="閉じる" data-testid="button-close-detail"><X size={19} /></button>
-            {detail.photo ? <img className="detail-image" src={detail.photo} alt={`${detail.itemName}の写真`} /> : <div className="detail-image-placeholder"><ImageIcon size={54} /></div>}
+            {detail.photo ? getVoices(detail).length ? (
+              <button
+                type="button"
+                className={`detail-photo-button${playing && playingItemId === detail.id ? ' is-playing' : ''}`}
+                onClick={() => playKeepsake(detail)}
+                aria-label={`${detail.itemName}の声をきく`}
+                title={`${detail.itemName}の声をきく`}
+                data-testid="button-play-detail-photo"
+              >
+                <img className="detail-image" src={detail.photo} alt="" aria-hidden="true" />
+                <span className="detail-photo-play-indicator" aria-hidden="true">
+                  {playing && playingItemId === detail.id ? <Pause size={22} /> : <Play size={22} />}
+                </span>
+              </button>
+            ) : <img className="detail-image" src={detail.photo} alt={`${detail.itemName}の写真`} /> : <div className="detail-image-placeholder"><ImageIcon size={54} /></div>}
             <div className="detail-meta">
-              <div><h2 className="detail-name">{detail.itemName}</h2><p className="detail-date" data-testid="text-detail-created-at">キロクした日時：{formatStamp(detail.createdAt)}</p><p className="detail-date" data-testid="text-detail-category">カテゴリ: {categoryName(detail.categoryId) ?? (detail.categoryId ? '読み込み中のカテゴリ' : '未分類')}</p>{!readOnlyMode && <div className="detail-category"><CategorySelect id="detail-category" categories={categories} value={detail.categoryId ?? null} onChange={(id) => void changeDetailCategory(id)} disabled={busy || catBusy} testId="select-detail-category" /></div>}{getVoices(detail).length === 0 && <p className="detail-date">このキロクには、まだ声がありません</p>}</div>
-              <div className="detail-actions">
+              <div><h2 className="detail-name">{detail.itemName}</h2><p className="detail-date" data-testid="text-detail-created-at">キロクした日時：{formatStamp(detail.createdAt)}</p><p className="detail-date" data-testid="text-detail-category">カテゴリ: {categoryName(detail.categoryId) ?? (detail.categoryId ? '読み込み中のカテゴリ' : '未分類')}</p>{detail.memo?.trim() && <p className="detail-memo" data-testid="text-detail-memo"><Pencil size={14} aria-hidden="true" />{detail.memo}</p>}{childMode === 'normal' && <div className="detail-category"><CategorySelect id="detail-category" categories={categories} value={detail.categoryId ?? null} onChange={(id) => void changeDetailCategory(id)} disabled={busy || catBusy} testId="select-detail-category" /></div>}{getVoices(detail).length === 0 && <p className="detail-date">このキロクには、まだ声がありません</p>}</div>
+              <div className={`detail-actions${childMode === 'normal' ? '' : ' detail-actions-child'}`}>
                 {getVoices(detail).map((v, i, all) => { const on = playing && playingItemId === detail.id && playingUrl === v.url; return (
-                  <button key={v.id} type="button" className="record-button primary" onClick={() => playDetailVoice(v.url)} data-testid={i === 0 ? 'button-play-detail-voice' : `button-play-detail-voice-${i}`}>{on ? <Pause size={16} /> : <Play size={16} />}{on ? 'とめる' : all.length > 1 ? `声${i + 1}をきく` : '声をきく'}</button>); })}
-                 {!readOnlyMode && <button type="button" className="record-button" disabled={busy} onClick={() => { stopPlayback(); setEditOpen(true); }} data-testid="button-edit-card"><Pencil size={15} /> へんしゅう</button>}
+                  <button key={v.id} type="button" className="record-button primary" aria-label={on ? '声をとめる' : `声${i + 1}をきく`} onClick={() => playDetailVoice(v.url)} data-testid={i === 0 ? 'button-play-detail-voice' : `button-play-detail-voice-${i}`}>{on ? <Pause size={20} /> : <Play size={20} />}<span className="detail-action-label">{on ? 'とめる' : all.length > 1 ? `声${i + 1}をきく` : '声をきく'}</span></button>); })}
+                 {childMode === 'normal' && <button type="button" className="record-button" disabled={busy} onClick={() => { stopPlayback(); setEditOpen(true); }} data-testid="button-edit-card"><Pencil size={15} /> へんしゅう</button>}
+                {childAddMode && <button type="button" className="record-button primary child-add-action" aria-label="声をついか" disabled={busy || getVoices(detail).length >= MAX_VOICES} onClick={() => openVoiceAddition(detail)} data-testid="button-child-add-voice"><Mic size={22} /><span className="detail-action-label">声をついか</span></button>}
                  {childMode === 'normal' && <button type="button" className="record-button archive-card-button" disabled={busy} onClick={() => setConfirmArchive((value) => !value)} data-testid="button-archive-card"><Archive size={15} /> アーカイブする</button>}
                  {childMode === 'normal' && <button type="button" className="plain-action" disabled={busy} onClick={() => setConfirmDelete((value) => !value)} aria-label="このキロクを削除" data-testid="button-delete-card"><Trash2 size={17} /></button>}
               </div>
             </div>
-            {confirmDelete && childMode === 'normal' && <div className="delete-confirm" role="alert"><AlertCircle size={16} />写真・声・このキロクを完全に削除しますか？<button type="button" disabled={busy} onClick={deleteCard} data-testid="button-confirm-delete">{busy ? '削除中…' : '削除する'}</button><button type="button" disabled={busy} onClick={() => setConfirmDelete(false)}>やめる</button></div>}
-            {confirmArchive && childMode === 'normal' && <div className="archive-confirm" role="alert"><AlertCircle size={16} />このキロクを一覧からしまいます。写真と声は残ります。<button type="button" disabled={busy} onClick={archiveCard} data-testid="button-confirm-archive">{busy ? '処理中…' : 'しまう'}</button><button type="button" disabled={busy} onClick={() => setConfirmArchive(false)}>やめる</button></div>}
             {error && <p className="form-error" role="alert">{error}</p>}
           </DetailDialogShell>
+        </div>
+      )}
+      {detail && childMode === 'normal' && (confirmDelete || confirmArchive) && (
+        <div className="overlay overlay-confirm" role="presentation">
+          <section className="dialog confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-action-title">
+            <AlertCircle size={26} aria-hidden="true" />
+            <h2 id="confirm-action-title" className="dialog-title">{confirmDelete ? 'キロクを削除しますか？' : 'キロクをアーカイブしますか？'}</h2>
+            <p>{confirmDelete ? '写真・声・このキロクを完全に削除します。この操作はもとにもどせません。' : 'このキロクを一覧からしまいます。写真と声は残り、あとで戻せます。'}</p>
+            <div className="dialog-actions">
+              <button type="button" className="record-button" disabled={busy} onClick={() => { setConfirmDelete(false); setConfirmArchive(false); }}>やめる</button>
+              {confirmDelete
+                ? <button type="button" className="danger-button" disabled={busy} onClick={() => void deleteCard()} data-testid="button-confirm-delete">{busy ? '削除中…' : '完全に削除'}</button>
+                : <button type="button" className="save-button" disabled={busy} onClick={() => void archiveCard()} data-testid="button-confirm-archive">{busy ? '処理中…' : 'アーカイブする'}</button>}
+            </div>
+          </section>
         </div>
       )}
       {categoryOpen && (
@@ -1035,10 +1108,11 @@ function App() {
         <EditCardDialog
           item={detail}
           categories={categories}
+          mode={childAddMode ? 'add-voice-only' : 'normal'}
           describeError={describeError}
           onClose={() => setEditOpen(false)}
           onSave={async (base, changes, editId) => {
-            if (readOnlyMode) return;
+            if (readOnlyMode || (childAddMode && Object.keys(changes).some((key) => key !== 'voices'))) return;
             const saved = await editKeepsake(base, changes, editId);
             setDetail((current) => current && current.id === saved.id ? saved : current);
             setItems((list) => list.map((entry) => entry.id === saved.id ? saved : entry));
@@ -1056,6 +1130,14 @@ function App() {
           setSettingsOpen(false);
           setArchiveError('');
           setArchiveOpen(true);
+        }}
+        onExportBackup={downloadLocalBackup}
+        onRestoreBackup={async (file) => {
+          const restoredSettings = await restoreLocalBackup(file);
+          setGallerySettings(restoredSettings);
+          setSelectedCategory(null);
+          setGridPage(0);
+          setLoadAttempt((attempt) => attempt + 1);
         }}
         onClose={() => setSettingsOpen(false)}
         onSave={async (next) => {
@@ -1077,7 +1159,7 @@ function App() {
       />}
       {parentGateOpen && <div className="overlay overlay-top" role="presentation"><form className="dialog" role="dialog" aria-modal="true" aria-labelledby="parent-gate-title" onSubmit={passParentGate}>
         <h2 id="parent-gate-title" className="dialog-title">おとなの確認</h2><p>設定を開くには、計算の答えを入力してください。</p>
-        <label htmlFor="parent-gate-answer">{parentGateNumbers[0]} ＋ {parentGateNumbers[1]} は？</label><input id="parent-gate-answer" className="text-input" type="number" inputMode="numeric" value={parentGateAnswer} onChange={(event) => setParentGateAnswer(event.target.value)} />
+        <label htmlFor="parent-gate-answer">{parentGateNumbers[0]} × {parentGateNumbers[1]} は？</label><input id="parent-gate-answer" className="parent-gate-answer" type="number" inputMode="numeric" value={parentGateAnswer} onChange={(event) => setParentGateAnswer(event.target.value)} />
         {parentGateError && <p className="form-error" role="alert">{parentGateError}</p>}
         <div className="dialog-actions"><button type="button" className="record-button" onClick={() => setParentGateOpen(false)}>やめる</button><button type="submit" className="save-button">設定をひらく</button></div>
       </form></div>}

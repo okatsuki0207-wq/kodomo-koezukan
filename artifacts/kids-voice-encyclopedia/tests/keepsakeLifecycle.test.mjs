@@ -49,8 +49,8 @@ const clients = (context) => ({ db: context.firestore(), storage: context.storag
 before(async () => {
   env = await initializeTestEnvironment({
     projectId,
-    firestore: { host: '127.0.0.1', port: 8087, rules: await readFile(new URL('../firebase/firestore.rules', import.meta.url), 'utf8') },
-    storage: { host: '127.0.0.1', port: 9197, rules: await readFile(new URL('../firebase/storage.rules', import.meta.url), 'utf8') },
+    firestore: { host: '127.0.0.1', port: 8087, rules: await readFile(new URL('../firebase/test-firestore.rules', import.meta.url), 'utf8') },
+    storage: { host: '127.0.0.1', port: 9197, rules: await readFile(new URL('../firebase/test-storage.rules', import.meta.url), 'utf8') },
   });
   alice = clients(env.authenticatedContext('alice'));
   bob = clients(env.authenticatedContext('bob'));
@@ -541,7 +541,7 @@ test('legacy flat paths still load and delete; malformed deletion URL cannot rem
   await absent(photoPath); await absent(voicePath);
 });
 
-test('prototype rules accept any media and Firestore writes', async () => {
+test('isolated legacy-cloud test fixture permits synthetic media and Firestore writes', async () => {
   const uploaded = [];
   for (const [path, type, bytes] of [
     ['users/alice/keepsakes/bad/attempt/photo', 'text/plain', photoBytes],

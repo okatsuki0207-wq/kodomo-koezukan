@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, Check, Mic, Pause, Play, Plus, RotateCcw, Square, X } from 'lucide-react';
+import { Camera, Check, Mic, Pause, Pencil, Play, Plus, RotateCcw, Square, X } from 'lucide-react';
 import type { Category } from '../lib/categories';
 import type { Keepsake } from '../lib/keepsakeStore';
 import { refreshVoiceDownloadUrl } from '../lib/keepsakeStore';
@@ -9,6 +9,7 @@ import CategorySelect from './CategorySelect';
 import PhotoEditor from './PhotoEditor';
 import RecordingGuide from './RecordingGuide';
 import VoiceTrimEditor from './VoiceTrimEditor';
+import MemoDialog from './MemoDialog';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 import { canRecord, MAX_RECORD_SECONDS, useEditRecording } from '../hooks/useEditRecording';
 import './edit-media/edit-media.css';
@@ -16,6 +17,7 @@ import './edit-media/edit-media.css';
 type Props = {
   item: Keepsake;
   categories: readonly Category[];
+  mode?: 'normal' | 'add-voice-only';
   onSave: (base: Keepsake, changes: KeepsakeEdit, editId: string) => Promise<void>;
   describeError: (caught: unknown) => string;
   onClose: () => void;
@@ -34,12 +36,15 @@ function readBlobAsDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-export default function EditCardDialog({ item, categories, onSave, describeError, onClose }: Props) {
+export default function EditCardDialog({ item, categories, mode = 'normal', onSave, describeError, onClose }: Props) {
+  const voiceOnly = mode === 'add-voice-only';
   const base = useRef(item).current; // ダイアログを開いた時点の不変な基準
   const editId = useRef(crypto.randomUUID());
   const submittedPayload = useRef<string | null>(null);
   const [name, setName] = useState(base.itemName);
   const [categoryId, setCategoryId] = useState<string | null>(base.categoryId ?? null);
+  const [memo, setMemo] = useState(base.memo ?? '');
+  const [memoOpen, setMemoOpen] = useState(false);
   const [photo, setPhoto] = useState<string | null>(null);
   const [photoSource, setPhotoSource] = useState('');
   const [originalPhoto, setOriginalPhoto] = useState<Blob | null>(null);
@@ -194,12 +199,13 @@ export default function EditCardDialog({ item, categories, onSave, describeError
   const submit = async () => {
     if (lock.current || mediaLocked) return;
     const clean = name.trim();
-    if (!clean) { setError('キロクの名前を入力してください。'); return; }
+    if (!voiceOnly && !clean) { setError('キロクの名前を入力してください。'); return; }
     const changes: KeepsakeEdit = {};
-    if (clean !== base.itemName) changes.itemName = clean;
-    if (categoryId !== (base.categoryId ?? null)) changes.categoryId = categoryId;
-    if (photo) changes.photo = photo;
-    const voices: VoiceChange[] = slots.filter((s) => s.replaced && s.url).map((s) => ({ id: s.id, source: s.url }));
+    if (!voiceOnly && clean !== base.itemName) changes.itemName = clean;
+    if (!voiceOnly && categoryId !== (base.categoryId ?? null)) changes.categoryId = categoryId;
+    if (!voiceOnly && photo) changes.photo = photo;
+    if (!voiceOnly && memo.trim() !== (base.memo ?? '').trim()) changes.memo = memo.trim();
+    const voices: VoiceChange[] = slots.filter((s) => s.replaced && s.url && (!voiceOnly || s.fresh)).map((s) => ({ id: s.id, source: s.url }));
     if (voices.length) changes.voices = voices;
     if (voices.length + (photo ? 1 : 0) > MAX_EDIT_FILES) {
       setError('1回の保存で変更できる写真・音声は合計5ファイルまでです。音声5件と写真を変える場合は、写真の変更を戻して音声を保存し、もう一度編集して写真を変更してください。');
@@ -226,9 +232,10 @@ export default function EditCardDialog({ item, categories, onSave, describeError
       <div className="overlay overlay-top" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
         <form ref={dialog} className="dialog dialog-small edit-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-title" inert={!!photoSource} onSubmit={(e) => { e.preventDefault(); void submit(); }}>
           <div className="dialog-head">
-            <div><h2 id="edit-title" className="dialog-title">キロクをなおす</h2><p className="dialog-lede">写真・声・名前を変えられます。しまうまでは元のままです。</p></div>
+            <div><h2 id="edit-title" className="dialog-title">{voiceOnly ? '声をついかする' : 'キロクをなおす'}</h2><p className="dialog-lede">{voiceOnly ? 'あたらしい声だけを追加できます。前の声や写真は変わりません。' : '写真・声・名前を変えられます。しまうまでは元のままです。'}</p></div>
             <button type="button" className="icon-button" disabled={busy} onClick={close} aria-label="閉じる" data-testid="button-close-edit"><X size={19} /></button>
           </div>
+          {!voiceOnly && <>
           <div className="form-block">
             <label className="field-label" htmlFor="edit-item-name">なまえ</label>
             <input id="edit-item-name" className="title-input" value={name} disabled={busy} maxLength={48} onChange={(e) => { setName(e.currentTarget.value); setError(''); }} aria-invalid={!!error} data-testid="input-edit-name" />
@@ -245,12 +252,17 @@ export default function EditCardDialog({ item, categories, onSave, describeError
             </button>
             {photo && <button type="button" className="record-button em-inline" disabled={busy} onClick={() => { setPhoto(null); setOriginalPhoto(null); }} data-testid="button-undo-photo"><RotateCcw size={14} /> 元の写真にもどす</button>}
           </div>
+          <button type="button" className={`memo-access-button${memo.trim() ? ' has-memo' : ''}`} onClick={() => setMemoOpen(true)} disabled={busy} aria-label={memo.trim() ? '詳細メモを編集' : '詳細メモを追加'} data-testid="button-open-edit-memo">
+            <Pencil size={18} /> <span>{memo.trim() ? '詳細メモを編集' : '詳細メモを追加'}</span>
+          </button>
+          </>}
           <div className="form-block">
             <span className="field-label"><Mic size={14} /> 声（{slots.length}/{MAX_VOICES}）</span>
             {(rec.starting || rec.recording) && <RecordingGuide phase={rec.recording ? 'recording' : rec.guiding || rec.starting ? 'guide' : 'idle'} />}
+            {voiceOnly && <p className="field-hint">保存ずみの声はそのまま残ります。新しい声だけを録音します。</p>}
             {slots.length === 0 && <p className="field-hint">まだ声がありません。マイクで録音して追加できます。</p>}
             <ul className="em-voices">
-              {slots.map((slot, index) => {
+              {slots.filter((slot) => !voiceOnly || slot.fresh).map((slot, index) => {
                 const mine = target === slot.key;
                 const isRec = mine && rec.recording;
                 const isBusy = mine && (rec.starting || processing);
@@ -280,14 +292,14 @@ export default function EditCardDialog({ item, categories, onSave, describeError
                         </>
                       ) : (
                         <>
-                          <button type="button" className="record-button" disabled={mediaLocked || !micOk} onClick={() => void record(slot.key)} data-testid={`button-record-voice-${index}`}><Mic size={14} /> {slot.url ? '録りなおす' : '録音'}</button>
+                          {(!voiceOnly || slot.fresh) && <button type="button" className="record-button" disabled={mediaLocked || !micOk} onClick={() => void record(slot.key)} data-testid={`button-record-voice-${index}`}><Mic size={14} /> {slot.url ? '録りなおす' : '録音'}</button>}
                         </>
                       )}
-                      {slot.url && !mine && <button type="button" className="record-button" disabled={mediaLocked} onClick={() => { stopPlayback(); setTrimKey(slot.key); }} data-testid={`button-trim-voice-${index}`}>波形でカット</button>}
+                      {!voiceOnly && slot.url && !mine && <button type="button" className="record-button" disabled={mediaLocked} onClick={() => { stopPlayback(); setTrimKey(slot.key); }} data-testid={`button-trim-voice-${index}`}>波形でカット</button>}
                       {isBusy && rec.starting && <button type="button" className="record-button" onClick={cancelRecording}>やめる</button>}
                     </div>
                     <p className="field-hint">※録音した声は、後から図鑑カード長押しで編集できます</p>
-                    {trimKey === slot.key && slot.url && !working && <VoiceTrimEditor source={slot.blob ?? slot.url} refreshSource={!slot.blob && slot.path ? () => refreshVoiceDownloadUrl(slot.path!) : undefined} disabled={busy} onPendingChange={setTrimPending} onBeforePreview={stopPlayback} onApply={(blob) => { stopPlayback(); applyAudio(slot.key, blob); }} />}
+                    {!voiceOnly && trimKey === slot.key && slot.url && !working && <VoiceTrimEditor source={slot.blob ?? slot.url} refreshSource={!slot.blob && slot.path ? () => refreshVoiceDownloadUrl(slot.path!) : undefined} disabled={busy} onClose={() => setTrimKey(null)} onPendingChange={setTrimPending} onBeforePreview={stopPlayback} onApply={(blob) => { stopPlayback(); applyAudio(slot.key, blob); }} />}
                   </li>
                 );
               })}
@@ -305,7 +317,7 @@ export default function EditCardDialog({ item, categories, onSave, describeError
           {error && <p className="form-error" role="alert" data-testid="status-edit-error">{error}</p>}
           <div className="dialog-actions">
             <button type="button" className="cancel-button" disabled={busy} onClick={close} data-testid="button-cancel-edit">やめる</button>
-            <button type="submit" className="save-button" disabled={mediaLocked} data-testid="button-save-edit"><Check size={16} /> {busy ? 'しまっています…' : 'なおしてしまう'}</button>
+            <button type="submit" className="save-button" disabled={mediaLocked || (voiceOnly && !slots.some((slot) => slot.fresh && slot.replaced && slot.url))} data-testid="button-save-edit"><Check size={16} /> {busy ? 'しまっています…' : voiceOnly ? '声を追加する' : 'なおしてしまう'}</button>
           </div>
         </form>
       </div>
@@ -317,6 +329,7 @@ export default function EditCardDialog({ item, categories, onSave, describeError
           onApply={(processed) => { setPhoto(processed); clearPhotoSource(); setError(''); }}
         />
       )}
+      {memoOpen && !voiceOnly && <MemoDialog value={memo} onClose={() => setMemoOpen(false)} onSave={(value) => { setMemo(value); setMemoOpen(false); }} />}
     </>
   );
 }

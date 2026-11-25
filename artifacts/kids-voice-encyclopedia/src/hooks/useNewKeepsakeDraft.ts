@@ -72,17 +72,21 @@ export function useNewKeepsakeDraft() {
     if (timer.current !== null) window.clearTimeout(timer.current);
     timer.current = null;
     ++revision.current;
-    return enqueue(async () => {
-      try {
-        await store.clear();
+    try {
+      await enqueue(async () => {
+        try {
+          await store.clear();
+        } catch {
+          // Draft cleanup is best effort; never turn a successful card save into a failure.
+        }
         setStatus('idle');
         setError('');
-      } catch {
-        setStatus('error');
-        setError('キロクは保存されましたが、この端末の下書きを消去できませんでした。保存ボタンをもう一度押して再試行してください。');
-        throw new Error('local-draft-clear-failed');
-      }
-    }).then(() => true, () => false);
+      });
+    } catch {
+      // Keep cleanup failures out of the save flow and user-facing status.
+      setStatus('idle');
+      setError('');
+    }
   }, [store]);
 
   return { load, saveNow, saveSoon, clear, status, error };

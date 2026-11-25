@@ -33,6 +33,7 @@ export function createKeepsakeEditor(db: Firestore, storage: FirebaseStorage, us
       const patch: Record<string, unknown> = {};
       if (changes.itemName !== undefined) patch.itemName = keepsakeMetadata(changes.itemName).itemName;
       if (changes.categoryId !== undefined) patch.categoryId = changes.categoryId;
+      if (changes.memo !== undefined) patch.memo = changes.memo;
       if (Object.keys(patch).length) await deadline(updateDoc(record, patch), timeoutMs);
       return keepsakeFromData(base.id, { ...initial.data(), ...patch });
     }
@@ -111,6 +112,7 @@ export function createKeepsakeEditor(db: Firestore, storage: FirebaseStorage, us
         const patch: Record<string, unknown> = {};
         if (changes.itemName !== undefined) patch.itemName = keepsakeMetadata(changes.itemName).itemName;
         if (changes.categoryId !== undefined) patch.categoryId = changes.categoryId;
+        if (changes.memo !== undefined) patch.memo = changes.memo;
         if (changes.photo !== undefined) { patch.photo = uploads.get('photo')!.url; patch.photoPath = uploads.get('photo')!.path; }
         if (additions.length) {
           patch.voices = voices; patch.voice = voices[0]?.url ?? null; patch.voicePath = voices[0]?.path ?? null;

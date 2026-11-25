@@ -16,6 +16,7 @@ export type Keepsake = {
   photoPath?: string;
   voicePath?: string | null;
   categoryId?: string | null;
+  memo?: string;
   archived?: boolean;
   archivedAt?: number | null;
   voices?: VoiceAsset[];
@@ -99,7 +100,7 @@ export function createKeepsakeRepository(
         transaction.update(attemptRecord, { state: 'finished', finishedAt: serverTimestamp() });
         if (existing.exists()) return false;
         transaction.set(record, {
-          itemName: metadata.itemName, photo: photo.url, voice: voice?.url ?? null,
+          itemName: metadata.itemName, photo: photo.url, voice: voice?.url ?? null, memo: item.memo ?? '',
           ...(metadata.categoryId ? { categoryId: metadata.categoryId } : {}),
           photoPath: photo.path, voicePath: voice?.path ?? null,
           createdAt: migrating ? new Date(item.createdAt) : serverTimestamp(),

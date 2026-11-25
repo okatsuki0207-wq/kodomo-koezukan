@@ -79,7 +79,7 @@ test('page turns preload and play the latest supplied paper-turn MP3 from its be
     const audio = created[0];
     assert.equal(audio.src, '/assets/audio/page-turn-paper.mp3');
     assert.equal(audio.preload, 'auto');
-    assert.equal(audio.volume, 0.12);
+    assert.equal(audio.volume, 0.06);
     assert.equal(audio.loadCalls, 1);
     assert.equal(unlockPageTurnSound(), true);
     assert.equal(audio.muted, true);
@@ -190,7 +190,7 @@ test('gallery cards render names as noninteractive labels and page through touch
   assert.doesNotMatch(app, /ShareLinkDialog|shareEncyclopedia|ずかんを共有/);
   assert.doesNotMatch(app, /beforeinstallprompt|openInstallExperience|InstallAppDialog/);
   assert.doesNotMatch(styles, /pwa-install-dialog|pwa-install-steps/);
-  assert.match(pageTurnSound, /audio\.volume = 0\.12/);
+  assert.match(pageTurnSound, /audio\.volume = 0\.06/);
   assert.doesNotMatch(app, /BookOpeningTransition|BOOK_OPENING|bookOpeningPhase|openLibraryWithTransition/);
   assert.doesNotMatch(styles, /book-opening|opening-video/);
   assert.doesNotMatch(app, /FloatingVoicele|book-companion/);

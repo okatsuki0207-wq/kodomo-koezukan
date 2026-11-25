@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Archive, Eye, Shuffle, X } from 'lucide-react';
+import { Archive, Download, Eye, Shuffle, Upload, X } from 'lucide-react';
 import { normalizeGallerySettings, type GallerySettings } from '../lib/gallerySettings';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 
@@ -8,6 +8,8 @@ type Props = {
   childMode: 'normal' | 'view' | 'add';
   onChildModeChange: (mode: 'normal' | 'view' | 'add') => void;
   onManageArchive: () => void;
+  onExportBackup: () => Promise<void>;
+  onRestoreBackup: (file: File) => Promise<void>;
   onSave: (settings: GallerySettings) => Promise<void>;
   onClose: () => void;
 };
@@ -24,12 +26,15 @@ export default function SettingsDialog({
   childMode,
   onChildModeChange,
   onManageArchive,
+  onExportBackup,
+  onRestoreBackup,
   onSave,
   onClose,
 }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const dialog = useRef<HTMLDivElement>(null);
+  const backupInput = useRef<HTMLInputElement>(null);
   useDialogFocus(dialog, '[data-testid="button-settings"]', () => { if (!busy) onClose(); });
 
   const close = () => { if (!busy) onClose(); };
@@ -51,6 +56,36 @@ export default function SettingsDialog({
       setBusy(false);
     }
   };
+  const exportBackup = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await onExportBackup();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'バックアップを書き出せませんでした。');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const restoreBackup = async (file?: File) => {
+    if (!file || busy) return;
+    if (!window.confirm('この端末のキロク・カテゴリ・表示設定を、バックアップの内容に置き換えます。先に現在のデータを書き出してください。復元しますか？')) {
+      if (backupInput.current) backupInput.current.value = '';
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await onRestoreBackup(file);
+      onClose();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'バックアップを復元できませんでした。');
+    } finally {
+      setBusy(false);
+      if (backupInput.current) backupInput.current.value = '';
+    }
+  };
 
   return (
     <div className="overlay overlay-top" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }} onKeyDown={(event) => { if (event.key === 'Escape') close(); }}>
@@ -58,7 +93,7 @@ export default function SettingsDialog({
         <div className="dialog-head">
           <div>
             <h2 id="settings-title" className="dialog-title">ずかんの設定</h2>
-            <p className="dialog-lede">閲覧・編集と、ずかんの表示方法を切り替えられます。</p>
+            <p className="dialog-lede">使い方に合わせてモードを切り替えられます。</p>
           </div>
           <button type="button" className="icon-button" disabled={busy} onClick={close} aria-label="閉じる" data-testid="button-close-settings"><X size={19} /></button>
         </div>
@@ -82,11 +117,11 @@ export default function SettingsDialog({
               <span className={`settings-switch${childMode === 'normal' ? ' is-on' : ''}`} aria-hidden="true"><span /></span>
             </button>
             <button type="button" className={`settings-mode-option${childMode === 'view' ? ' selected' : ''}`} aria-pressed={childMode === 'view'} disabled={busy} onClick={() => onChildModeChange('view')} data-testid="setting-mode-child-view">
-              <Eye size={18} /><span className="settings-option-copy"><strong>こどもモード：見る・聞く</strong><small>追加・編集・削除はできません。</small></span>
+              <Eye size={18} /><span className="settings-option-copy"><strong>見るだけモード</strong><small>キロクを見たり、声を聞いたりできます。</small></span>
               <span className={`settings-switch${childMode === 'view' ? ' is-on' : ''}`} aria-hidden="true"><span /></span>
             </button>
             <button type="button" className={`settings-mode-option${childMode === 'add' ? ' selected' : ''}`} aria-pressed={childMode === 'add'} disabled={busy} onClick={() => onChildModeChange('add')} data-testid="setting-mode-child-add">
-              <Eye size={18} /><span className="settings-option-copy"><strong>こどもモード：追加・編集もOK</strong><small>新しいキロクや声を追加・編集できます。削除はできません。</small></span>
+              <Eye size={18} /><span className="settings-option-copy"><strong>こどもモード</strong><small>見る・聞くことと、新しい声の追加ができます。写真や前の声は変えられません。</small></span>
               <span className={`settings-switch${childMode === 'add' ? ' is-on' : ''}`} aria-hidden="true"><span /></span>
             </button>
             <button
@@ -118,6 +153,20 @@ export default function SettingsDialog({
                 <small>しまったキロクをもどす、または完全に削除します。</small>
               </span>
             </button>}
+          </div>
+        </section>
+
+        <section className="settings-section settings-backup" aria-label="データのバックアップ">
+          <h3 className="settings-section-title">データのバックアップ</h3>
+          <p className="settings-backup-note">キロクの写真・声・カテゴリ・表示設定をJSONファイルに保存し、別の端末へ移せます。ファイルには個人のデータが含まれるため、安全な場所で保管してください。</p>
+          <div className="settings-backup-actions">
+            <button type="button" className="settings-mode-option" disabled={busy} onClick={() => { void exportBackup(); }} data-testid="button-export-backup">
+              <Download size={18} /><span className="settings-option-copy"><strong>バックアップを書き出す</strong><small>この端末のデータをJSONで保存します。</small></span>
+            </button>
+            <button type="button" className="settings-mode-option" disabled={busy} onClick={() => backupInput.current?.click()} data-testid="button-import-backup">
+              <Upload size={18} /><span className="settings-option-copy"><strong>バックアップを読み込む</strong><small>選んだ内容で、この端末のデータを置き換えます。</small></span>
+            </button>
+            <input ref={backupInput} type="file" accept="application/json,.json" hidden disabled={busy} onChange={(event) => { void restoreBackup(event.currentTarget.files?.[0]); }} data-testid="input-import-backup" />
           </div>
         </section>
 

@@ -7,6 +7,7 @@ const source = await readFile(new URL('../src/lib/newKeepsakeDraft.ts', import.m
 const draftModule = await import(`data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString('base64')}`);
 const appSource = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
 const startScreenSource = await readFile(new URL('../src/components/StartScreen.tsx', import.meta.url), 'utf8');
+const draftHookSource = await readFile(new URL('../src/hooks/useNewKeepsakeDraft.ts', import.meta.url), 'utf8');
 
 class FakeIndexedDB {
   values = new Map();
@@ -91,10 +92,14 @@ test('local draft status text and alerts are not shown in the create form', () =
   assert.doesNotMatch(appSource, /draft-autosave|draft-notice|status-draft-error|この端末に自動保存|下書きを確認しています/u);
 });
 
-test('successful cloud save clears the local draft afterward', () => {
+test('successful cloud save closes immediately and clears the local draft as best effort', () => {
   const cloudSave = appSource.indexOf('await saveKeepsake({');
-  const clearDraft = appSource.indexOf('await localDraft.clear()', cloudSave);
-  assert.ok(cloudSave >= 0 && clearDraft > cloudSave);
+  const clearDraft = appSource.indexOf('void localDraft.clear()', cloudSave);
+  const closeForm = appSource.indexOf('setCreateOpen(false)', cloudSave);
+  assert.ok(cloudSave >= 0 && clearDraft > cloudSave && closeForm > clearDraft);
+  assert.match(draftHookSource, /try \{\s*await store\.clear\(\);\s*\} catch \{\s*\/\/ Draft cleanup is best effort/u);
+  assert.match(draftHookSource, /setStatus\('idle'\);\s*setError\(''\)/u);
+  assert.doesNotMatch(draftHookSource, /local-draft-clear-failed|この端末の下書きを消去できませんでした/u);
 });
 
 test('explicitly closing the create form discards the draft and suppresses a delayed pagehide flush', () => {

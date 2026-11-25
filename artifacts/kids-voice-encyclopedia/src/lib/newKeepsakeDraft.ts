@@ -4,6 +4,7 @@ export type NewKeepsakeDraftInput = {
   pendingPhotoBlob: Blob | null;
   voiceBlob: Blob | null;
   categoryId: string | null;
+  memo: string;
 };
 
 export type NewKeepsakeDraft = NewKeepsakeDraftInput & {
@@ -11,7 +12,7 @@ export type NewKeepsakeDraft = NewKeepsakeDraftInput & {
 };
 
 export function hasNewKeepsakeDraftContent(draft: NewKeepsakeDraftInput): boolean {
-  return Boolean(draft.itemName.trim() || draft.photo || draft.pendingPhotoBlob || draft.voiceBlob);
+  return Boolean(draft.itemName.trim() || draft.photo || draft.pendingPhotoBlob || draft.voiceBlob || (draft.memo ?? '').trim());
 }
 
 const DATABASE_NAME = 'kids-voice-encyclopedia-local';
@@ -96,6 +97,7 @@ function validDraft(value: unknown): NewKeepsakeDraft | null {
     pendingPhotoBlob: draft.pendingPhotoBlob ?? null,
     voiceBlob: draft.voiceBlob ?? null,
     categoryId: draft.categoryId ?? null,
+    memo: typeof draft.memo === 'string' ? draft.memo : '',
     updatedAt: draft.updatedAt,
   };
 }
