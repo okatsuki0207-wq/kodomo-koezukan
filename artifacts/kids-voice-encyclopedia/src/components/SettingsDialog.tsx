@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
-import { Archive, Download, Eye, Shuffle, Upload, X } from 'lucide-react';
+import { Archive, Check, Download, Eye, Shuffle, Smartphone, Upload, X } from 'lucide-react';
 import { normalizeGallerySettings, type GallerySettings } from '../lib/gallerySettings';
+import { isRunningStandalone } from '../lib/installGuide';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 
 type Props = {
@@ -11,6 +12,7 @@ type Props = {
   onExportBackup: () => Promise<void>;
   onRestoreBackup: (file: File) => Promise<void>;
   onSave: (settings: GallerySettings) => Promise<void>;
+  onShowInstallGuide: () => void;
   onClose: () => void;
 };
 
@@ -29,9 +31,11 @@ export default function SettingsDialog({
   onExportBackup,
   onRestoreBackup,
   onSave,
+  onShowInstallGuide,
   onClose,
 }: Props) {
   const [busy, setBusy] = useState(false);
+  const [runningStandalone] = useState(isRunningStandalone);
   const [error, setError] = useState('');
   const dialog = useRef<HTMLDivElement>(null);
   const backupInput = useRef<HTMLInputElement>(null);
@@ -154,6 +158,17 @@ export default function SettingsDialog({
               </span>
             </button>}
           </div>
+        </section>
+
+        <section className="settings-section settings-install" aria-label="ホーム画面に追加">
+          <h3 className="settings-section-title">アプリとして使う</h3>
+          {runningStandalone ? (
+            <p className="settings-installed-note" data-testid="status-running-standalone"><Check size={16} />ホーム画面から開いています。このまま使えます。</p>
+          ) : (
+            <button type="button" className="settings-mode-option" disabled={busy} onClick={onShowInstallGuide} data-testid="setting-install">
+              <Smartphone size={18} /><span className="settings-option-copy"><strong>ホーム画面に追加する</strong><small>アイコンからすぐ開けて、キロクも残りやすくなります。追加のしかたを表示します。</small></span>
+            </button>
+          )}
         </section>
 
         <section className="settings-section settings-backup" aria-label="データのバックアップ">

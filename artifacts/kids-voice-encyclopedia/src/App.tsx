@@ -36,6 +36,8 @@ import { VoicePlayback, VoiceShuffleBag } from './lib/voicePlayback';
 import DetailDialogShell from './components/DetailDialogShell';
 import StartScreen from './components/StartScreen';
 import SettingsDialog from './components/SettingsDialog';
+import InstallGuideDialog from './components/InstallGuideDialog';
+import { isRunningStandalone, loadInstallGuideDismissed, persistInstallGuideDismissed } from './lib/installGuide';
 import ArchiveDialog from './components/ArchiveDialog';
 import { downloadLocalBackup, restoreLocalBackup } from './lib/localDataBackup';
 import { useCategories } from './hooks/useCategories';
@@ -74,6 +76,17 @@ function loadChildMode(): ChildMode {
 function App() {
   const [items, setItems] = useState<Keepsake[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [installGuideOpen, setInstallGuideOpen] = useState(false);
+  const [installGuideReturn, setInstallGuideReturn] = useState('[data-testid="button-home"]');
+  useEffect(() => {
+    if (isRunningStandalone() || loadInstallGuideDismissed()) return;
+    const timer = window.setTimeout(() => setInstallGuideOpen(true), 900);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const closeInstallGuide = () => {
+    persistInstallGuideDismissed();
+    setInstallGuideOpen(false);
+  };
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiveBusyId, setArchiveBusyId] = useState<string | null>(null);
   const [archiveError, setArchiveError] = useState('');
@@ -752,7 +765,7 @@ function App() {
   const formatTime = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   return (
     <div className={`app-shell${view === 'library' ? ' app-shell-library' : ''}`} data-child-mode={childMode}>
-      <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen}>
+      <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen || installGuideOpen}>
         <div className="topbar-row">
           <button type="button" className="brand brand-home" onClick={() => navigate('start')} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
             <span className="brand-mark"><BookOpen size={20} strokeWidth={1.8} /></span>
@@ -779,7 +792,7 @@ function App() {
       )}
 
       {view === 'start' ? (
-        <main className="start-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen}>
+        <main className="start-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen || installGuideOpen}>
           <StartScreen
             onRecord={openCreate}
             showRecordAction={childMode === 'normal'}
@@ -787,7 +800,7 @@ function App() {
           />
         </main>
       ) : (
-      <main className="page-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen}>
+      <main className="page-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen || installGuideOpen}>
         <CategoryBar
           categories={categories}
           selected={selectedCategory}
@@ -1139,6 +1152,10 @@ function App() {
           setGridPage(0);
           setLoadAttempt((attempt) => attempt + 1);
         }}
+        onShowInstallGuide={() => {
+          setInstallGuideReturn('[data-testid="setting-install"]');
+          setInstallGuideOpen(true);
+        }}
         onClose={() => setSettingsOpen(false)}
         onSave={async (next) => {
           try {
@@ -1148,6 +1165,10 @@ function App() {
             throw new Error(firebaseError(caught));
           }
         }}
+      />}
+      {installGuideOpen && <InstallGuideDialog
+        onClose={closeInstallGuide}
+        returnSelector={installGuideReturn}
       />}
       {archiveOpen && childMode === 'normal' && <ArchiveDialog
         items={archivedItems}

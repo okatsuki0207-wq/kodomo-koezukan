@@ -452,6 +452,16 @@ button:disabled {cursor:not-allowed;opacity:.55;}
 .settings-section-title { margin:0 0 8px; color:#59675b; font-size:14px; }
 .settings-backup-note { margin:0 0 12px; color:#817b70; font-size:12px; line-height:1.65; }
 .settings-backup-actions { display:grid; grid-template-columns:1fr; gap:9px; }
+.install-guide-character { display:flex; justify-content:center; margin:2px 0 10px; }
+.install-guide-character img { width:104px; height:auto; }
+.install-guide-steps { list-style:none; margin:6px 0 0; padding:0; display:grid; gap:12px; }
+.install-guide-steps li { display:flex; align-items:flex-start; gap:11px; font-size:13.5px; line-height:1.7; color:#4c554d; }
+.install-guide-step-icon { flex:0 0 auto; width:30px; height:30px; border-radius:50%; background:#f0f5ef; border:1px solid #c4d4c3; color:#59675b; display:flex; align-items:center; justify-content:center; margin-top:1px; }
+.install-guide-note { margin:0 0 12px; padding:10px 12px; background:#f5e7dc; color:#9a5c45; font-size:12px; line-height:1.7; border-radius:9px; }
+.install-guide-native-button { width:100%; min-height:52px; margin:2px 0 16px; display:flex; align-items:center; justify-content:center; gap:9px; border:1px solid #9ab09a; border-radius:14px; background:#f0f5ef; color:#42543f; font-size:15px; font-weight:700; cursor:pointer; }
+.install-guide-native-button:disabled { opacity:.65; cursor:wait; }
+.install-guide-done { display:flex; align-items:center; gap:8px; margin:8px 0 0; padding:12px 14px; background:#e8eee2; color:#63795e; font-size:13.5px; line-height:1.7; border-radius:10px; }
+.settings-installed-note { margin:0; color:#817b70; font-size:12.5px; line-height:1.65; display:flex; align-items:center; gap:8px; }
 .settings-toggles { padding-top:12px; border-top:0; }
 .settings-mode-options { display:grid; grid-template-columns:1fr; gap:10px; }
 .settings-mode-option { width:100%; min-width:0; min-height:76px; padding:13px 14px; display:flex; align-items:center; gap:11px; border:1px solid #d9ded9; border-radius:14px; background:#fff; color:#59675b; text-align:left; cursor:pointer; transition:background .18s,border-color .18s,box-shadow .18s; }
