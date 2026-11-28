@@ -1099,8 +1099,8 @@ button:focus-visible {
   box-shadow:none;
 }
 .app-shell-library .sticker-add-media {
-  width:min(100%,clamp(52px,calc(16dvh - 48px),84px));
-  height:min(100%,clamp(52px,calc(16dvh - 48px),84px));
+  width:min(100%,clamp(40px,calc(12dvh - 36px),64px));
+  height:min(100%,clamp(40px,calc(12dvh - 36px),64px));
   max-height:100%;
   place-self:center;
   display:grid;
