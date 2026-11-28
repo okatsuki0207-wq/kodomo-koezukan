@@ -858,7 +858,7 @@ function App() {
                       aria-label="新しいキロクを追加"
                       data-testid="button-add-card-tile"
                     >
-                      <span className="sticker-add-media"><Plus size={30} strokeWidth={1.8} /></span>
+                      <span className="sticker-add-media"><Plus size={24} strokeWidth={1.8} /></span>
                       <span className="sticker-add-name">キロクする</span>
                     </button>
                   </article>

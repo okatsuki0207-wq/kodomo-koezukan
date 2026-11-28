@@ -571,8 +571,8 @@ button:disabled {cursor:not-allowed;opacity:.55;}
 
 /* Pastel rainbow accents on a clean paper-white base. */
 :root {
-  --rainbow-soft: linear-gradient(115deg, #f4c7d3 0%, #f6dfaa 27%, #c9e4cd 52%, #c9dcf2 76%, #dfcff0 100%);
-  --rainbow-line: linear-gradient(115deg, #e8aebf 0%, #ebd294 27%, #add2b5 52%, #aac8e8 76%, #cab2e5 100%);
+  --rainbow-soft: linear-gradient(115deg, #fce0ea 0%, #fdf0cd 27%, #dcf2de 52%, #dcecfb 76%, #ecdffa 100%);
+  --rainbow-line: linear-gradient(115deg, #f5bcd2 0%, #f5dc9e 27%, #bfe6c6 52%, #bcd9f7 76%, #dcc6f5 100%);
   --rainbow-ink: #574b5d;
 }
 body { background:#fff; color:#514b49; }
@@ -599,7 +599,7 @@ body::before {
 .save-button:hover,
 .record-button.primary:hover,
 .photo-editor-primary:hover,
-.photo-editor-apply:hover { background:var(--rainbow-soft); filter:saturate(1.08) brightness(.99); }
+.photo-editor-apply:hover { background:var(--rainbow-soft); filter:saturate(1.05) brightness(1.02); }
 .category-chip.active {
   background:var(--rainbow-soft);
   border-color:#d8c5df;
@@ -1099,8 +1099,8 @@ button:focus-visible {
   box-shadow:none;
 }
 .app-shell-library .sticker-add-media {
-  width:min(100%,clamp(64px,calc(20dvh - 60px),108px));
-  height:min(100%,clamp(64px,calc(20dvh - 60px),108px));
+  width:min(100%,clamp(52px,calc(16dvh - 48px),84px));
+  height:min(100%,clamp(52px,calc(16dvh - 48px),84px));
   max-height:100%;
   place-self:center;
   display:grid;
