@@ -25,17 +25,18 @@ function shuffledIds(items: Keepsake[]): string[] {
 export default function KanaMode({ items, childMode, playing, playingItemId, onPlay, onRecordKana, onClose }: Props) {
   const [script, setScript] = useState<'hiragana' | 'katakana'>('hiragana');
   const [selectedKana, setSelectedKana] = useState<string | null>(null);
-  const [stageItem, setStageItem] = useState<Keepsake | null>(null);
+  const [shownItem, setShownItem] = useState<Keepsake | null>(null);
   const cycles = useRef(new Map<string, { order: string[]; index: number }>());
 
   const grouped = useMemo(() => groupItemsByKana(items), [items]);
   const collected = ALL_KANA.filter((kana) => (grouped.get(kana)?.length ?? 0) > 0).length;
+  const selectedIsEmpty = selectedKana !== null && (grouped.get(selectedKana)?.length ?? 0) === 0;
 
   const tapKana = (kana: string) => {
     const list = grouped.get(kana) ?? [];
     if (!list.length) {
       setSelectedKana(kana);
-      setStageItem(null);
+      setShownItem(null);
       return;
     }
     const entry = cycles.current.get(kana);
@@ -51,14 +52,14 @@ export default function KanaMode({ items, childMode, playing, playingItemId, onP
     cycles.current.set(kana, { order, index });
     const item = list.find((candidate) => candidate.id === order[index]) ?? list[0];
     setSelectedKana(kana);
-    setStageItem(item);
+    setShownItem(item);
     onPlay(item);
   };
 
   const renderCell = (kana: string) => {
     const list = grouped.get(kana) ?? [];
     const filled = list.length > 0;
-    const representative = selectedKana === kana && stageItem ? stageItem : list[0];
+    const showItem = selectedKana === kana ? shownItem : null;
     return (
       <button
         key={kana}
@@ -68,10 +69,20 @@ export default function KanaMode({ items, childMode, playing, playingItemId, onP
         aria-label={filled ? `${kana}のキロク` : `${kana}（まだキロクがない）`}
         data-testid={`kana-cell-${kana}`}
       >
-        {filled && representative?.photo
-          ? <img className="kana-cell-photo" src={representative.photo} alt="" aria-hidden="true" />
-          : null}
-        <span className="kana-cell-kana">{displayKana(kana, script)}</span>
+        {showItem ? (
+          showItem.photo ? (
+            <>
+              <img className="kana-cell-photo" src={showItem.photo} alt={`${showItem.itemName}の写真`} />
+              <span className="kana-cell-badge" aria-hidden="true">{displayKana(kana, script)}</span>
+              <span className="kana-cell-name" aria-hidden="true">{showItem.itemName}</span>
+              {playing && playingItemId === showItem.id && <span className="kana-cell-notes" aria-hidden="true">♪</span>}
+            </>
+          ) : (
+            <span className="kana-cell-name-only">{showItem.itemName}</span>
+          )
+        ) : (
+          <span className="kana-cell-kana">{displayKana(kana, script)}</span>
+        )}
       </button>
     );
   };
@@ -84,36 +95,10 @@ export default function KanaMode({ items, childMode, playing, playingItemId, onP
             <ChevronLeft size={18} /><span>ずかんにもどる</span>
           </button>
           <h2 className="kana-title">あいうえお</h2>
-        </div>
-        <p className="dialog-lede">もじを おすと、その もじではじまる キロクの こえが ながれるよ。</p>
-
-        <div className="kana-script-toggle" role="group" aria-label="ひらがなとカタカナの切り替え">
-          <button type="button" className={script === 'hiragana' ? 'selected' : ''} aria-pressed={script === 'hiragana'} onClick={() => setScript('hiragana')} data-testid="button-kana-hiragana">ひらがな</button>
-          <button type="button" className={script === 'katakana' ? 'selected' : ''} aria-pressed={script === 'katakana'} onClick={() => setScript('katakana')} data-testid="button-kana-katakana">カタカナ</button>
-        </div>
-
-        <div className="kana-stage" data-testid="kana-stage">
-          {stageItem ? (
-            <>
-              {stageItem.photo && <img className="kana-stage-photo" src={stageItem.photo} alt={`${stageItem.itemName}の写真`} />}
-              <p className="kana-stage-name">
-                {stageItem.itemName}
-                {playing && playingItemId === stageItem.id && <span className="voice-notes" aria-hidden="true"><span>♪</span><span>♫</span><span>♪</span></span>}
-              </p>
-            </>
-          ) : selectedKana ? (
-            <>
-              <p className="kana-stage-letter" aria-hidden="true">{displayKana(selectedKana, script)}</p>
-              <p className="kana-stage-name">『{displayKana(selectedKana, script)}』のキロクは、まだないよ</p>
-              {childMode === 'normal' && (
-                <button type="button" className="record-button primary" onClick={onRecordKana} data-testid="button-kana-record">
-                  <Mic size={18} /><span>この音でキロクする</span>
-                </button>
-              )}
-            </>
-          ) : (
-            <p className="kana-stage-name">すきな もじを おしてね</p>
-          )}
+          <div className="kana-script-toggle" role="group" aria-label="ひらがなとカタカナの切り替え">
+            <button type="button" className={script === 'hiragana' ? 'selected' : ''} aria-pressed={script === 'hiragana'} onClick={() => setScript('hiragana')} data-testid="button-kana-hiragana">ひらがな</button>
+            <button type="button" className={script === 'katakana' ? 'selected' : ''} aria-pressed={script === 'katakana'} onClick={() => setScript('katakana')} data-testid="button-kana-katakana">カタカナ</button>
+          </div>
         </div>
 
         <div className="kana-chart">
@@ -129,6 +114,15 @@ export default function KanaMode({ items, childMode, playing, playingItemId, onP
             <p className="kana-progress" data-testid="kana-progress">{collected}／{ALL_KANA.length} もじ あつまった</p>
           </div>
         </div>
+
+        {selectedIsEmpty && childMode === 'normal' && selectedKana && (
+          <div className="kana-record-bar">
+            <span>『{displayKana(selectedKana, script)}』のキロクは、まだないよ</span>
+            <button type="button" className="record-button primary" onClick={onRecordKana} data-testid="button-kana-record">
+              <Mic size={16} /><span>この音でキロクする</span>
+            </button>
+          </div>
+        )}
       </div>
     </main>
   );
