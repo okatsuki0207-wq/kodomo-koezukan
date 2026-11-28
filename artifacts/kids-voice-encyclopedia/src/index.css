@@ -1534,7 +1534,7 @@ button:focus-visible {
   overflow:hidden;
   padding:0;
 }
-.kana-cell.is-filled { background:#fffafd; border-color:#dccdea; }
+.kana-cell.is-filled { background:var(--rainbow-soft); border-color:#d8c5df; }
 .kana-cell.is-prefilled { background:var(--rainbow-soft); border-color:#d8c5df; }
 .kana-cell.is-empty { background:#faf8fb; }
 .kana-cell.is-empty .kana-cell-kana { color:#c9bccd; }
@@ -1567,24 +1567,9 @@ button:focus-visible {
 }
 .kana-chart.slide-next { animation:kana-slide-next .32s ease both; }
 .kana-chart.slide-prev { animation:kana-slide-prev .32s ease both; }
-.kana-popup { position:relative; text-align:center; }
-.kana-popup-close {
-  position:absolute;
-  top:8px;
-  right:8px;
-  display:grid;
-  place-items:center;
-  width:34px;
-  height:34px;
-  border:1px solid #e4d7eb;
-  border-radius:50%;
-  background:#fff;
-  color:#736778;
-  cursor:pointer;
-}
+.kana-popup { position:relative; text-align:center; cursor:pointer; }
 .kana-popup-kana { margin:4px 0 8px; font-size:84px; line-height:1.05; font-weight:700; color:#574b5d; }
 .kana-popup-kana.is-combo { font-size:56px; }
-.kana-popup-photo-button { background:none; border:none; padding:0; cursor:pointer; }
 .kana-popup-photo { max-width:min(74vw,320px); max-height:36vh; object-fit:contain; }
 .kana-popup-name { margin:8px 0 0; font-size:19px; font-weight:700; color:#65513d; display:flex; align-items:center; justify-content:center; gap:8px; }
 .kana-popup-hint { margin:5px 0 0; font-size:12.5px; color:#8a7d8d; }

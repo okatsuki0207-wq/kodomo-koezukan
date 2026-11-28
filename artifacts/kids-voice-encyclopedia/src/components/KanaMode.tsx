@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
-import { ChevronLeft, Mic, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronLeft, Mic } from 'lucide-react';
 import type { Keepsake } from '../lib/keepsakeRepository';
 import {
   ALL_DAKUTEN, ALL_KANA, ALL_YOON, DAKUTEN_ROWS, KANA_N, KANA_ROWS, NON_INITIAL_KANA, YOON_ROWS,
@@ -55,7 +55,6 @@ export default function KanaMode({ items, childMode, playing, playingItemId, onP
   const grouped = useMemo(() => groupItemsByKana(items), [items]);
   const page = VISIBLE_PAGES[pageIndex];
   const filledCount = page.keys.filter((kana) => grouped.has(kana) || NON_INITIAL_KANA.includes(kana)).length;
-  const popupCount = popupKana ? (grouped.get(popupKana)?.length ?? 0) : 0;
 
   const goPage = (next: number) => {
     const clamped = Math.max(0, Math.min(VISIBLE_PAGES.length - 1, next));
@@ -88,18 +87,22 @@ export default function KanaMode({ items, childMode, playing, playingItemId, onP
     if (item) onPlay(item);
   };
 
-  const popupNext = () => {
-    if (!popupKana || popupCount < 2) return;
-    const item = advance(popupKana);
-    setPopupItem(item);
-    if (item) onPlay(item);
-  };
-
   const closePopup = () => {
     setPopupKana(null);
     setPopupItem(null);
     onStop();
   };
+
+  // カード表示中は、声が流れ終わってから約3秒で自動的に表へ戻る。
+  // （声がないカードは、開いてから約3秒で戻る。文字だけのポップアップは対象外）
+  useEffect(() => {
+    if (!popupKana || !popupItem || playing) return;
+    const timer = window.setTimeout(() => {
+      setPopupKana(null);
+      setPopupItem(null);
+    }, 3000);
+    return () => window.clearTimeout(timer);
+  }, [popupKana, popupItem, playing]);
 
   const renderCell = (kana: string) => {
     const filled = (grouped.get(kana)?.length ?? 0) > 0;
@@ -191,29 +194,31 @@ export default function KanaMode({ items, childMode, playing, playingItemId, onP
           role="presentation"
           onMouseDown={(event) => { if (event.target === event.currentTarget) closePopup(); }}
         >
-          <section className="dialog kana-popup" role="dialog" aria-modal="true" aria-label={`${popupKana}のポップアップ`} data-testid="kana-popup">
-            <button type="button" className="kana-popup-close" onClick={closePopup} aria-label="とじる" data-testid="button-close-kana-popup">
-              <X size={20} />
-            </button>
+          <section
+            className="dialog kana-popup"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${popupKana}のポップアップ`}
+            data-testid="kana-popup"
+            onClick={closePopup}
+          >
             <p className={`kana-popup-kana${popupKana.length > 1 ? ' is-combo' : ''}`}>{displayKana(popupKana, script)}</p>
             {popupItem ? (
               <>
                 {popupItem.photo && (
-                  <button type="button" className="kana-popup-photo-button" onClick={popupNext} aria-label={popupCount > 1 ? 'つぎのキロク' : popupItem.itemName}>
-                    <img className="kana-popup-photo" src={popupItem.photo} alt={`${popupItem.itemName}の写真`} />
-                  </button>
+                  <img className="kana-popup-photo" src={popupItem.photo} alt={`${popupItem.itemName}の写真`} />
                 )}
                 <p className="kana-popup-name">
                   {popupItem.itemName}
                   {playing && playingItemId === popupItem.id && <span className="voice-notes" aria-hidden="true"><span>♪</span><span>♫</span><span>♪</span></span>}
                 </p>
-                {popupCount > 1 && <p className="kana-popup-hint">しゃしんを タップすると つぎのキロクが でるよ</p>}
+                <p className="kana-popup-hint">タップすると もどるよ</p>
               </>
             ) : !NON_INITIAL_KANA.includes(popupKana) && childMode === 'normal' ? (
               <button
                 type="button"
                 className="record-button primary"
-                onClick={() => { setPopupKana(null); setPopupItem(null); onRecordKana(); }}
+                onClick={(event) => { event.stopPropagation(); setPopupKana(null); setPopupItem(null); onRecordKana(); }}
                 data-testid="button-kana-record"
               >
                 <Mic size={18} /><span>この音でキロクする</span>
