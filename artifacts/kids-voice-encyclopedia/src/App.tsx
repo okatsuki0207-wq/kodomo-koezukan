@@ -820,6 +820,7 @@ function App() {
           playing={playing}
           playingItemId={playingItemId}
           onPlay={playKeepsake}
+          onStop={stopPlayback}
           onRecordKana={() => { setKanaOpen(false); openCreate(); }}
           onClose={closeKana}
         />
