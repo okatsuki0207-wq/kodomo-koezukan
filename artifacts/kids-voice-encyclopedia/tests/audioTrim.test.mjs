@@ -202,10 +202,10 @@ test('guide playback rejection does not fall back to a beep or successful record
 });
 
 test('voice range trims both edges with preroll and postroll', () => {
-  // sampleRate 1000: 10ms window = 10 samples, preroll 100, postroll 250.
+  // sampleRate 1000: 10ms window = 10 samples, preroll 50, postroll 200.
   const samples = new Float32Array(4000).fill(0.004);
   samples.fill(0.3, 1000, 2000);
-  assert.deepEqual(findVoiceRange([samples], 1000), { start: 900, end: 2250 });
+  assert.deepEqual(findVoiceRange([samples], 1000), { start: 950, end: 2200 });
 });
 
 test('voice range ignores low-level noise louder than the absolute floor', () => {
@@ -213,13 +213,22 @@ test('voice range ignores low-level noise louder than the absolute floor', () =>
   const samples = new Float32Array(4000).fill(0.02);
   samples.fill(0.4, 1000, 2000);
   samples.fill(0, 2000);
-  assert.deepEqual(findVoiceRange([samples], 1000), { start: 900, end: 2250 });
+  assert.deepEqual(findVoiceRange([samples], 1000), { start: 950, end: 2200 });
+});
+
+test('voice range drops guide-period residue below a quarter of the peak', () => {
+  // Echo-cancelled guide bleed and room sound at 15% of the child's peak
+  // must not survive at the head of the clip.
+  const samples = new Float32Array(4000);
+  samples.fill(0.045, 0, 1000);
+  samples.fill(0.3, 1500, 2500);
+  assert.deepEqual(findVoiceRange([samples], 1000), { start: 1450, end: 2700 });
 });
 
 test('voice range keeps a wholly quiet voice recording', () => {
   const samples = new Float32Array(3000);
   samples.fill(0.03, 500, 1500);
-  assert.deepEqual(findVoiceRange([samples], 1000), { start: 400, end: 1750 });
+  assert.deepEqual(findVoiceRange([samples], 1000), { start: 450, end: 1700 });
 });
 
 test('voice range returns null for silence and faint noise', () => {
@@ -236,5 +245,5 @@ test('voice range is not extended by an isolated click', () => {
   const samples = new Float32Array(4000);
   samples[100] = 0.9;
   samples.fill(0.3, 1000, 2000);
-  assert.deepEqual(findVoiceRange([samples], 1000), { start: 900, end: 2250 });
+  assert.deepEqual(findVoiceRange([samples], 1000), { start: 950, end: 2200 });
 });

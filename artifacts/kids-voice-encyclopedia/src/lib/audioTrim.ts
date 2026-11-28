@@ -80,15 +80,22 @@ export async function trimLeadingSilence(recording: Blob): Promise<Blob> {
 }
 
 /** 前後の余白は声の始まり・終わりに少しだけ残す。 */
-export const VOICE_RANGE_PREROLL_SECONDS = 0.1;
-export const VOICE_RANGE_POSTROLL_SECONDS = 0.25;
-/** 一番大きな声の窓を基準に、この割合未満の窓は「声なし」とみなす（小さな物音や残響を前後に残さない）。 */
-export const VOICE_RELATIVE_THRESHOLD = 0.12;
+export const VOICE_RANGE_PREROLL_SECONDS = 0.05;
+export const VOICE_RANGE_POSTROLL_SECONDS = 0.2;
+/**
+ * 一番大きな声の窓を基準に、この割合未満の窓は「声なし」とみなす。
+ * ガイドボイス再生中の残響や小さな物音を残さないよう、しっかり声が
+ * 入っている範囲だけを残す厳しめの値にする。
+ */
+export const VOICE_RELATIVE_THRESHOLD = 0.25;
+/** 声の開始・終了とみなすために必要な、しきい値超えの連続窓数（10ms窓）。 */
+export const VOICE_RANGE_MIN_RUN_WINDOWS = 3;
 
 /**
  * 声らしい大きさがある範囲だけを返す。判定は10ms窓のRMSで、一番大きな窓に
  * 対する相対しきい値（下限は SILENCE_THRESHOLD）。短いノイズで判定しないよう、
- * 開始・終了とも2窓連続でしきい値を超えた位置を使う。
+ * 開始・終了とも原則3窓連続でしきい値を超えた位置を使う（見つからなければ
+ * 2窓・1窓の順に緩める）。
  */
 export function findVoiceRange(channels: Float32Array[], sampleRate: number): { start: number; end: number } | null {
   const length = channels[0]?.length ?? 0;
@@ -111,21 +118,29 @@ export function findVoiceRange(channels: Float32Array[], sampleRate: number): { 
   }
   if (peak < SILENCE_THRESHOLD) return null;
   const threshold = Math.max(SILENCE_THRESHOLD, peak * VOICE_RELATIVE_THRESHOLD);
-  let first = -1;
-  for (let w = 0; w + 1 < windows; w++) {
-    if (rms[w] >= threshold && rms[w + 1] >= threshold) { first = w; break; }
-  }
-  if (first < 0) {
-    for (let w = 0; w < windows; w++) if (rms[w] >= threshold) { first = w; break; }
-  }
+  const findRunStart = (minRun: number): number => {
+    for (let w = 0; w + minRun - 1 < windows; w++) {
+      let ok = true;
+      for (let k = 0; k < minRun; k++) if (rms[w + k] < threshold) { ok = false; break; }
+      if (ok) return w;
+    }
+    return -1;
+  };
+  const findRunEnd = (minRun: number): number => {
+    for (let w = windows - 1; w - minRun + 1 >= 0; w--) {
+      let ok = true;
+      for (let k = 0; k < minRun; k++) if (rms[w - k] < threshold) { ok = false; break; }
+      if (ok) return w;
+    }
+    return -1;
+  };
+  let first = findRunStart(VOICE_RANGE_MIN_RUN_WINDOWS);
+  if (first < 0) first = findRunStart(2);
+  if (first < 0) first = findRunStart(1);
   if (first < 0) return null;
-  let last = -1;
-  for (let w = windows - 1; w - 1 >= 0; w--) {
-    if (rms[w] >= threshold && rms[w - 1] >= threshold) { last = w; break; }
-  }
-  if (last < 0) {
-    for (let w = windows - 1; w >= 0; w--) if (rms[w] >= threshold) { last = w; break; }
-  }
+  let last = findRunEnd(VOICE_RANGE_MIN_RUN_WINDOWS);
+  if (last < 0) last = findRunEnd(2);
+  if (last < 0) last = findRunEnd(1);
   if (last < first) return null;
   const start = Math.max(0, first * windowSize - Math.round(sampleRate * VOICE_RANGE_PREROLL_SECONDS));
   const end = Math.min(length, (last + 1) * windowSize + Math.round(sampleRate * VOICE_RANGE_POSTROLL_SECONDS));

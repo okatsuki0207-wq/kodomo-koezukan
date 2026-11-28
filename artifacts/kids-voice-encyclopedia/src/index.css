@@ -71,6 +71,13 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(194, 104, 78
 ::selection { background: #e7b58e; color: #49362c; }
 
 .app-shell { width:100%; height:100dvh; min-height:0; overflow:hidden; display:flex; flex-direction:column; }
+/* 長押しで文字が選択されたり、コピー等の呼び出しが出たりしないようにする（入力欄は除く） */
+.app-shell { -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+.app-shell input,
+.app-shell textarea,
+.app-shell [contenteditable="true"] { -webkit-user-select:text; user-select:text; -webkit-touch-callout:default; }
+/* 音声の再生中は画面全体を覆って、すべての操作を受け付けない */
+.playback-lock { position:fixed; inset:0; z-index:80; background:transparent; touch-action:none; }
 .app-shell > .start-main,
 .app-shell > .page-main { flex:1 1 auto; min-height:0; overflow:hidden; }
 .topbar { max-width: 1200px; margin: auto; height: 94px; padding: 0 32px; display:flex; align-items:center; justify-content:space-between; }

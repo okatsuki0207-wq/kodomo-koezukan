@@ -497,6 +497,15 @@ function App() {
 
   const stopPlayback = () => playback.stop();
 
+  // 再生中は画面全体をロックし、声が終わるまで何も触れないようにする
+  // （子どもが連打しても音声が途切れないように）。万一終わらない再生が
+  // あっても、60秒で強制解除する。
+  useEffect(() => {
+    if (!playingUrl) return;
+    const timer = window.setTimeout(() => playback.stop(), 60_000);
+    return () => window.clearTimeout(timer);
+  }, [playingUrl, playback]);
+
   const longPress = useLongPress<Keepsake>((item) => {
     const current = items.find((entry) => entry.id === item.id);
     if (!mutationLock.current && current) openDetail(current);
@@ -1166,6 +1175,7 @@ function App() {
           }}
         />
       )}
+      {playingUrl && <div className="playback-lock" aria-hidden="true" data-testid="playback-lock" />}
       {settingsOpen && <SettingsDialog
         settings={gallerySettings}
         childMode={childMode}
