@@ -22,13 +22,17 @@ type KanaPage = {
   label: string;
   rows: Array<Array<string | null>>;
   keys: string[];
+  /** true のページは画面に出さない（仕組みだけ残し、将来の開放用）。 */
+  hidden?: boolean;
 };
 
 const PAGES: KanaPage[] = [
   { id: 'seion', label: 'せいおん', rows: KANA_ROWS, keys: ALL_KANA },
   { id: 'dakuten', label: 'だくおん', rows: DAKUTEN_ROWS, keys: ALL_DAKUTEN },
-  { id: 'yoon', label: 'ようおん', rows: YOON_ROWS, keys: ALL_YOON },
+  // ようおんは当面非表示。判定・表の仕組みは残してある（隠し要素として後から開放する想定）。
+  { id: 'yoon', label: 'ようおん', rows: YOON_ROWS, keys: ALL_YOON, hidden: true },
 ];
+const VISIBLE_PAGES = PAGES.filter((candidate) => !candidate.hidden);
 
 function shuffledIds(items: Keepsake[]): string[] {
   const ids = items.map((item) => item.id);
@@ -49,12 +53,12 @@ export default function KanaMode({ items, childMode, playing, playingItemId, onP
   const touchX = useRef<number | null>(null);
 
   const grouped = useMemo(() => groupItemsByKana(items), [items]);
-  const page = PAGES[pageIndex];
+  const page = VISIBLE_PAGES[pageIndex];
   const filledCount = page.keys.filter((kana) => grouped.has(kana) || NON_INITIAL_KANA.includes(kana)).length;
   const popupCount = popupKana ? (grouped.get(popupKana)?.length ?? 0) : 0;
 
   const goPage = (next: number) => {
-    const clamped = Math.max(0, Math.min(PAGES.length - 1, next));
+    const clamped = Math.max(0, Math.min(VISIBLE_PAGES.length - 1, next));
     if (clamped === pageIndex) return;
     setSlideDir(clamped > pageIndex ? 'next' : 'prev');
     setPageIndex(clamped);
@@ -123,8 +127,9 @@ export default function KanaMode({ items, childMode, playing, playingItemId, onP
           if (touchX.current === null) return;
           const dx = event.changedTouches[0].clientX - touchX.current;
           touchX.current = null;
-          if (dx >= 48) goPage(pageIndex + 1);
-          else if (dx <= -48) goPage(pageIndex - 1);
+          // 左スワイプで右のページへ、右スワイプで左のページへ。
+          if (dx <= -48) goPage(pageIndex + 1);
+          else if (dx >= 48) goPage(pageIndex - 1);
         }}
       >
         <div className="kana-head">
@@ -142,7 +147,7 @@ export default function KanaMode({ items, childMode, playing, playingItemId, onP
           <span className="kana-page-label" data-testid="kana-page-label">{page.label}</span>
           <span className="kana-page-hint">スライドで ページが かわるよ</span>
           <div className="kana-dots" role="group" aria-label="ページ切り替え">
-            {PAGES.map((candidate, index) => (
+            {VISIBLE_PAGES.map((candidate, index) => (
               <button
                 key={candidate.id}
                 type="button"

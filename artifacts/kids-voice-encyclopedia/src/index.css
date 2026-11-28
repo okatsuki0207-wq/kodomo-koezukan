@@ -1558,11 +1558,11 @@ button:focus-visible {
 }
 .kana-dot.selected { background:#b5a1d0; }
 @keyframes kana-slide-next {
-  from { transform:translateX(-30px); opacity:.25; }
+  from { transform:translateX(30px); opacity:.25; }
   to { transform:translateX(0); opacity:1; }
 }
 @keyframes kana-slide-prev {
-  from { transform:translateX(30px); opacity:.25; }
+  from { transform:translateX(-30px); opacity:.25; }
   to { transform:translateX(0); opacity:1; }
 }
 .kana-chart.slide-next { animation:kana-slide-next .32s ease both; }
