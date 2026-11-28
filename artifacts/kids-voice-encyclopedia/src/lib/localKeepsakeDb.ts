@@ -11,7 +11,7 @@ type StoredKeepsake = Omit<Keepsake, 'photo' | 'voice' | 'voices' | 'photoBlob' 
   voices: Array<{ id: string; blob: Blob; path?: string | null }>;
 };
 const DB_NAME = 'kids-voice-encyclopedia-local';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const URLS = new Map<string, string>();
 const listeners = new Set<(items: Keepsake[]) => void>();
 let opening: Promise<IDBDatabase> | null = null;
@@ -28,6 +28,7 @@ function db() {
         if (!database.objectStoreNames.contains('categories')) database.createObjectStore('categories', { keyPath: 'id' });
         if (!database.objectStoreNames.contains('settings')) database.createObjectStore('settings');
         if (!database.objectStoreNames.contains('meta')) database.createObjectStore('meta');
+        if (!database.objectStoreNames.contains('drafts')) database.createObjectStore('drafts');
       };
       request.onsuccess = () => {
         const database = request.result;
@@ -56,7 +57,23 @@ function db() {
   return opening;
 }
 
+function isConnectionClosingError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'InvalidStateError';
+}
+
 async function request<T>(storeName: string, mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+  try {
+    return await requestOnce<T>(storeName, mode, run);
+  } catch (error) {
+    if (!isConnectionClosingError(error)) throw error;
+    // The cached connection was closed (e.g. by a versionchange in another tab).
+    // Discard it, reopen once, and retry.
+    opening = null;
+    return requestOnce<T>(storeName, mode, run);
+  }
+}
+
+async function requestOnce<T>(storeName: string, mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
   const database = await db();
   return new Promise((resolve, reject) => {
     const transaction = database.transaction(storeName, mode);
@@ -84,29 +101,53 @@ async function request<T>(storeName: string, mode: IDBTransactionMode, run: (sto
   });
 }
 
-function objectUrl(key: string, blob: Blob) {
+// Media URLs are generation-scoped per card. Rewriting a card bumps its
+// generation so present() hands out fresh URLs, while URLs from older
+// generations are revoked only after a delay. Revoking a URL the moment a
+// card is saved can strand a mounted <img> on a dead URL — on iOS Safari the
+// photo then stays blank until the app is reopened, even though the stored
+// data is intact.
+const GENERATIONS = new Map<string, number>();
+const REVOKE_DELAY_MS = 30_000;
+
+function generationOf(id: string) {
+  return GENERATIONS.get(id) ?? 0;
+}
+function objectUrl(id: string, part: string, blob: Blob) {
+  const key = `${id}:${part}@${generationOf(id)}`;
   const previous = URLS.get(key);
   if (previous) return previous;
   const created = URL.createObjectURL(blob);
   URLS.set(key, created);
   return created;
 }
-function invalidateUrls(id: string) {
-  for (const [key, url] of URLS) if (key.startsWith(`${id}:`)) {
-    URL.revokeObjectURL(url);
-    URLS.delete(key);
+function advanceMediaGeneration(id: string) {
+  const next = generationOf(id) + 1;
+  GENERATIONS.set(id, next);
+  const stale: Array<readonly [string, string]> = [];
+  for (const [key, url] of URLS) {
+    if (key.startsWith(`${id}:`) && !key.endsWith(`@${next}`)) stale.push([key, url] as const);
   }
+  if (!stale.length) return;
+  setTimeout(() => {
+    for (const [key, url] of stale) {
+      if (URLS.get(key) === url) {
+        URL.revokeObjectURL(url);
+        URLS.delete(key);
+      }
+    }
+  }, REVOKE_DELAY_MS);
 }
 function present(value: StoredKeepsake): Keepsake {
   const voices = value.voices.map((voice) => ({
     id: voice.id,
-    url: objectUrl(`${value.id}:voice:${voice.id}`, voice.blob),
+    url: objectUrl(value.id, `voice:${voice.id}`, voice.blob),
     blob: voice.blob,
     path: voice.path ?? null,
   }));
   return {
     ...value,
-    photo: objectUrl(`${value.id}:photo`, value.photoBlob),
+    photo: objectUrl(value.id, 'photo', value.photoBlob),
     photoBlob: value.photoBlob,
     voice: voices[0]?.url ?? null,
     voiceBlob: voices[0]?.blob,
@@ -140,6 +181,16 @@ export async function setMeta(key: string, value: unknown) {
   await request('meta', 'readwrite', (store) => store.put(value, key));
 }
 export async function replaceImportedData(cards: Keepsake[], categories: Category[], settings: GallerySettings) {
+  try {
+    await replaceImportedDataOnce(cards, categories, settings);
+  } catch (error) {
+    if (!isConnectionClosingError(error)) throw error;
+    opening = null;
+    await replaceImportedDataOnce(cards, categories, settings);
+  }
+}
+
+async function replaceImportedDataOnce(cards: Keepsake[], categories: Category[], settings: GallerySettings) {
   const database = await db();
   const existingCards = await allStored();
   await new Promise<void>((resolve, reject) => {
@@ -165,7 +216,7 @@ export async function replaceImportedData(cards: Keepsake[], categories: Categor
     tx.oncomplete = () => resolve();
     tx.onerror = tx.onabort = () => reject(tx.error ?? new Error('初回データ移行に失敗しました。元のFirebaseデータは残っています。'));
   });
-  existingCards.forEach((card) => invalidateUrls(card.id));
+  existingCards.forEach((card) => advanceMediaGeneration(card.id));
   await publish();
 }
 export async function subscribe(onChange: (items: Keepsake[]) => void, onError: (error: unknown) => void) {
@@ -186,8 +237,8 @@ export async function save(item: Keepsake) {
     categoryId: item.categoryId, memo: item.memo ?? '', archived: item.archived, archivedAt: item.archivedAt,
     voices: storedVoices,
   };
-  invalidateUrls(item.id);
   await request('cards', 'readwrite', (store) => store.put(record));
+  advanceMediaGeneration(item.id);
   await publish();
 }
 export async function edit(base: Keepsake, changes: { itemName?: string; categoryId?: string | null; memo?: string; photo?: string; voices?: Array<{id:string;source:string}> }) {
@@ -208,14 +259,14 @@ export async function edit(base: Keepsake, changes: { itemName?: string; categor
     ...(changes.photo !== undefined ? { photoBlob: await asBlob(changes.photo, 'image') } : {}),
     voices,
   };
-  invalidateUrls(base.id);
   await request('cards', 'readwrite', (store) => store.put(next));
+  advanceMediaGeneration(base.id);
   await publish();
   return present(next);
 }
 export async function remove(item: Keepsake) {
-  invalidateUrls(item.id);
   await request('cards', 'readwrite', (store) => store.delete(item.id));
+  advanceMediaGeneration(item.id);
   await publish();
 }
 export async function patchCard(id: string, patch: Partial<Keepsake>) {

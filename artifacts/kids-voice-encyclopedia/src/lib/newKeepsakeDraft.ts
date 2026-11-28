@@ -16,7 +16,9 @@ export function hasNewKeepsakeDraftContent(draft: NewKeepsakeDraftInput): boolea
 }
 
 const DATABASE_NAME = 'kids-voice-encyclopedia-local';
-const DATABASE_VERSION = 1;
+// Must match DB_VERSION in localKeepsakeDb.ts: both modules open the same
+// database, and whichever runs first creates the full store set.
+const DATABASE_VERSION = 3;
 const STORE_NAME = 'drafts';
 const DRAFT_KEY = 'new-keepsake';
 
@@ -29,9 +31,12 @@ function openDatabase(factory?: IDBFactory): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDBFactory.open(DATABASE_NAME, DATABASE_VERSION);
     request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains(STORE_NAME)) {
-        request.result.createObjectStore(STORE_NAME);
-      }
+      const database = request.result;
+      if (!database.objectStoreNames.contains('cards')) database.createObjectStore('cards', { keyPath: 'id' });
+      if (!database.objectStoreNames.contains('categories')) database.createObjectStore('categories', { keyPath: 'id' });
+      if (!database.objectStoreNames.contains('settings')) database.createObjectStore('settings');
+      if (!database.objectStoreNames.contains('meta')) database.createObjectStore('meta');
+      if (!database.objectStoreNames.contains(STORE_NAME)) database.createObjectStore(STORE_NAME);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error('下書きデータベースを開けませんでした。'));

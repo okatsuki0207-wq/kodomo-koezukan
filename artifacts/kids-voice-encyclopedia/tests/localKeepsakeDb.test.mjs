@@ -64,7 +64,7 @@ test('IndexedDB keeps card media as blobs and applies local edits, archive, rest
   const voiceBlob = new Blob(['voice'], { type: 'audio/webm' });
   const states = [];
   const stop = await local.subscribe((items) => states.push(items), assert.fail);
-  assert.equal(database.version, 2);
+  assert.equal(database.version, 3);
   assert.deepEqual(['cards', 'categories', 'settings', 'meta'].map((name) => objectStoreNames.contains(name)), [true, true, true, true]);
   assert.ok(states[0].some((item) => item.id === 'existing-card'), 'upgrade preserves existing card records');
   await local.save({

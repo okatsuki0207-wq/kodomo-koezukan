@@ -181,7 +181,7 @@ export default function SettingsDialog({
             <button type="button" className="settings-mode-option" disabled={busy} onClick={() => backupInput.current?.click()} data-testid="button-import-backup">
               <Upload size={18} /><span className="settings-option-copy"><strong>バックアップを読み込む</strong><small>選んだ内容で、この端末のデータを置き換えます。</small></span>
             </button>
-            <input ref={backupInput} type="file" accept="application/json,.json" hidden disabled={busy} onChange={(event) => { void restoreBackup(event.currentTarget.files?.[0]); }} data-testid="input-import-backup" />
+            <input ref={backupInput} type="file" accept="application/json,.json" className="sr-only" disabled={busy} onChange={(event) => { void restoreBackup(event.currentTarget.files?.[0]); }} data-testid="input-import-backup" />
           </div>
         </section>
 
