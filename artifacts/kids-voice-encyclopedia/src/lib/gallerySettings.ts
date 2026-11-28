@@ -1,13 +1,16 @@
-export type GalleryDisplayMode = 'ordered' | 'shuffle';
+export type GalleryDisplayMode = 'ordered' | 'monthly' | 'shuffle';
+export type GalleryDensity = 'big' | 'medium' | 'small';
 export type GallerySettings = {
   displayMode: GalleryDisplayMode;
   shuffleSeed: number;
+  density: GalleryDensity;
 };
 
 export const UNCATEGORIZED_CATEGORY_KEY = '__uncategorized__';
 export const DEFAULT_GALLERY_SETTINGS: GallerySettings = {
   displayMode: 'ordered',
   shuffleSeed: 0,
+  density: 'medium',
 };
 
 export function normalizeGallerySettings(value: unknown): GallerySettings {
@@ -15,10 +18,11 @@ export function normalizeGallerySettings(value: unknown): GallerySettings {
   const source = value as Record<string, unknown>;
   const seed = source.shuffleSeed;
   return {
-    displayMode: source.displayMode === 'shuffle' ? 'shuffle' : 'ordered',
+    displayMode: source.displayMode === 'shuffle' ? 'shuffle' : source.displayMode === 'monthly' ? 'monthly' : 'ordered',
     shuffleSeed: Number.isSafeInteger(seed) && (seed as number) >= 0 && (seed as number) <= 0xffff_ffff
       ? seed as number
       : DEFAULT_GALLERY_SETTINGS.shuffleSeed,
+    density: source.density === 'big' || source.density === 'small' ? source.density : 'medium',
   };
 }
 
@@ -43,7 +47,7 @@ function shuffled<T extends { id: string }>(items: readonly T[], seed: number, s
   return result;
 }
 
-function timestampValue(value: unknown): number {
+export function galleryTimestampValue(value: unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (value instanceof Date) return value.getTime();
   if (value && typeof value === 'object' && 'toMillis' in value
@@ -65,7 +69,7 @@ export function sortGalleryItems<T extends { id: string; categoryId?: string | n
       ? items.filter((item) => (item.categoryId ?? null) === null)
       : items.filter((item) => item.categoryId === selectedCategory);
   const newestFirst = filtered.sort((left, right) =>
-    timestampValue(right.createdAt) - timestampValue(left.createdAt)
+    galleryTimestampValue(right.createdAt) - galleryTimestampValue(left.createdAt)
       || left.id.localeCompare(right.id),
   );
   if (settings.displayMode !== 'shuffle' || newestFirst.length < 2) return newestFirst;

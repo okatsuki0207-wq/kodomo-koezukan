@@ -41,8 +41,9 @@ import { isRunningStandalone, loadInstallGuideDismissed, persistInstallGuideDism
 import ArchiveDialog from './components/ArchiveDialog';
 import { downloadLocalBackup, mergeLocalBackup, restoreLocalBackup } from './lib/localDataBackup';
 import { useCategories } from './hooks/useCategories';
-import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, sortGalleryItems, type GallerySettings } from './lib/gallerySettings';
-import { COMPACT_GALLERY_PAGE_SIZE, clampGalleryPage, galleryPageCount, galleryPageItems, galleryPageSize, gallerySwipeDelta } from './lib/galleryPagination';
+import { DEFAULT_GALLERY_SETTINGS, galleryTimestampValue, normalizeGallerySettings, sortGalleryItems, type GallerySettings } from './lib/gallerySettings';
+import { COMPACT_GALLERY_MAX_HEIGHT, buildMonthlyPages, clampGalleryPage, galleryDensityPageSize, galleryPageCount, galleryPageItems, gallerySwipeDelta } from './lib/galleryPagination';
+import KanaMode from './components/KanaMode';
 import { playPageTurnSound, preloadPageTurnSound, unlockPageTurnSound } from './lib/pageTurnSound';
 import { deleteKeepsake, editKeepsake, firebaseError, saveGallerySettings, saveKeepsake, setKeepsakeArchived, subscribeGallerySettings, subscribeKeepsakes, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
 import { getVoices, MAX_VOICES, type VoiceAsset } from './lib/voiceAssets';
@@ -76,6 +77,7 @@ function loadChildMode(): ChildMode {
 function App() {
   const [items, setItems] = useState<Keepsake[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [kanaOpen, setKanaOpen] = useState(false);
   const [installGuideOpen, setInstallGuideOpen] = useState(false);
   const [installGuideReturn, setInstallGuideReturn] = useState('[data-testid="button-home"]');
   useEffect(() => {
@@ -253,11 +255,15 @@ function App() {
   }, []);
   const visibleItems = sortGalleryItems(activeKeepsakes(items), gallerySettings, selectedCategory);
   const archivedItems = archivedKeepsakes(items);
-  const pageSize = galleryPageSize(viewportHeight);
+  const pageSize = galleryDensityPageSize(gallerySettings.density, viewportHeight);
   const showAddCard = childMode !== 'view';
-  const pageCount = galleryPageCount(visibleItems.length, pageSize, showAddCard);
+  const monthlyPages = gallerySettings.displayMode === 'monthly'
+    ? buildMonthlyPages(visibleItems, pageSize, showAddCard, (item) => galleryTimestampValue(item.createdAt))
+    : null;
+  const pageCount = monthlyPages ? Math.max(1, monthlyPages.length) : galleryPageCount(visibleItems.length, pageSize, showAddCard);
   const currentPage = clampGalleryPage(gridPage, pageCount);
-  const pageItems = galleryPageItems(visibleItems, currentPage, pageSize, showAddCard);
+  const pageItems = monthlyPages ? (monthlyPages[currentPage]?.items ?? []) : galleryPageItems(visibleItems, currentPage, pageSize, showAddCard);
+  const currentMonthLabel = monthlyPages?.[currentPage]?.label;
   useEffect(() => {
     setGridPage(0);
     galleryTouchStart.current = null;
@@ -266,7 +272,7 @@ function App() {
       window.clearTimeout(pageTurnTimer.current);
       pageTurnTimer.current = null;
     }
-  }, [selectedCategory, pageSize, readOnlyMode]);
+  }, [selectedCategory, pageSize, readOnlyMode, gallerySettings.displayMode]);
   useEffect(() => () => {
     if (pageTurnTimer.current !== null) window.clearTimeout(pageTurnTimer.current);
   }, []);
@@ -765,13 +771,16 @@ function App() {
   const formatTime = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   return (
     <div className={`app-shell${view === 'library' ? ' app-shell-library' : ''}`} data-child-mode={childMode}>
-      <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen || installGuideOpen}>
+      <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen || installGuideOpen || kanaOpen}>
         <div className="topbar-row">
           <button type="button" className="brand brand-home" onClick={() => navigate('start')} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
             <span className="brand-mark"><BookOpen size={20} strokeWidth={1.8} /></span>
             <h1 className="brand-title" style={{ margin: 0 }}>こどもの こえずかん</h1>
           </button>
           <div className="topbar-actions">
+            {view === 'library' && (
+              <button type="button" className="kana-open-button" onClick={() => setKanaOpen(true)} data-testid="button-open-kana">あいうえお</button>
+            )}
             <button type="button" className="header-settings-button" onClick={openSettings} disabled={settingsLoading} aria-label="設定" title="設定" data-testid="button-settings"><Settings size={17} /></button>
           </div>
         </div>
@@ -792,7 +801,7 @@ function App() {
       )}
 
       {view === 'start' ? (
-        <main className="start-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen || installGuideOpen}>
+        <main className="start-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen || installGuideOpen || kanaOpen}>
           <StartScreen
             onRecord={openCreate}
             showRecordAction={childMode === 'normal'}
@@ -800,7 +809,7 @@ function App() {
           />
         </main>
       ) : (
-      <main className="page-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen || installGuideOpen}>
+      <main className="page-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen || installGuideOpen || kanaOpen}>
         <CategoryBar
           categories={categories}
           selected={selectedCategory}
@@ -842,9 +851,10 @@ function App() {
               onTouchCancel={() => { galleryTouchStart.current = null; }}
               data-testid="gallery-page-viewport"
             >
+              {currentMonthLabel && <p className="gallery-month-label" data-testid="gallery-month-label">{currentMonthLabel}の図鑑</p>}
               <section
                 key={`${currentPage}-${pageTurnDirection ?? 'idle'}`}
-                className={`sticker-collage${pageSize === COMPACT_GALLERY_PAGE_SIZE ? ' is-compact' : ''}${pageTurnDirection ? ` page-turn-${pageTurnDirection}` : ''}`}
+                className={`sticker-collage density-${gallerySettings.density}${viewportHeight <= COMPACT_GALLERY_MAX_HEIGHT ? ' is-compact' : ''}${pageTurnDirection ? ` page-turn-${pageTurnDirection}` : ''}`}
                 aria-label="わが家のキロク"
                 data-testid="grid-keepsakes"
                 data-page-index={currentPage}
@@ -1130,6 +1140,17 @@ function App() {
             setDetail((current) => current && current.id === saved.id ? saved : current);
             setItems((list) => list.map((entry) => entry.id === saved.id ? saved : entry));
           }}
+        />
+      )}
+      {kanaOpen && (
+        <KanaMode
+          items={activeKeepsakes(items)}
+          childMode={childMode}
+          playing={playing}
+          playingItemId={playingItemId}
+          onPlay={playKeepsake}
+          onRecordKana={() => { setKanaOpen(false); openCreate(); }}
+          onClose={() => { stopPlayback(); setKanaOpen(false); }}
         />
       )}
       {settingsOpen && <SettingsDialog

@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react';
-import { Archive, Check, Download, Eye, ListPlus, Replace, Shuffle, Smartphone, Upload, X } from 'lucide-react';
+import { Archive, Check, Download, ListPlus, Replace, Smartphone, Upload, X } from 'lucide-react';
 import type { BackupImportMode } from '../lib/localDataBackup';
+import type { GalleryDensity, GalleryDisplayMode } from '../lib/gallerySettings';
+import { APP_VERSION } from '../lib/version';
 import { normalizeGallerySettings, type GallerySettings } from '../lib/gallerySettings';
 import { isRunningStandalone } from '../lib/installGuide';
 import { useDialogFocus } from '../hooks/useDialogFocus';
@@ -45,23 +47,27 @@ export default function SettingsDialog({
   useDialogFocus(dialog, '[data-testid="button-settings"]', () => { if (!busy) onClose(); });
 
   const close = () => { if (!busy) onClose(); };
-  const toggleShuffle = async () => {
+  const saveSettings = async (next: GallerySettings) => {
     if (busy) return;
     setBusy(true);
     setError('');
-    const enable = settings.displayMode !== 'shuffle';
-    const next = normalizeGallerySettings({
-      ...settings,
-      displayMode: enable ? 'shuffle' : 'ordered',
-      shuffleSeed: enable ? nextShuffleSeed() : settings.shuffleSeed,
-    });
     try {
-      await onSave(next);
+      await onSave(normalizeGallerySettings(next));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'この端末に設定を保存できませんでした。');
     } finally {
       setBusy(false);
     }
+  };
+  const applyDisplayMode = (mode: GalleryDisplayMode) => {
+    void saveSettings({
+      ...settings,
+      displayMode: mode,
+      shuffleSeed: mode === 'shuffle' ? nextShuffleSeed() : settings.shuffleSeed,
+    });
+  };
+  const applyDensity = (density: GalleryDensity) => {
+    void saveSettings({ ...settings, density });
   };
   const exportBackup = async () => {
     if (busy) return;
@@ -113,61 +119,58 @@ export default function SettingsDialog({
         </div>
 
         <section className="settings-section settings-toggles" aria-label="設定項目">
-          <div className="settings-mode-options" role="group" aria-label="ずかんの設定">
-            <button
-              type="button"
-              className={`settings-mode-option${childMode === 'normal' ? ' selected' : ''}`}
-              aria-pressed={childMode === 'normal'}
-              aria-label="通常モード"
-              disabled={busy}
-              onClick={() => onChildModeChange('normal')}
-              data-testid="setting-mode-normal"
-            >
-              <X size={18} />
-              <span className="settings-option-copy">
-                <strong>通常モード</strong>
-                <small>追加・編集・削除など、すべての操作ができます。</small>
-              </span>
-              <span className={`settings-switch${childMode === 'normal' ? ' is-on' : ''}`} aria-hidden="true"><span /></span>
-            </button>
-            <button type="button" className={`settings-mode-option${childMode === 'view' ? ' selected' : ''}`} aria-pressed={childMode === 'view'} disabled={busy} onClick={() => onChildModeChange('view')} data-testid="setting-mode-child-view">
-              <Eye size={18} /><span className="settings-option-copy"><strong>見るだけモード</strong><small>キロクを見たり、声を聞いたりできます。</small></span>
-              <span className={`settings-switch${childMode === 'view' ? ' is-on' : ''}`} aria-hidden="true"><span /></span>
-            </button>
-            <button type="button" className={`settings-mode-option${childMode === 'add' ? ' selected' : ''}`} aria-pressed={childMode === 'add'} disabled={busy} onClick={() => onChildModeChange('add')} data-testid="setting-mode-child-add">
-              <Eye size={18} /><span className="settings-option-copy"><strong>こどもモード</strong><small>見る・聞くことと、新しい声の追加ができます。写真や前の声は変えられません。</small></span>
-              <span className={`settings-switch${childMode === 'add' ? ' is-on' : ''}`} aria-hidden="true"><span /></span>
-            </button>
-            <button
-              type="button"
-              className={`settings-mode-option${settings.displayMode === 'shuffle' ? ' selected' : ''}`}
-              aria-pressed={settings.displayMode === 'shuffle'}
-              aria-label={`シャッフルモード ${settings.displayMode === 'shuffle' ? 'オン' : 'オフ'}`}
-              disabled={busy}
-              onClick={() => { void toggleShuffle(); }}
-              data-testid="setting-display-shuffle"
-            >
-              <Shuffle size={18} />
-              <span className="settings-option-copy">
-                <strong>シャッフルモード</strong>
-                <small>{settings.displayMode === 'shuffle' ? 'オン：最新のキロクが先頭、ほかはランダムに並びます。' : 'オフ：新しいキロクから順に並びます。'}</small>
-              </span>
-              <span className={`settings-switch${settings.displayMode === 'shuffle' ? ' is-on' : ''}`} aria-hidden="true"><span /></span>
-            </button>
-            {childMode === 'normal' && <button
-              type="button"
-              className="settings-mode-option settings-archive-option"
-              disabled={busy}
-              onClick={onManageArchive}
-              data-testid="setting-manage-archive"
-            >
-              <Archive size={18} />
-              <span className="settings-option-copy">
-                <strong>アーカイブの整理</strong>
-                <small>しまったキロクをもどす、または完全に削除します。</small>
-              </span>
-            </button>}
+          <h3 className="settings-section-title">閲覧モード</h3>
+          <div className="settings-segmented" role="group" aria-label="閲覧モード">
+            <button type="button" className={childMode === 'normal' ? 'selected' : ''} aria-pressed={childMode === 'normal'} disabled={busy} onClick={() => onChildModeChange('normal')} data-testid="setting-mode-normal">通常</button>
+            <button type="button" className={childMode === 'view' ? 'selected' : ''} aria-pressed={childMode === 'view'} disabled={busy} onClick={() => onChildModeChange('view')} data-testid="setting-mode-child-view">見るだけ</button>
+            <button type="button" className={childMode === 'add' ? 'selected' : ''} aria-pressed={childMode === 'add'} disabled={busy} onClick={() => onChildModeChange('add')} data-testid="setting-mode-child-add">こども</button>
           </div>
+          <p className="settings-mode-description">
+            {childMode === 'normal' && '追加・編集・削除など、すべての操作ができます。'}
+            {childMode === 'view' && 'キロクを見たり、声を聞いたりできます。'}
+            {childMode === 'add' && '見る・聞くことと、新しい声の追加ができます。写真や前の声は変えられません。'}
+          </p>
+          {childMode === 'normal' && (
+            <div className="settings-mode-options">
+              <button
+                type="button"
+                className="settings-mode-option settings-archive-option"
+                disabled={busy}
+                onClick={onManageArchive}
+                data-testid="setting-manage-archive"
+              >
+                <Archive size={18} />
+                <span className="settings-option-copy">
+                  <strong>アーカイブの整理</strong>
+                  <small>しまったキロクをもどす、または完全に削除します。</small>
+                </span>
+              </button>
+            </div>
+          )}
+
+          <h3 className="settings-section-title">並べ方</h3>
+          <div className="settings-segmented" role="group" aria-label="並べ方">
+            <button type="button" className={settings.displayMode === 'ordered' ? 'selected' : ''} aria-pressed={settings.displayMode === 'ordered'} disabled={busy} onClick={() => applyDisplayMode('ordered')} data-testid="setting-sort-ordered">新しい順</button>
+            <button type="button" className={settings.displayMode === 'monthly' ? 'selected' : ''} aria-pressed={settings.displayMode === 'monthly'} disabled={busy} onClick={() => applyDisplayMode('monthly')} data-testid="setting-sort-monthly">年月</button>
+            <button type="button" className={settings.displayMode === 'shuffle' ? 'selected' : ''} aria-pressed={settings.displayMode === 'shuffle'} disabled={busy} onClick={() => applyDisplayMode('shuffle')} data-testid="setting-sort-shuffle">シャッフル</button>
+          </div>
+          <p className="settings-mode-description">
+            {settings.displayMode === 'ordered' && '新しいキロクから順に並びます。'}
+            {settings.displayMode === 'monthly' && '年月ごとにページが分かれ、何年何月の図鑑か一目で分かります。'}
+            {settings.displayMode === 'shuffle' && '最新のキロクが先頭、ほかはランダムに並びます。'}
+          </p>
+
+          <h3 className="settings-section-title">大きさ</h3>
+          <div className="settings-segmented" role="group" aria-label="大きさ">
+            <button type="button" className={settings.density === 'big' ? 'selected' : ''} aria-pressed={settings.density === 'big'} disabled={busy} onClick={() => applyDensity('big')} data-testid="setting-density-big">おおきく</button>
+            <button type="button" className={settings.density === 'medium' ? 'selected' : ''} aria-pressed={settings.density === 'medium'} disabled={busy} onClick={() => applyDensity('medium')} data-testid="setting-density-medium">ふつう</button>
+            <button type="button" className={settings.density === 'small' ? 'selected' : ''} aria-pressed={settings.density === 'small'} disabled={busy} onClick={() => applyDensity('small')} data-testid="setting-density-small">たくさん</button>
+          </div>
+          <p className="settings-mode-description">
+            {settings.density === 'big' && '1ページに1つだけ、大きく表示します。小さいお子さま向けです。'}
+            {settings.density === 'medium' && '2列で表示します。'}
+            {settings.density === 'small' && '3列で、たくさんのキロクを一度に表示します。'}
+          </p>
         </section>
 
         <section className="settings-section settings-install" aria-label="ホーム画面に追加">
@@ -211,6 +214,8 @@ export default function SettingsDialog({
           )}
           {importNotice && <p className="settings-installed-note" role="status" data-testid="status-import-result"><Check size={16} />{importNotice}</p>}
         </section>
+
+        <p className="settings-version" data-testid="status-app-version">バージョン {APP_VERSION}</p>
 
         {error && <p className="form-error" role="alert" data-testid="status-settings-error">{error}</p>}
       </div>

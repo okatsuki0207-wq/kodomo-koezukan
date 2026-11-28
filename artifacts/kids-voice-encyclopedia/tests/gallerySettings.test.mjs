@@ -32,7 +32,17 @@ test('legacy manual-order fields are ignored and removed from normalized setting
     cardOrderByCategory: { toys: ['toy-1'] },
     displayMode: 'ordered',
     shuffleSeed: 3,
-  }), { displayMode: 'ordered', shuffleSeed: 3 });
+  }), { displayMode: 'ordered', shuffleSeed: 3, density: 'medium' });
+});
+
+test('monthly mode and density are normalized with safe defaults', () => {
+  assert.equal(normalizeGallerySettings({ displayMode: 'monthly' }).displayMode, 'monthly');
+  assert.equal(normalizeGallerySettings({ density: 'big' }).density, 'big');
+  assert.equal(normalizeGallerySettings({ density: 'small' }).density, 'small');
+  assert.equal(normalizeGallerySettings({ density: 'huge' }).density, 'medium');
+  assert.equal(normalizeGallerySettings(null).density, 'medium');
+  assert.deepEqual(normalizeGallerySettings({ displayMode: 'monthly', density: 'big', shuffleSeed: 7 }),
+    { displayMode: 'monthly', shuffleSeed: 7, density: 'big' });
 });
 
 test('shuffle mode keeps the newest card first and shuffles the remainder for each page', () => {

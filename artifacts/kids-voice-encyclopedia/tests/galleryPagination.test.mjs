@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { access, readFile } from 'node:fs/promises';
 import {
+  buildMonthlyPages,
   clampGalleryPage,
+  galleryDensityPageSize,
   galleryPageCount,
   galleryPageItems,
   galleryPageSize,
@@ -211,4 +213,36 @@ test('PWA home-screen icons are present at the dimensions declared by the manife
     assert.ok(iconBytes.length > 100);
     assert.equal(iconBytes.toString('hex', 0, 8), '89504e470d0a1a0a');
   }
+});
+
+test('density page sizes follow the three display sizes', () => {
+  assert.equal(galleryDensityPageSize('big', 800), 1);
+  assert.equal(galleryDensityPageSize('big', 500), 1);
+  assert.equal(galleryDensityPageSize('medium', 800), 10);
+  assert.equal(galleryDensityPageSize('medium', 700), 8);
+  assert.equal(galleryDensityPageSize('small', 800), 15);
+  assert.equal(galleryDensityPageSize('small', 700), 12);
+});
+
+test('monthly pages break at month boundaries and carry labels', () => {
+  const at = (year, month, day) => new Date(year, month - 1, day).getTime();
+  const items = [
+    { id: 'a', createdAt: at(2026, 11, 20) },
+    { id: 'b', createdAt: at(2026, 11, 2) },
+    { id: 'c', createdAt: at(2026, 10, 15) },
+    { id: 'd', createdAt: at(2025, 12, 24) },
+  ];
+  const pages = buildMonthlyPages(items, 15, false, (item) => item.createdAt);
+  assert.deepEqual(pages.map((page) => page.label), ['2026年11月', '2026年10月', '2025年12月']);
+  assert.deepEqual(pages.map((page) => page.items.map((item) => item.id)), [['a', 'b'], ['c'], ['d']]);
+});
+
+test('monthly pages chunk long months and reserve the first slot for the add tile', () => {
+  const at = (day) => new Date(2026, 10, day).getTime();
+  const items = Array.from({ length: 5 }, (_, index) => ({ id: `i${index}`, createdAt: at(20 - index) }));
+  const pages = buildMonthlyPages(items, 3, true, (item) => item.createdAt);
+  assert.deepEqual(pages.map((page) => page.items.length), [2, 3]);
+  assert.ok(pages.every((page) => page.label === '2026年11月'));
+  const bigPages = buildMonthlyPages(items.slice(0, 2), 1, true, (item) => item.createdAt);
+  assert.deepEqual(bigPages.map((page) => page.items.length), [1, 1]);
 });

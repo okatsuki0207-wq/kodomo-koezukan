@@ -65,9 +65,9 @@ test('the three modes allow child card creation but restrict edits on existing c
   const settings = await readFile(new URL('../src/components/SettingsDialog.tsx', import.meta.url), 'utf8');
   const editor = await readFile(new URL('../src/components/EditCardDialog.tsx', import.meta.url), 'utf8');
   const archive = await readFile(new URL('../src/components/ArchiveDialog.tsx', import.meta.url), 'utf8');
-  assert.match(settings, /<strong>通常モード<\/strong>/);
-  assert.match(settings, /<strong>見るだけモード<\/strong>/);
-  assert.match(settings, /<strong>こどもモード<\/strong>/);
+  assert.match(settings, /data-testid="setting-mode-normal"/);
+  assert.match(settings, /data-testid="setting-mode-child-view"/);
+  assert.match(settings, /data-testid="setting-mode-child-add"/);
   assert.match(app, /const showAddCard = childMode !== 'view'/);
   assert.doesNotMatch(app, /childAddMode && !getVoices\(item\)\.length/);
   assert.match(app, /mode={childAddMode \? 'add-voice-only' : 'normal'}/);
