@@ -151,7 +151,7 @@ test('gallery cards render names as noninteractive labels and page through touch
   assert.match(styles, /\.app-shell-library \.sticker-photo-button \{[^}]*position:absolute;[^}]*inset:0;[^}]*height:100%/);
   assert.match(styles, /\.app-shell-library \.sticker-item \{[^}]*grid-template-rows:minmax\(0,1fr\) clamp\(/);
   assert.match(styles, /\.app-shell-library \.sticker-photo \{[^}]*object-fit:contain/);
-  assert.match(styles, /\.app-shell-library \.sticker-photo \{[^}]*width:86%;[^}]*height:86%;[^}]*padding:2%;[^}]*object-fit:contain/);
+  assert.match(styles, /\.app-shell-library \.sticker-photo \{[^}]*position:absolute;[^}]*inset:0;[^}]*width:100%;[^}]*height:100%;[^}]*padding:2%;[^}]*object-fit:contain/);
   assert.match(styles, /@keyframes book-page-next/);
   assert.match(styles, /@keyframes book-sheet-next/);
   assert.match(styles, /@keyframes book-page-previous/);
@@ -218,8 +218,8 @@ test('PWA home-screen icons are present at the dimensions declared by the manife
 test('density page sizes follow the three display sizes', () => {
   assert.equal(galleryDensityPageSize('big', 800), 1);
   assert.equal(galleryDensityPageSize('big', 500), 1);
-  assert.equal(galleryDensityPageSize('medium', 800), 10);
-  assert.equal(galleryDensityPageSize('medium', 700), 8);
+  assert.equal(galleryDensityPageSize('medium', 800), 8);
+  assert.equal(galleryDensityPageSize('medium', 700), 6);
   assert.equal(galleryDensityPageSize('small', 800), 15);
   assert.equal(galleryDensityPageSize('small', 700), 12);
 });

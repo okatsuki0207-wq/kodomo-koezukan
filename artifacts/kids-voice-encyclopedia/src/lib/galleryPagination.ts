@@ -13,7 +13,7 @@ export function galleryPageSize(viewportHeight: number): number {
 /** 大きさ設定ごとの1ページあたりの件数。おおきくは常に1件、ふつうは2列、たくさん（3列）は従来どおり。 */
 export function galleryDensityPageSize(density: GalleryDensity, viewportHeight: number): number {
   if (density === 'big') return 1;
-  if (density === 'medium') return viewportHeight <= COMPACT_GALLERY_MAX_HEIGHT ? 8 : 10;
+  if (density === 'medium') return viewportHeight <= COMPACT_GALLERY_MAX_HEIGHT ? 6 : 8;
   return galleryPageSize(viewportHeight);
 }
 
