@@ -1,7 +1,7 @@
 import type { Category } from './categories';
 import { DEFAULT_CATEGORIES } from './categories';
 import type { Keepsake } from './keepsakeRepository';
-import { listKeepsakes, listCategories, listSettings, replaceImportedData } from './localKeepsakeDb';
+import { listKeepsakes, listCategories, listSettings, replaceImportedData, mergeImportedData, type ImportMergeResult } from './localKeepsakeDb';
 import { getVoices, type VoiceAsset } from './voiceAssets';
 import { normalizeGallerySettings, type GallerySettings } from './gallerySettings';
 
@@ -99,7 +99,9 @@ export async function downloadLocalBackup() {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export async function restoreLocalBackup(file: File): Promise<GallerySettings> {
+type ParsedBackup = { cards: Keepsake[]; categories: Category[]; settings: GallerySettings };
+
+async function parseBackup(file: File): Promise<ParsedBackup> {
   if (file.size > MAX_FILE_BYTES) throw new Error('バックアップファイルが大きすぎます（上限200MB）。');
   let parsed: unknown;
   try { parsed = JSON.parse(await file.text()); } catch { throw new Error('JSONファイルを読み取れません。'); }
@@ -146,6 +148,20 @@ export async function restoreLocalBackup(file: File): Promise<GallerySettings> {
   if (new Set(cards.map((card) => card.id)).size !== cards.length) throw new Error('バックアップ内に同じキロクが複数あります。');
   if (cards.some((card) => card.categoryId && !ids.has(card.categoryId))) throw new Error('バックアップ内のキロクに存在しないカテゴリが設定されています。');
   const settings = normalizeGallerySettings(source.settings);
+  return { cards, categories, settings };
+}
+
+export async function restoreLocalBackup(file: File): Promise<GallerySettings> {
+  const { cards, categories, settings } = await parseBackup(file);
   await replaceImportedData(cards, categories, settings);
   return settings;
+}
+
+export type { ImportMergeResult };
+export type BackupImportMode = 'replace' | 'merge';
+
+/** 既存のキロクは残し、バックアップにある新しいキロクだけを足す。表示設定は変えない。 */
+export async function mergeLocalBackup(file: File): Promise<ImportMergeResult> {
+  const { cards, categories } = await parseBackup(file);
+  return mergeImportedData(cards, categories);
 }

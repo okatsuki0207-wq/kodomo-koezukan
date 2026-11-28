@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
-import { Archive, Check, Download, Eye, Shuffle, Smartphone, Upload, X } from 'lucide-react';
+import { Archive, Check, Download, Eye, ListPlus, Replace, Shuffle, Smartphone, Upload, X } from 'lucide-react';
+import type { BackupImportMode } from '../lib/localDataBackup';
 import { normalizeGallerySettings, type GallerySettings } from '../lib/gallerySettings';
 import { isRunningStandalone } from '../lib/installGuide';
 import { useDialogFocus } from '../hooks/useDialogFocus';
@@ -10,7 +11,7 @@ type Props = {
   onChildModeChange: (mode: 'normal' | 'view' | 'add') => void;
   onManageArchive: () => void;
   onExportBackup: () => Promise<void>;
-  onRestoreBackup: (file: File) => Promise<void>;
+  onRestoreBackup: (file: File, mode: BackupImportMode) => Promise<string>;
   onSave: (settings: GallerySettings) => Promise<void>;
   onShowInstallGuide: () => void;
   onClose: () => void;
@@ -37,6 +38,8 @@ export default function SettingsDialog({
   const [busy, setBusy] = useState(false);
   const [runningStandalone] = useState(isRunningStandalone);
   const [error, setError] = useState('');
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [importNotice, setImportNotice] = useState('');
   const dialog = useRef<HTMLDivElement>(null);
   const backupInput = useRef<HTMLInputElement>(null);
   useDialogFocus(dialog, '[data-testid="button-settings"]', () => { if (!busy) onClose(); });
@@ -72,17 +75,24 @@ export default function SettingsDialog({
       setBusy(false);
     }
   };
-  const restoreBackup = async (file?: File) => {
+  const restoreBackup = (file?: File) => {
     if (!file || busy) return;
-    if (!window.confirm('この端末のキロク・カテゴリ・表示設定を、バックアップの内容に置き換えます。先に現在のデータを書き出してください。復元しますか？')) {
-      if (backupInput.current) backupInput.current.value = '';
-      return;
-    }
+    setError('');
+    setImportNotice('');
+    setPendingFile(file);
+  };
+  const cancelImport = () => {
+    setPendingFile(null);
+    if (backupInput.current) backupInput.current.value = '';
+  };
+  const runImport = async (mode: BackupImportMode) => {
+    if (!pendingFile || busy) return;
     setBusy(true);
     setError('');
     try {
-      await onRestoreBackup(file);
-      onClose();
+      const message = await onRestoreBackup(pendingFile, mode);
+      setImportNotice(message);
+      setPendingFile(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'バックアップを復元できませんでした。');
     } finally {
@@ -179,10 +189,27 @@ export default function SettingsDialog({
               <Download size={18} /><span className="settings-option-copy"><strong>バックアップを書き出す</strong><small>この端末のデータをJSONで保存します。</small></span>
             </button>
             <button type="button" className="settings-mode-option" disabled={busy} onClick={() => backupInput.current?.click()} data-testid="button-import-backup">
-              <Upload size={18} /><span className="settings-option-copy"><strong>バックアップを読み込む</strong><small>選んだ内容で、この端末のデータを置き換えます。</small></span>
+              <Upload size={18} /><span className="settings-option-copy"><strong>バックアップを読み込む</strong><small>読み込み時に、追加するか入れ替えるか選べます。</small></span>
             </button>
-            <input ref={backupInput} type="file" accept="application/json,.json" className="sr-only" disabled={busy} onChange={(event) => { void restoreBackup(event.currentTarget.files?.[0]); }} data-testid="input-import-backup" />
+            <input ref={backupInput} type="file" accept="application/json,.json" className="sr-only" disabled={busy} onChange={(event) => { restoreBackup(event.currentTarget.files?.[0]); }} data-testid="input-import-backup" />
           </div>
+          {pendingFile && (
+            <div className="settings-import-choice" data-testid="import-mode-choice">
+              <p className="settings-backup-note">「{pendingFile.name}」を読み込みます。読み込み方を選んでください。</p>
+              <div className="settings-backup-actions">
+                <button type="button" className="settings-mode-option" disabled={busy} onClick={() => { void runImport('merge'); }} data-testid="button-import-merge">
+                  <ListPlus size={18} /><span className="settings-option-copy"><strong>キロクを追加する</strong><small>今のキロクはそのまま残し、バックアップにある新しいキロクだけを足します。同じキロクは二重になりません。</small></span>
+                </button>
+                <button type="button" className="settings-mode-option" disabled={busy} onClick={() => { void runImport('replace'); }} data-testid="button-import-replace">
+                  <Replace size={18} /><span className="settings-option-copy"><strong>すべて入れ替える</strong><small>この端末のキロク・カテゴリ・表示設定を、バックアップの内容に置き換えます。今のデータは消えるため、先に書き出しをおすすめします。</small></span>
+                </button>
+                <button type="button" className="settings-mode-option" disabled={busy} onClick={cancelImport} data-testid="button-import-cancel">
+                  <X size={18} /><span className="settings-option-copy"><strong>やめる</strong><small>ファイルを読み込まずに戻ります。</small></span>
+                </button>
+              </div>
+            </div>
+          )}
+          {importNotice && <p className="settings-installed-note" role="status" data-testid="status-import-result"><Check size={16} />{importNotice}</p>}
         </section>
 
         {error && <p className="form-error" role="alert" data-testid="status-settings-error">{error}</p>}

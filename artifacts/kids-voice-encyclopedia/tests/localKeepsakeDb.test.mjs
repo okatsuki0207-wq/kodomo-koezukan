@@ -88,6 +88,30 @@ test('IndexedDB keeps card media as blobs and applies local edits, archive, rest
   stop();
 });
 
+test('merge import adds only new cards and categories, keeps settings, and is idempotent', async () => {
+  const photoBlob = new Blob(['photo'], { type: 'image/png' });
+  const mkCard = (id, itemName) => ({
+    id, itemName, photo: '', photoBlob, voice: null, voices: [],
+    createdAt: 300, categoryId: null, memo: '', archived: false, archivedAt: null,
+  });
+  const backupCategories = [
+    { id: 'default-toys', name: 'おもちゃ', createdAt: 1 },
+    { id: 'backup-cat', name: 'おでかけ', createdAt: 2 },
+  ];
+  const first = await local.mergeImportedData(
+    [mkCard('existing-card', '上書きされない'), mkCard('merged-card', '追加される')],
+    backupCategories,
+  );
+  assert.deepEqual(first, { addedCards: 1, skippedCards: 1, addedCategories: 1 });
+  const items = await local.listKeepsakes();
+  assert.equal(items.find((item) => item.id === 'existing-card').itemName, '以前からのキロク');
+  assert.ok(items.some((item) => item.id === 'merged-card'));
+  assert.ok((await local.listCategories()).some((category) => category.id === 'backup-cat'));
+  const second = await local.mergeImportedData([mkCard('merged-card', '追加される')], backupCategories);
+  assert.deepEqual(second, { addedCards: 0, skippedCards: 1, addedCategories: 0 });
+  assert.equal((await local.listKeepsakes()).filter((item) => item.id === 'merged-card').length, 1);
+});
+
 test('local categories and gallery settings survive reads and writes', async () => {
   const category = { id: 'local-cat', name: 'のりもの', createdAt: 200 };
   await local.addCategory(category);

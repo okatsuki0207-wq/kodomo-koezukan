@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { encodeWav, findVoiceStart, trimAudioRange, waveformPeaks } from '../src/lib/audioTrim.ts';
+import { encodeWav, findVoiceRange, findVoiceStart, trimAudioRange, waveformPeaks } from '../src/lib/audioTrim.ts';
 import { VoicePlayback, VoiceShuffleBag } from '../src/lib/voicePlayback.ts';
 import { recordingCue } from '../src/lib/recordingCue.ts';
 
@@ -199,4 +199,42 @@ test('guide playback rejection does not fall back to a beep or successful record
     play() { return Promise.reject(new Error('autoplay denied')); } };
   const cue = recordingCue('/guide.mp3', () => audio);
   await assert.rejects(cue.finished, /ガイドボイスを再生できません/);
+});
+
+test('voice range trims both edges with preroll and postroll', () => {
+  // sampleRate 1000: 10ms window = 10 samples, preroll 100, postroll 250.
+  const samples = new Float32Array(4000).fill(0.004);
+  samples.fill(0.3, 1000, 2000);
+  assert.deepEqual(findVoiceRange([samples], 1000), { start: 900, end: 2250 });
+});
+
+test('voice range ignores low-level noise louder than the absolute floor', () => {
+  // Noise at RMS 0.02 passes the old -40dB floor but is far below the voice peak.
+  const samples = new Float32Array(4000).fill(0.02);
+  samples.fill(0.4, 1000, 2000);
+  samples.fill(0, 2000);
+  assert.deepEqual(findVoiceRange([samples], 1000), { start: 900, end: 2250 });
+});
+
+test('voice range keeps a wholly quiet voice recording', () => {
+  const samples = new Float32Array(3000);
+  samples.fill(0.03, 500, 1500);
+  assert.deepEqual(findVoiceRange([samples], 1000), { start: 400, end: 1750 });
+});
+
+test('voice range returns null for silence and faint noise', () => {
+  assert.equal(findVoiceRange([new Float32Array(1000)], 1000), null);
+  assert.equal(findVoiceRange([new Float32Array(1000).fill(0.005)], 1000), null);
+});
+
+test('voice range keeps a recording that is voice from start to end', () => {
+  const samples = new Float32Array(2000).fill(0.2);
+  assert.deepEqual(findVoiceRange([samples], 1000), { start: 0, end: 2000 });
+});
+
+test('voice range is not extended by an isolated click', () => {
+  const samples = new Float32Array(4000);
+  samples[100] = 0.9;
+  samples.fill(0.3, 1000, 2000);
+  assert.deepEqual(findVoiceRange([samples], 1000), { start: 900, end: 2250 });
 });

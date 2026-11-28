@@ -190,6 +190,53 @@ export async function replaceImportedData(cards: Keepsake[], categories: Categor
   }
 }
 
+export type ImportMergeResult = { addedCards: number; skippedCards: number; addedCategories: number };
+
+export async function mergeImportedData(cards: Keepsake[], categories: Category[]): Promise<ImportMergeResult> {
+  try {
+    return await mergeImportedDataOnce(cards, categories);
+  } catch (error) {
+    if (!isConnectionClosingError(error)) throw error;
+    opening = null;
+    return await mergeImportedDataOnce(cards, categories);
+  }
+}
+
+async function mergeImportedDataOnce(cards: Keepsake[], categories: Category[]): Promise<ImportMergeResult> {
+  const database = await db();
+  const existingCards = await allStored();
+  const existingCardIds = new Set(existingCards.map((card) => card.id));
+  const storedCategories = await request<Category[]>('categories', 'readonly', (store) => store.getAll());
+  const existingCategoryIds = new Set(storedCategories.map((category) => category.id));
+  const newCards = cards.filter((card) => !existingCardIds.has(card.id));
+  const newCategories = categories.filter((category) =>
+    !DEFAULT_CATEGORIES.some((defaultCategory) => defaultCategory.id === category.id) &&
+    !existingCategoryIds.has(category.id));
+  if (!newCards.length && !newCategories.length) {
+    return { addedCards: 0, skippedCards: cards.length, addedCategories: 0 };
+  }
+  await new Promise<void>((resolve, reject) => {
+    const tx = database.transaction(['cards', 'categories'], 'readwrite');
+    const cardStore = tx.objectStore('cards');
+    for (const item of newCards) {
+      const sourceVoices = getVoices(item);
+      const record: StoredKeepsake = {
+        id: item.id, itemName: item.itemName, photoBlob: item.photoBlob!,
+        createdAt: item.createdAt, photoPath: item.photoPath,
+        categoryId: item.categoryId, memo: item.memo ?? '', archived: item.archived, archivedAt: item.archivedAt,
+        voices: sourceVoices.map((voice) => ({ id: voice.id, blob: (voice as typeof voice & { blob?: Blob }).blob!, path: voice.path })),
+      };
+      cardStore.put(record);
+    }
+    const categoryStore = tx.objectStore('categories');
+    for (const category of newCategories) categoryStore.put(category);
+    tx.oncomplete = () => resolve();
+    tx.onerror = tx.onabort = () => reject(tx.error ?? new Error('バックアップの追加に失敗しました。'));
+  });
+  await publish();
+  return { addedCards: newCards.length, skippedCards: cards.length - newCards.length, addedCategories: newCategories.length };
+}
+
 async function replaceImportedDataOnce(cards: Keepsake[], categories: Category[], settings: GallerySettings) {
   const database = await db();
   const existingCards = await allStored();

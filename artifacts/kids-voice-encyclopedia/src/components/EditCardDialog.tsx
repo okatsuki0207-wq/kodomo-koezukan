@@ -4,7 +4,7 @@ import type { Category } from '../lib/categories';
 import type { Keepsake } from '../lib/keepsakeStore';
 import { refreshVoiceDownloadUrl } from '../lib/keepsakeStore';
 import { getVoices, MAX_VOICES, MAX_EDIT_FILES, type KeepsakeEdit, type VoiceChange } from '../lib/voiceAssets';
-import { trimLeadingSilence } from '../lib/audioTrim';
+import { autoTrimVoiceEdges } from '../lib/audioTrim';
 import CategorySelect from './CategorySelect';
 import PhotoEditor from './PhotoEditor';
 import RecordingGuide from './RecordingGuide';
@@ -98,7 +98,7 @@ export default function EditCardDialog({ item, categories, mode = 'normal', onSa
     setTrimKey(null); setProcessing(true); setVoiceError('');
     try {
       if (!blob.size) throw new Error('音声が空でした。');
-      const trimmed = await trimLeadingSilence(blob);
+      const trimmed = await autoTrimVoiceEdges(blob);
       if (!alive.current || session !== sessionRef.current) return;
       applyAudio(key, trimmed);
     } catch (caught) {

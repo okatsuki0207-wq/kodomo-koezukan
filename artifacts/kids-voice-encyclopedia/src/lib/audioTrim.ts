@@ -79,6 +79,68 @@ export async function trimLeadingSilence(recording: Blob): Promise<Blob> {
   return encodeWav(decoded.channels, decoded.sampleRate, start);
 }
 
+/** 前後の余白は声の始まり・終わりに少しだけ残す。 */
+export const VOICE_RANGE_PREROLL_SECONDS = 0.1;
+export const VOICE_RANGE_POSTROLL_SECONDS = 0.25;
+/** 一番大きな声の窓を基準に、この割合未満の窓は「声なし」とみなす（小さな物音や残響を前後に残さない）。 */
+export const VOICE_RELATIVE_THRESHOLD = 0.12;
+
+/**
+ * 声らしい大きさがある範囲だけを返す。判定は10ms窓のRMSで、一番大きな窓に
+ * 対する相対しきい値（下限は SILENCE_THRESHOLD）。短いノイズで判定しないよう、
+ * 開始・終了とも2窓連続でしきい値を超えた位置を使う。
+ */
+export function findVoiceRange(channels: Float32Array[], sampleRate: number): { start: number; end: number } | null {
+  const length = channels[0]?.length ?? 0;
+  if (!length || !channels.length) return null;
+  const windowSize = Math.max(1, Math.round(sampleRate * 0.01));
+  const windows = Math.ceil(length / windowSize);
+  const rms = new Float32Array(windows);
+  let peak = 0;
+  for (let w = 0; w < windows; w++) {
+    const from = w * windowSize;
+    const to = Math.min(from + windowSize, length);
+    let loudest = 0;
+    for (const channel of channels) {
+      let squares = 0;
+      for (let i = from; i < to; i++) squares += channel[i] ** 2;
+      loudest = Math.max(loudest, Math.sqrt(squares / (to - from)));
+    }
+    rms[w] = loudest;
+    if (loudest > peak) peak = loudest;
+  }
+  if (peak < SILENCE_THRESHOLD) return null;
+  const threshold = Math.max(SILENCE_THRESHOLD, peak * VOICE_RELATIVE_THRESHOLD);
+  let first = -1;
+  for (let w = 0; w + 1 < windows; w++) {
+    if (rms[w] >= threshold && rms[w + 1] >= threshold) { first = w; break; }
+  }
+  if (first < 0) {
+    for (let w = 0; w < windows; w++) if (rms[w] >= threshold) { first = w; break; }
+  }
+  if (first < 0) return null;
+  let last = -1;
+  for (let w = windows - 1; w - 1 >= 0; w--) {
+    if (rms[w] >= threshold && rms[w - 1] >= threshold) { last = w; break; }
+  }
+  if (last < 0) {
+    for (let w = windows - 1; w >= 0; w--) if (rms[w] >= threshold) { last = w; break; }
+  }
+  if (last < first) return null;
+  const start = Math.max(0, first * windowSize - Math.round(sampleRate * VOICE_RANGE_PREROLL_SECONDS));
+  const end = Math.min(length, (last + 1) * windowSize + Math.round(sampleRate * VOICE_RANGE_POSTROLL_SECONDS));
+  if (end - start < Math.round(sampleRate * 0.05)) return null;
+  return { start, end };
+}
+
+/** 録音の前後にある小さい音量の部分を自動で切り取り、声の範囲だけをWAVで返す。 */
+export async function autoTrimVoiceEdges(recording: Blob): Promise<Blob> {
+  const decoded = await decodeAudioBlob(recording);
+  const range = findVoiceRange(decoded.channels, decoded.sampleRate);
+  if (range === null) throw new Error('声が聞こえませんでした。マイクの近くでもう一度録音してください。');
+  return encodeWav(decoded.channels, decoded.sampleRate, range.start, range.end);
+}
+
 export function trimAudioRange(audio: DecodedAudio, startSeconds: number, endSeconds: number): Blob {
   if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds) ||
     startSeconds < 0 || endSeconds > audio.duration + 0.001 || endSeconds - startSeconds < 0.05) {

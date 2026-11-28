@@ -39,14 +39,14 @@ import SettingsDialog from './components/SettingsDialog';
 import InstallGuideDialog from './components/InstallGuideDialog';
 import { isRunningStandalone, loadInstallGuideDismissed, persistInstallGuideDismissed } from './lib/installGuide';
 import ArchiveDialog from './components/ArchiveDialog';
-import { downloadLocalBackup, restoreLocalBackup } from './lib/localDataBackup';
+import { downloadLocalBackup, mergeLocalBackup, restoreLocalBackup } from './lib/localDataBackup';
 import { useCategories } from './hooks/useCategories';
 import { DEFAULT_GALLERY_SETTINGS, normalizeGallerySettings, sortGalleryItems, type GallerySettings } from './lib/gallerySettings';
 import { COMPACT_GALLERY_PAGE_SIZE, clampGalleryPage, galleryPageCount, galleryPageItems, galleryPageSize, gallerySwipeDelta } from './lib/galleryPagination';
 import { playPageTurnSound, preloadPageTurnSound, unlockPageTurnSound } from './lib/pageTurnSound';
 import { deleteKeepsake, editKeepsake, firebaseError, saveGallerySettings, saveKeepsake, setKeepsakeArchived, subscribeGallerySettings, subscribeKeepsakes, updateKeepsakeCategory, type Keepsake } from './lib/keepsakeStore';
 import { getVoices, MAX_VOICES, type VoiceAsset } from './lib/voiceAssets';
-import { trimLeadingSilence } from './lib/audioTrim';
+import { autoTrimVoiceEdges } from './lib/audioTrim';
 import { preloadRecordingGuide } from './lib/recordingCue';
 import { hasNewKeepsakeDraftContent, type NewKeepsakeDraftInput } from './lib/newKeepsakeDraft';
 import { APP_LAST_ACTIVE_STORAGE_KEY, APP_VIEW_RESUME_WINDOW_MS, APP_VIEW_STORAGE_KEY, persistAppView, restoreAppView, type AppView } from './lib/appViewState';
@@ -366,7 +366,7 @@ function App() {
     setProcessingVoice(true);
     void (async () => {
       try {
-        const trimmed = await trimLeadingSilence(blob);
+        const trimmed = await autoTrimVoiceEdges(blob);
         if (session === recordingSession.current) {
           setVoice(URL.createObjectURL(trimmed));
           setVoiceBlob(trimmed);
@@ -1145,12 +1145,21 @@ function App() {
           setArchiveOpen(true);
         }}
         onExportBackup={downloadLocalBackup}
-        onRestoreBackup={async (file) => {
-          const restoredSettings = await restoreLocalBackup(file);
-          setGallerySettings(restoredSettings);
+        onRestoreBackup={async (file, mode) => {
+          if (mode === 'replace') {
+            const restoredSettings = await restoreLocalBackup(file);
+            setGallerySettings(restoredSettings);
+            setSelectedCategory(null);
+            setGridPage(0);
+            setLoadAttempt((attempt) => attempt + 1);
+            return 'バックアップの内容に置き換えました。';
+          }
+          const result = await mergeLocalBackup(file);
           setSelectedCategory(null);
           setGridPage(0);
           setLoadAttempt((attempt) => attempt + 1);
+          if (result.addedCards === 0) return '新しいキロクはありませんでした（すべて既にこの端末にあります）。';
+          return `${result.addedCards}件のキロクを追加しました${result.skippedCards > 0 ? `（${result.skippedCards}件は既にあるためスキップしました）` : ''}。`;
         }}
         onShowInstallGuide={() => {
           setInstallGuideReturn('[data-testid="setting-install"]');
