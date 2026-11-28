@@ -1457,7 +1457,40 @@ button:focus-visible {
   font-weight:700;
   cursor:pointer;
 }
-.kana-mode { max-height:92dvh; overflow-y:auto; }
+@keyframes mode-flip-in {
+  from { transform:perspective(1400px) rotateY(-68deg); opacity:.2; }
+  to { transform:perspective(1400px) rotateY(0deg); opacity:1; }
+}
+@keyframes mode-flip-back {
+  from { transform:perspective(1400px) rotateY(68deg); opacity:.2; }
+  to { transform:perspective(1400px) rotateY(0deg); opacity:1; }
+}
+.mode-flip-in { animation:mode-flip-in .55s ease both; transform-origin:center; }
+.mode-flip-back { animation:mode-flip-back .55s ease both; transform-origin:center; }
+.kana-view {
+  flex:1 1 auto;
+  min-height:0;
+  overflow-y:auto;
+  background:#fffefb;
+  overscroll-behavior:none;
+}
+.kana-view-inner { max-width:680px; margin:0 auto; padding:14px 16px 30px; }
+.kana-head { display:flex; align-items:center; gap:10px; margin-bottom:2px; }
+.kana-title { margin:0; font-size:21px; color:#574b5d; letter-spacing:.06em; }
+.kana-back-button {
+  display:inline-flex;
+  align-items:center;
+  gap:2px;
+  padding:7px 12px 7px 8px;
+  border:1px solid #d8c5df;
+  border-radius:999px;
+  background:var(--rainbow-soft);
+  color:var(--rainbow-ink);
+  font:inherit;
+  font-size:13.5px;
+  font-weight:700;
+  cursor:pointer;
+}
 .kana-script-toggle {
   display:flex;
   gap:6px;

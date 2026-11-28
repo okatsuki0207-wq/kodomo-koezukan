@@ -1,8 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
-import { Mic, X } from 'lucide-react';
+import { ChevronLeft, Mic } from 'lucide-react';
 import type { Keepsake } from '../lib/keepsakeRepository';
 import { ALL_KANA, KANA_N, KANA_ROWS, displayKana, groupItemsByKana } from '../lib/kanaChart';
-import { useDialogFocus } from '../hooks/useDialogFocus';
 
 type Props = {
   items: Keepsake[];
@@ -28,8 +27,6 @@ export default function KanaMode({ items, childMode, playing, playingItemId, onP
   const [selectedKana, setSelectedKana] = useState<string | null>(null);
   const [stageItem, setStageItem] = useState<Keepsake | null>(null);
   const cycles = useRef(new Map<string, { order: string[]; index: number }>());
-  const dialog = useRef<HTMLDivElement>(null);
-  useDialogFocus(dialog, '[data-testid="button-open-kana"]', onClose);
 
   const grouped = useMemo(() => groupItemsByKana(items), [items]);
   const collected = ALL_KANA.filter((kana) => (grouped.get(kana)?.length ?? 0) > 0).length;
@@ -80,15 +77,15 @@ export default function KanaMode({ items, childMode, playing, playingItemId, onP
   };
 
   return (
-    <div className="overlay overlay-top" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div ref={dialog} className="dialog kana-mode" role="dialog" aria-modal="true" aria-labelledby="kana-mode-title" data-testid="kana-mode">
-        <div className="dialog-head">
-          <div>
-            <h2 id="kana-mode-title" className="dialog-title">あいうえお</h2>
-            <p className="dialog-lede">もじを おすと、その もじではじまる キロクの こえが ながれるよ。</p>
-          </div>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="閉じる" data-testid="button-close-kana"><X size={19} /></button>
+    <main className="kana-view mode-flip-in" data-testid="kana-mode">
+      <div className="kana-view-inner">
+        <div className="kana-head">
+          <button type="button" className="kana-back-button" onClick={onClose} data-testid="button-close-kana">
+            <ChevronLeft size={18} /><span>ずかんにもどる</span>
+          </button>
+          <h2 className="kana-title">あいうえお</h2>
         </div>
+        <p className="dialog-lede">もじを おすと、その もじではじまる キロクの こえが ながれるよ。</p>
 
         <div className="kana-script-toggle" role="group" aria-label="ひらがなとカタカナの切り替え">
           <button type="button" className={script === 'hiragana' ? 'selected' : ''} aria-pressed={script === 'hiragana'} onClick={() => setScript('hiragana')} data-testid="button-kana-hiragana">ひらがな</button>
@@ -133,6 +130,6 @@ export default function KanaMode({ items, childMode, playing, playingItemId, onP
           </div>
         </div>
       </div>
-    </div>
+    </main>
   );
 }

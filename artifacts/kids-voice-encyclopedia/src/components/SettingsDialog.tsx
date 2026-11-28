@@ -41,6 +41,7 @@ export default function SettingsDialog({
   const [runningStandalone] = useState(isRunningStandalone);
   const [error, setError] = useState('');
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingChildMode, setPendingChildMode] = useState<'view' | 'add' | null>(null);
   const [importNotice, setImportNotice] = useState('');
   const dialog = useRef<HTMLDivElement>(null);
   const backupInput = useRef<HTMLInputElement>(null);
@@ -122,32 +123,14 @@ export default function SettingsDialog({
           <h3 className="settings-section-title">閲覧モード</h3>
           <div className="settings-segmented" role="group" aria-label="閲覧モード">
             <button type="button" className={childMode === 'normal' ? 'selected' : ''} aria-pressed={childMode === 'normal'} disabled={busy} onClick={() => onChildModeChange('normal')} data-testid="setting-mode-normal">通常</button>
-            <button type="button" className={childMode === 'view' ? 'selected' : ''} aria-pressed={childMode === 'view'} disabled={busy} onClick={() => onChildModeChange('view')} data-testid="setting-mode-child-view">見るだけ</button>
-            <button type="button" className={childMode === 'add' ? 'selected' : ''} aria-pressed={childMode === 'add'} disabled={busy} onClick={() => onChildModeChange('add')} data-testid="setting-mode-child-add">こども</button>
+            <button type="button" className={childMode === 'view' ? 'selected' : ''} aria-pressed={childMode === 'view'} disabled={busy} onClick={() => setPendingChildMode('view')} data-testid="setting-mode-child-view">見るだけ</button>
+            <button type="button" className={childMode === 'add' ? 'selected' : ''} aria-pressed={childMode === 'add'} disabled={busy} onClick={() => setPendingChildMode('add')} data-testid="setting-mode-child-add">こども</button>
           </div>
           <p className="settings-mode-description">
             {childMode === 'normal' && '追加・編集・削除など、すべての操作ができます。'}
             {childMode === 'view' && 'キロクを見たり、声を聞いたりできます。'}
             {childMode === 'add' && '見る・聞くことと、新しい声の追加ができます。写真や前の声は変えられません。'}
           </p>
-          {childMode === 'normal' && (
-            <div className="settings-mode-options">
-              <button
-                type="button"
-                className="settings-mode-option settings-archive-option"
-                disabled={busy}
-                onClick={onManageArchive}
-                data-testid="setting-manage-archive"
-              >
-                <Archive size={18} />
-                <span className="settings-option-copy">
-                  <strong>アーカイブの整理</strong>
-                  <small>しまったキロクをもどす、または完全に削除します。</small>
-                </span>
-              </button>
-            </div>
-          )}
-
           <h3 className="settings-section-title">並べ方</h3>
           <div className="settings-segmented" role="group" aria-label="並べ方">
             <button type="button" className={settings.displayMode === 'ordered' ? 'selected' : ''} aria-pressed={settings.displayMode === 'ordered'} disabled={busy} onClick={() => applyDisplayMode('ordered')} data-testid="setting-sort-ordered">新しい順</button>
@@ -160,17 +143,38 @@ export default function SettingsDialog({
             {settings.displayMode === 'shuffle' && '最新のキロクが先頭、ほかはランダムに並びます。'}
           </p>
 
-          <h3 className="settings-section-title">大きさ</h3>
-          <div className="settings-segmented" role="group" aria-label="大きさ">
+          <h3 className="settings-section-title">ずかんのサイズ</h3>
+          <div className="settings-segmented" role="group" aria-label="ずかんのサイズ">
             <button type="button" className={settings.density === 'big' ? 'selected' : ''} aria-pressed={settings.density === 'big'} disabled={busy} onClick={() => applyDensity('big')} data-testid="setting-density-big">おおきく</button>
             <button type="button" className={settings.density === 'medium' ? 'selected' : ''} aria-pressed={settings.density === 'medium'} disabled={busy} onClick={() => applyDensity('medium')} data-testid="setting-density-medium">ふつう</button>
-            <button type="button" className={settings.density === 'small' ? 'selected' : ''} aria-pressed={settings.density === 'small'} disabled={busy} onClick={() => applyDensity('small')} data-testid="setting-density-small">たくさん</button>
+            <button type="button" className={settings.density === 'small' ? 'selected' : ''} aria-pressed={settings.density === 'small'} disabled={busy} onClick={() => applyDensity('small')} data-testid="setting-density-small">ちいさく</button>
           </div>
           <p className="settings-mode-description">
             {settings.density === 'big' && '1ページに1つだけ、大きく表示します。小さいお子さま向けです。'}
             {settings.density === 'medium' && '2列で表示します。'}
             {settings.density === 'small' && '3列で、たくさんのキロクを一度に表示します。'}
           </p>
+
+          {childMode === 'normal' && (
+            <>
+              <h3 className="settings-section-title">アーカイブの整理</h3>
+              <div className="settings-mode-options">
+                <button
+                  type="button"
+                  className="settings-mode-option settings-archive-option"
+                  disabled={busy}
+                  onClick={onManageArchive}
+                  data-testid="setting-manage-archive"
+                >
+                  <Archive size={18} />
+                  <span className="settings-option-copy">
+                    <strong>アーカイブの整理</strong>
+                    <small>しまったキロクをもどす、または完全に削除します。</small>
+                  </span>
+                </button>
+              </div>
+            </>
+          )}
         </section>
 
         <section className="settings-section settings-install" aria-label="ホーム画面に追加">
@@ -219,6 +223,26 @@ export default function SettingsDialog({
 
         {error && <p className="form-error" role="alert" data-testid="status-settings-error">{error}</p>}
       </div>
+
+      {pendingChildMode && (
+        <div className="overlay overlay-top" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPendingChildMode(null); }}>
+          <section className="dialog confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-mode-title" data-testid="dialog-confirm-mode">
+            <h2 id="confirm-mode-title" className="dialog-title">{pendingChildMode === 'view' ? '見るだけモード' : 'こどもモード'}に切り替えますか？</h2>
+            <p>{pendingChildMode === 'view'
+              ? 'キロクを見たり、声を聞いたりできます。追加・編集・削除はできなくなります。'
+              : '見る・聞くことと、新しい声の追加ができます。写真や前の声は変えられません。'}</p>
+            <div className="dialog-actions">
+              <button type="button" className="record-button" onClick={() => setPendingChildMode(null)} data-testid="button-cancel-mode-switch">いいえ</button>
+              <button
+                type="button"
+                className="save-button"
+                onClick={() => { const mode = pendingChildMode; setPendingChildMode(null); onChildModeChange(mode); }}
+                data-testid="button-confirm-mode-switch"
+              >はい</button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

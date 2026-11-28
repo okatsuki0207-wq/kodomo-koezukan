@@ -78,6 +78,17 @@ function App() {
   const [items, setItems] = useState<Keepsake[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [kanaOpen, setKanaOpen] = useState(false);
+  const [libraryFlipBack, setLibraryFlipBack] = useState(false);
+  const flipTimer = useRef<number | null>(null);
+  const openKana = () => { playPageTurnSound(); setKanaOpen(true); };
+  const closeKana = () => {
+    stopPlayback();
+    playPageTurnSound();
+    setKanaOpen(false);
+    setLibraryFlipBack(true);
+    if (flipTimer.current !== null) window.clearTimeout(flipTimer.current);
+    flipTimer.current = window.setTimeout(() => { setLibraryFlipBack(false); flipTimer.current = null; }, 600);
+  };
   const [installGuideOpen, setInstallGuideOpen] = useState(false);
   const [installGuideReturn, setInstallGuideReturn] = useState('[data-testid="button-home"]');
   useEffect(() => {
@@ -771,16 +782,18 @@ function App() {
   const formatTime = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   return (
     <div className={`app-shell${view === 'library' ? ' app-shell-library' : ''}`} data-child-mode={childMode}>
-      <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen || installGuideOpen || kanaOpen}>
+      <header className={`topbar${view === 'library' ? ' topbar-library' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen || installGuideOpen}>
         <div className="topbar-row">
           <button type="button" className="brand brand-home" onClick={() => navigate('start')} aria-label="こどもの こえずかん スタート画面" data-testid="button-home">
             <span className="brand-mark"><BookOpen size={20} strokeWidth={1.8} /></span>
             <h1 className="brand-title" style={{ margin: 0 }}>こどもの こえずかん</h1>
           </button>
           <div className="topbar-actions">
-            {view === 'library' && (
-              <button type="button" className="kana-open-button" onClick={() => setKanaOpen(true)} data-testid="button-open-kana">あいうえお</button>
-            )}
+            {view === 'library' && (kanaOpen ? (
+              <button type="button" className="kana-open-button" onClick={closeKana} data-testid="button-close-kana-top">ずかん</button>
+            ) : (
+              <button type="button" className="kana-open-button" onClick={openKana} data-testid="button-open-kana">あいうえお</button>
+            ))}
             <button type="button" className="header-settings-button" onClick={openSettings} disabled={settingsLoading} aria-label="設定" title="設定" data-testid="button-settings"><Settings size={17} /></button>
           </div>
         </div>
@@ -800,8 +813,18 @@ function App() {
         </div>
       )}
 
-      {view === 'start' ? (
-        <main className="start-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen || installGuideOpen || kanaOpen}>
+      {view === 'library' && kanaOpen ? (
+        <KanaMode
+          items={activeKeepsakes(items)}
+          childMode={childMode}
+          playing={playing}
+          playingItemId={playingItemId}
+          onPlay={playKeepsake}
+          onRecordKana={() => { setKanaOpen(false); openCreate(); }}
+          onClose={closeKana}
+        />
+      ) : view === 'start' ? (
+        <main className="start-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen || installGuideOpen}>
           <StartScreen
             onRecord={openCreate}
             showRecordAction={childMode === 'normal'}
@@ -809,7 +832,7 @@ function App() {
           />
         </main>
       ) : (
-      <main className="page-main" inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen || installGuideOpen || kanaOpen}>
+      <main className={`page-main${libraryFlipBack ? ' mode-flip-back' : ''}`} inert={createOpen || !!detail || categoryOpen || settingsOpen || archiveOpen || parentGateOpen || installGuideOpen}>
         <CategoryBar
           categories={categories}
           selected={selectedCategory}
@@ -1140,17 +1163,6 @@ function App() {
             setDetail((current) => current && current.id === saved.id ? saved : current);
             setItems((list) => list.map((entry) => entry.id === saved.id ? saved : entry));
           }}
-        />
-      )}
-      {kanaOpen && (
-        <KanaMode
-          items={activeKeepsakes(items)}
-          childMode={childMode}
-          playing={playing}
-          playingItemId={playingItemId}
-          onPlay={playKeepsake}
-          onRecordKana={() => { setKanaOpen(false); openCreate(); }}
-          onClose={() => { stopPlayback(); setKanaOpen(false); }}
         />
       )}
       {settingsOpen && <SettingsDialog
